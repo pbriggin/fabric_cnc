@@ -38,8 +38,8 @@ class Config:
         """
         self.gpio_pins = {
             'X': {'DIR': 2, 'STEP': 3, 'EN': 4, 'HALL': 17},
-            'Y1': {'DIR': 5, 'STEP': 6, 'EN': 7, 'HALL': 27},
-            'Y2': {'DIR': 8, 'STEP': 9, 'EN': 10},
+            'Y1': {'DIR': 21, 'STEP': 19, 'EN': 23},  # Left Y motor
+            'Y2': {'DIR': 27, 'STEP': 17, 'EN': 22},  # Right Y motor
             'Z_LIFT': {'DIR': 11, 'STEP': 12, 'EN': 13, 'HALL': 22},
             'Z_ROTATE': {'DIR': 14, 'STEP': 15, 'EN': 16, 'HALL': 23},
         }
