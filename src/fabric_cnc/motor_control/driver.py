@@ -67,37 +67,62 @@ class StepperMotor:
     def _setup_gpio(self) -> None:
         """Set up GPIO pins for the motor."""
         if not self.gpio:
+            logger.error("GPIO module not available")
             return
             
-        self.gpio.setmode(self.gpio.BCM)
-        self.gpio.setup(self.config.dir_pin, self.gpio.OUT)
-        self.gpio.setup(self.config.step_pin, self.gpio.OUT)
-        self.gpio.setup(self.config.en_pin, self.gpio.OUT)
-        if self.config.hall_pin:
-            self.gpio.setup(self.config.hall_pin, self.gpio.IN)
-        self.gpio.output(self.config.en_pin, self.gpio.HIGH)
+        try:
+            self.gpio.setmode(self.gpio.BCM)
+            logger.info(f"Setting up {self.config.name} motor pins:")
+            logger.info(f"  DIR pin: {self.config.dir_pin}")
+            logger.info(f"  STEP pin: {self.config.step_pin}")
+            logger.info(f"  EN pin: {self.config.en_pin}")
+            
+            self.gpio.setup(self.config.dir_pin, self.gpio.OUT)
+            self.gpio.setup(self.config.step_pin, self.gpio.OUT)
+            self.gpio.setup(self.config.en_pin, self.gpio.OUT)
+            
+            # Initialize pins to safe state
+            self.gpio.output(self.config.dir_pin, self.gpio.LOW)
+            self.gpio.output(self.config.step_pin, self.gpio.LOW)
+            self.gpio.output(self.config.en_pin, self.gpio.HIGH)  # Disabled by default
+            
+            logger.info(f"Successfully set up {self.config.name} motor pins")
+        except Exception as e:
+            logger.error(f"Error setting up {self.config.name} motor pins: {e}")
+            raise
 
     def enable(self) -> None:
         """Enable the motor driver."""
         if not self.simulation_mode and self.gpio:
-            self.gpio.output(self.config.en_pin, self.gpio.LOW)
-        self._enabled = True
-        logger.debug(f"Motor {self.config.name} enabled")
+            try:
+                logger.info(f"Enabling {self.config.name} motor")
+                self.gpio.output(self.config.en_pin, self.gpio.LOW)  # Active low
+                self._enabled = True
+                logger.info(f"{self.config.name} motor enabled")
+            except Exception as e:
+                logger.error(f"Error enabling {self.config.name} motor: {e}")
+                raise
+        else:
+            self._enabled = True
+            logger.info(f"{self.config.name} motor enabled (simulation mode)")
 
     def disable(self) -> None:
         """Disable the motor driver."""
         if not self.simulation_mode and self.gpio:
-            self.gpio.output(self.config.en_pin, self.gpio.HIGH)
-        self._enabled = False
-        logger.debug(f"Motor {self.config.name} disabled")
+            try:
+                logger.info(f"Disabling {self.config.name} motor")
+                self.gpio.output(self.config.en_pin, self.gpio.HIGH)  # Active low
+                self._enabled = False
+                logger.info(f"{self.config.name} motor disabled")
+            except Exception as e:
+                logger.error(f"Error disabling {self.config.name} motor: {e}")
+                raise
+        else:
+            self._enabled = False
+            logger.info(f"{self.config.name} motor disabled (simulation mode)")
 
-    def move_mm(
-        self,
-        direction: bool,
-        distance_mm: float,
-        speed_mm_s: float
-    ) -> None:
-        """Move the motor a specified distance in millimeters.
+    def move_mm(self, direction: bool, distance_mm: float, speed_mm_s: float) -> None:
+        """Move the motor by a specified distance.
         
         Args:
             direction: True for forward, False for reverse
@@ -115,8 +140,10 @@ class StepperMotor:
 
         steps = int(distance_mm * self.config.steps_per_mm)
         step_delay = 1.0 / (speed_mm_s * self.config.steps_per_mm)
+        
         logger.info(
-            f"Moving motor {self.config.name} {distance_mm}mm "
+            f"Moving {self.config.name} motor "
+            f"{'forward' if direction else 'reverse'} {distance_mm}mm "
             f"at {speed_mm_s}mm/s ({steps} steps)"
         )
 
@@ -124,22 +151,29 @@ class StepperMotor:
         actual_direction = direction != self.config.direction_inverted
         
         if not self.simulation_mode and self.gpio:
-            self.gpio.output(
-                self.config.dir_pin,
-                self.gpio.HIGH if actual_direction else self.gpio.LOW
-            )
-
-        for step in range(steps):
-            if not self.simulation_mode and self.gpio:
-                self.gpio.output(self.config.step_pin, self.gpio.HIGH)
-                time.sleep(step_delay)
-                self.gpio.output(self.config.step_pin, self.gpio.LOW)
-            time.sleep(step_delay)
-            
-            if step % 100 == 0:  # Log progress every 100 steps
-                logger.debug(
-                    f"Motor {self.config.name} step {step}/{steps}"
+            try:
+                logger.info(f"Setting {self.config.name} direction pin to {'HIGH' if actual_direction else 'LOW'}")
+                self.gpio.output(
+                    self.config.dir_pin,
+                    self.gpio.HIGH if actual_direction else self.gpio.LOW
                 )
+
+                for step in range(steps):
+                    # Step pulse
+                    self.gpio.output(self.config.step_pin, self.gpio.HIGH)
+                    time.sleep(step_delay / 2)
+                    self.gpio.output(self.config.step_pin, self.gpio.LOW)
+                    time.sleep(step_delay / 2)
+                    
+                    if step % 100 == 0:  # Log progress every 100 steps
+                        logger.debug(
+                            f"{self.config.name} motor step {step}/{steps}"
+                        )
+            except Exception as e:
+                logger.error(f"Error moving {self.config.name} motor: {e}")
+                raise
+        else:
+            time.sleep(distance_mm / speed_mm_s)  # Simulate movement time
 
         # Update position
         if direction:
@@ -148,7 +182,7 @@ class StepperMotor:
             self._current_position -= distance_mm
             
         logger.info(
-            f"Moved motor {self.config.name} "
+            f"Moved {self.config.name} motor "
             f"{'forward' if direction else 'reverse'} {distance_mm}mm"
         )
 
