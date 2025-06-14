@@ -17,23 +17,45 @@ A Python-based control system for a CNC fabric cutting machine using Raspberry P
 - TB6600 stepper motor drivers
 - 5 stepper motors
 
-## Installation
+## Installation on Raspberry Pi 4
 
-1. Clone the repository:
+1. Update your Raspberry Pi:
+```bash
+sudo apt update
+sudo apt upgrade
+```
+
+2. Install required system packages:
+```bash
+sudo apt install -y python3-pip python3-venv python3-tk
+```
+
+3. Clone the repository:
 ```bash
 git clone https://github.com/yourusername/fabric_cnc.git
 cd fabric_cnc
 ```
 
-2. Create and activate a virtual environment (recommended):
+4. Create and activate a virtual environment:
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python3 -m venv venv
+source venv/bin/activate
 ```
 
-3. Install the package in development mode:
+5. Install the package in development mode:
 ```bash
 pip install -e ".[dev]"
+```
+
+6. Configure GPIO permissions:
+```bash
+sudo usermod -a -G gpio $USER
+sudo usermod -a -G i2c $USER
+```
+
+7. Reboot your Raspberry Pi:
+```bash
+sudo reboot
 ```
 
 ## Usage
