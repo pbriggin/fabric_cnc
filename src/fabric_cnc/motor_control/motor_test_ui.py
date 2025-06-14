@@ -160,46 +160,7 @@ class MotorTestUI:
         )
         
         # Create Y-axis frame
-        y_frame = ttk.LabelFrame(
-            self.main_frame,
-            text="Y Axis (Synchronized)",
-            padding="5"
-        )
-        y_frame.grid(
-            row=row,
-            column=0,
-            sticky=(tk.W, tk.E),
-            pady=5
-        )
-        y_frame.columnconfigure(0, weight=1)
-        y_frame.columnconfigure(1, weight=1)
-        y_frame.columnconfigure(2, weight=1)
-        
-        ttk.Button(
-            y_frame,
-            text="Forward",
-            command=lambda: self.move_y_axis(True)
-        ).grid(row=0, column=0, padx=5)
-        
-        ttk.Button(
-            y_frame,
-            text="Stop",
-            command=self.stop_y_axis
-        ).grid(row=0, column=1, padx=5)
-        
-        ttk.Button(
-            y_frame,
-            text="Reverse",
-            command=lambda: self.move_y_axis(False)
-        ).grid(row=0, column=2, padx=5)
-        
-        status_var = tk.StringVar(value="Ready")
-        ttk.Label(
-            y_frame,
-            textvariable=status_var
-        ).grid(row=1, column=0, columnspan=3, pady=5)
-        
-        row += 1
+        self._create_y_axis_frame(self.main_frame)
         
         # Initialize Z motors
         for z_name in ['Z_LIFT', 'Z_ROTATE']:
@@ -224,21 +185,39 @@ class MotorTestUI:
     def _create_motor_frame(self, parent, motor, name):
         """Create a frame for a single motor's controls."""
         frame = ttk.LabelFrame(parent, text=f"{name} Motor")
-        frame.pack(padx=5, pady=5, fill="x")
+        frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
         
         # Movement buttons
         btn_frame = ttk.Frame(frame)
-        btn_frame.pack(padx=5, pady=5)
+        btn_frame.grid(row=0, column=0, padx=5, pady=5)
         
         ttk.Button(btn_frame, text="Forward", 
-                  command=lambda: self._move_motor(motor, 10)).pack(side="left", padx=2)
+                  command=lambda: self._move_motor(motor, 10)).grid(row=0, column=0, padx=2)
         ttk.Button(btn_frame, text="Reverse", 
-                  command=lambda: self._move_motor(motor, -10)).pack(side="left", padx=2)
+                  command=lambda: self._move_motor(motor, -10)).grid(row=0, column=1, padx=2)
         ttk.Button(btn_frame, text="Stop", 
-                  command=lambda: self._stop_motor(motor)).pack(side="left", padx=2)
+                  command=lambda: self._stop_motor(motor)).grid(row=0, column=2, padx=2)
         
         return frame
-            
+
+    def _create_y_axis_frame(self, parent):
+        """Create a frame for synchronized Y-axis controls."""
+        frame = ttk.LabelFrame(parent, text="Y-Axis (Synchronized)")
+        frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
+        
+        # Movement buttons
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=0, column=0, padx=5, pady=5)
+        
+        ttk.Button(btn_frame, text="Forward", 
+                  command=lambda: self._move_y_axis(10)).grid(row=0, column=0, padx=2)
+        ttk.Button(btn_frame, text="Reverse", 
+                  command=lambda: self._move_y_axis(-10)).grid(row=0, column=1, padx=2)
+        ttk.Button(btn_frame, text="Stop", 
+                  command=self._stop_y_axis).grid(row=0, column=2, padx=2)
+        
+        return frame
+
     def _create_control_buttons(self) -> None:
         """Create the control buttons frame."""
         frame = ttk.LabelFrame(
@@ -260,7 +239,7 @@ class MotorTestUI:
             text="EMERGENCY STOP",
             command=self._emergency_stop,
             style="Emergency.TButton"
-        ).pack(fill="x", padx=5, pady=5)
+        ).grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
         
         # Status display
         self.status_var = tk.StringVar(value="Ready")
@@ -268,7 +247,7 @@ class MotorTestUI:
             frame,
             textvariable=self.status_var,
             wraplength=200
-        ).pack(fill="x", padx=5, pady=5)
+        ).grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
         
     def move_motor(self, motor: StepperMotor, direction: bool) -> None:
         """Move a motor in the specified direction.
