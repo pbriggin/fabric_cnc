@@ -37,7 +37,7 @@ class MotorTestUI:
         
         # Initialize motors
         self.motors = {
-            'X': {'STEP': 3, 'DIR': 2, 'EN': 4},
+            'X': {'STEP': 0, 'DIR': 5, 'EN': 6},
             'Y1': {'STEP': 10, 'DIR': 9, 'EN': 11},
             'Y2': {'STEP': 17, 'DIR': 27, 'EN': 22},
             'Z_LIFT': {'STEP': 12, 'DIR': 11, 'EN': 13},
