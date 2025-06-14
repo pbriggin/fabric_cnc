@@ -1,4 +1,4 @@
-#!/usr/bin/env/ python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 FILE: setup.py
@@ -13,9 +13,9 @@ from setuptools import setup, find_packages
 
 
 def get_version():
-    """Get the logging version for setup.py."""
+    """Get the package version."""
     here = Path(__file__).resolve()
-    version_file = here.parent / "fabric_cnc/__init__.py"
+    version_file = here / "src" / "fabric_cnc" / "__init__.py"
     with open(version_file, mode="r") as f:
         file_lines = f.readlines()
     for line in file_lines:
@@ -25,15 +25,31 @@ def get_version():
     raise RuntimeError("Unable to find version string.")
 
 
-extra_deps = {"notebook_plotting": ["ipywidgets", "matplotlib", "seaborn", "plotly"]}
+extra_deps = {
+    "dev": [
+        "pytest>=7.0",
+        "pytest-cov",
+        "black",
+        "isort",
+        "mypy",
+        "ruff",
+    ],
+    "plotting": [
+        "ipywidgets",
+        "matplotlib",
+        "seaborn",
+        "plotly",
+    ]
+}
+
 setup(
     name="fabric_cnc",
     version=get_version(),
-    packages=find_packages(),
-    python_requires=">=3.7",
-    install_requires=["numpy" , "pandas"],
+    package_dir={"": "src"},
+    packages=find_packages(where="src"),
+    python_requires=">=3.11",
+    install_requires=["numpy", "pandas"],
     extras_require=extra_deps,
-    tests_require=["pytest"],
     author="Peter Briggs",
     author_email="pacbriggs@gmail.com",
 )
