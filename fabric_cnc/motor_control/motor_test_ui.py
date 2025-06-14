@@ -1,4 +1,12 @@
-# fabric_cnc/motor_control/motor_test_ui.py
+#!/usr/bin/env/ python3
+# -*- coding: utf-8 -*-
+"""
+FILE: setup.py
+FILE THEME: GUI to test motors.
+PROJECT: fabric_cnc
+ORIGINAL AUTHOR: pbriggs
+DATE CREATED: 14 June 2025
+"""
 
 import tkinter as tk
 from fabric_cnc.motor_control.driver import StepperMotor
