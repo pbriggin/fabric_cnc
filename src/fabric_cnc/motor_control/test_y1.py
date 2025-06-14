@@ -38,14 +38,14 @@ def step_motor(direction, steps=1):
         logger.debug(f"Setting direction pin {DIR_PIN} to {'HIGH' if direction else 'LOW'}")
         GPIO.output(DIR_PIN, GPIO.HIGH if direction else GPIO.LOW)
         
-        for _ in range(steps):
+        for i in range(steps):
             # Step pulse
-            logger.debug(f"Setting step pin {STEP_PIN} to HIGH")
+            logger.debug(f"Step {i+1}/{steps}: Setting step pin {STEP_PIN} to HIGH")
             GPIO.output(STEP_PIN, GPIO.HIGH)
-            time.sleep(0.001)  # 1ms pulse
-            logger.debug(f"Setting step pin {STEP_PIN} to LOW")
+            time.sleep(0.002)  # 2ms pulse
+            logger.debug(f"Step {i+1}/{steps}: Setting step pin {STEP_PIN} to LOW")
             GPIO.output(STEP_PIN, GPIO.LOW)
-            time.sleep(0.001)  # 1ms delay
+            time.sleep(0.002)  # 2ms delay
             
     except Exception as e:
         logger.error(f"Error stepping motor: {e}")
@@ -62,13 +62,13 @@ def main():
         setup_gpio()
         
         # Test forward movement
-        logger.info("Testing forward movement (10 steps)")
-        step_motor(True, 10)
-        time.sleep(1)
+        logger.info("Testing forward movement (100 steps)")
+        step_motor(True, 100)
+        time.sleep(2)  # Wait 2 seconds between directions
         
         # Test reverse movement
-        logger.info("Testing reverse movement (10 steps)")
-        step_motor(False, 10)
+        logger.info("Testing reverse movement (100 steps)")
+        step_motor(False, 100)
         
     except Exception as e:
         logger.error(f"Test failed: {e}")
