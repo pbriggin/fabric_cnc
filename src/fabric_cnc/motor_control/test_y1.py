@@ -13,9 +13,9 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Motor pins
-STEP = 17
-DIR = 27
-EN = 22  # Enable pin (active low)
+STEP = 10
+DIR = 9
+EN = 11  # Enable pin (active low)
 
 # Motor configuration
 PULSES_PER_REV = 3200
