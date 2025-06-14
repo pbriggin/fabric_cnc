@@ -14,7 +14,7 @@ from setuptools import setup, find_packages
 
 def get_version():
     """Get the package version."""
-    here = Path(__file__).resolve()
+    here = Path(__file__).parent.resolve()
     version_file = here / "src" / "fabric_cnc" / "__init__.py"
     with open(version_file, mode="r") as f:
         file_lines = f.readlines()
