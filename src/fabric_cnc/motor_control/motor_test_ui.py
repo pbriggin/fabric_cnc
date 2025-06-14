@@ -8,131 +8,69 @@ Provides manual control interface with safety features and status feedback.
 import logging
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Dict, Optional
 import time
-import os
 import RPi.GPIO as GPIO
 
-from fabric_cnc.config import config
-from fabric_cnc.motor_control.driver import (
-    MotorConfig,
-    StepperMotor,
-    YAxisController
-)
-
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+# Motor configuration
+PULSES_PER_REV = 3200
+STEP_DELAY = 0.00025  # 0.25ms between pulses = 2000 steps/sec
 
 class MotorTestUI:
     """Simple UI for testing individual motors."""
     
     def __init__(self, root: tk.Tk):
-        """Initialize the motor test UI.
-        
-        Args:
-            root: Root window
-        """
+        """Initialize the motor test UI."""
         self.root = root
         self.root.title("Motor Test")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
-        # Setup logging
-        self._setup_logging()
+        # Setup GPIO
+        GPIO.setmode(GPIO.BCM)
         
         # Create main frame
         self.main_frame = ttk.Frame(self.root, padding="10")
         self.main_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.E, tk.W))
         
         # Initialize motors
-        self.motors = {}
-        self._init_motors()
+        self.motors = {
+            'X': {'STEP': 3, 'DIR': 2, 'EN': 4},
+            'Y1': {'STEP': 10, 'DIR': 9, 'EN': 11},
+            'Y2': {'STEP': 17, 'DIR': 27, 'EN': 22},
+            'Z_LIFT': {'STEP': 12, 'DIR': 11, 'EN': 13},
+            'Z_ROTATE': {'STEP': 15, 'DIR': 14, 'EN': 16}
+        }
+        
+        # Setup motor pins and create UI
+        self._setup_motors()
         
         # Create emergency stop button
         self._create_emergency_stop()
         
         logger.info("Motor test UI initialized")
         
-    def _setup_logging(self) -> None:
-        """Setup logging configuration."""
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        logger.info("Logging level set to DEBUG")
-        
-    def _init_motors(self) -> None:
-        """Initialize motor controllers and create UI elements."""
-        # Initialize X motor
-        x_pins = config.gpio_pins['X']
-        x_config = MotorConfig(
-            dir_pin=x_pins['DIR'],
-            step_pin=x_pins['STEP'],
-            en_pin=x_pins['EN'],
-            name='X',
-            steps_per_mm=config.steps_per_mm['X'],
-            direction_inverted=config.direction_inverted['X']
-        )
-        x_motor = StepperMotor(
-            config=x_config,
-            simulation_mode=config.simulation_mode
-        )
-        self.motors['X'] = x_motor
-        self._create_motor_frame(self.main_frame, x_motor, 'X', 0)
-        
-        # Initialize Y1 motor
-        y1_pins = config.gpio_pins['Y1']
-        y1_config = MotorConfig(
-            dir_pin=y1_pins['DIR'],
-            step_pin=y1_pins['STEP'],
-            en_pin=y1_pins['EN'],
-            name='Y1',
-            steps_per_mm=config.steps_per_mm['Y1'],
-            direction_inverted=config.direction_inverted['Y1']
-        )
-        y1_motor = StepperMotor(
-            config=y1_config,
-            simulation_mode=config.simulation_mode
-        )
-        self.motors['Y1'] = y1_motor
-        self._create_motor_frame(self.main_frame, y1_motor, 'Y1', 1)
-        
-        # Initialize Y2 motor
-        y2_pins = config.gpio_pins['Y2']
-        y2_config = MotorConfig(
-            dir_pin=y2_pins['DIR'],
-            step_pin=y2_pins['STEP'],
-            en_pin=y2_pins['EN'],
-            name='Y2',
-            steps_per_mm=config.steps_per_mm['Y2'],
-            direction_inverted=config.direction_inverted['Y2']
-        )
-        y2_motor = StepperMotor(
-            config=y2_config,
-            simulation_mode=config.simulation_mode
-        )
-        self.motors['Y2'] = y2_motor
-        self._create_motor_frame(self.main_frame, y2_motor, 'Y2', 2)
-        
-        # Initialize Z motors
-        for i, z_name in enumerate(['Z_LIFT', 'Z_ROTATE']):
-            z_pins = config.gpio_pins[z_name]
-            z_config = MotorConfig(
-                dir_pin=z_pins['DIR'],
-                step_pin=z_pins['STEP'],
-                en_pin=z_pins['EN'],
-                name=z_name,
-                steps_per_mm=config.steps_per_mm[z_name],
-                direction_inverted=config.direction_inverted[z_name]
-            )
-            z_motor = StepperMotor(
-                config=z_config,
-                simulation_mode=config.simulation_mode
-            )
-            self.motors[z_name] = z_motor
-            self._create_motor_frame(self.main_frame, z_motor, z_name, i + 3)
+    def _setup_motors(self):
+        """Setup GPIO pins for all motors and create UI elements."""
+        for i, (name, pins) in enumerate(self.motors.items()):
+            # Setup GPIO pins
+            GPIO.setup(pins['STEP'], GPIO.OUT)
+            GPIO.setup(pins['DIR'], GPIO.OUT)
+            GPIO.setup(pins['EN'], GPIO.OUT)
             
-    def _create_motor_frame(self, parent, motor, name, row):
+            # Initialize pins to safe state
+            GPIO.output(pins['STEP'], GPIO.LOW)
+            GPIO.output(pins['DIR'], GPIO.LOW)
+            GPIO.output(pins['EN'], GPIO.LOW)  # Enable motor
+            
+            # Create UI frame
+            self._create_motor_frame(name, pins, i)
+            
+    def _create_motor_frame(self, name, pins, row):
         """Create a frame for a single motor's controls."""
-        frame = ttk.LabelFrame(parent, text=f"{name} Motor")
+        frame = ttk.LabelFrame(self.main_frame, text=f"{name} Motor")
         frame.grid(row=row, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
         
         # Movement buttons
@@ -140,9 +78,9 @@ class MotorTestUI:
         btn_frame.grid(row=0, column=0, padx=5, pady=5)
         
         ttk.Button(btn_frame, text="Forward", 
-                  command=lambda: self._step_motor(motor, True)).grid(row=0, column=0, padx=2)
+                  command=lambda: self._step_motor(name, pins, True)).grid(row=0, column=0, padx=2)
         ttk.Button(btn_frame, text="Reverse", 
-                  command=lambda: self._step_motor(motor, False)).grid(row=0, column=1, padx=2)
+                  command=lambda: self._step_motor(name, pins, False)).grid(row=0, column=1, padx=2)
         
         # Status label
         status_var = tk.StringVar(value="Ready")
@@ -150,7 +88,7 @@ class MotorTestUI:
         
         return frame
         
-    def _create_emergency_stop(self) -> None:
+    def _create_emergency_stop(self):
         """Create emergency stop button."""
         ttk.Button(
             self.main_frame,
@@ -159,25 +97,30 @@ class MotorTestUI:
             style="Emergency.TButton"
         ).grid(row=5, column=0, sticky=(tk.W, tk.E), padx=5, pady=10)
         
-    def _step_motor(self, motor: StepperMotor, direction: bool) -> None:
-        """Step a motor once in the specified direction.
-        
-        Args:
-            motor: Motor to step
-            direction: True for forward, False for reverse
-        """
+    def _step_motor(self, name, pins, direction):
+        """Step a motor in the specified direction."""
         try:
-            logger.info(f"Stepping {motor.config.name} {'forward' if direction else 'reverse'}")
-            motor.step(direction)
+            logger.info(f"Stepping {name} {'forward' if direction else 'reverse'}")
+            
+            # Set direction
+            GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+            
+            # Step sequence
+            for _ in range(PULSES_PER_REV):
+                GPIO.output(pins['STEP'], GPIO.HIGH)
+                time.sleep(STEP_DELAY)
+                GPIO.output(pins['STEP'], GPIO.LOW)
+                time.sleep(STEP_DELAY)
+                
         except Exception as e:
             logger.error(f"Error stepping motor: {e}")
             messagebox.showerror("Motor Error", str(e))
             
-    def _emergency_stop(self) -> None:
+    def _emergency_stop(self):
         """Emergency stop all motors."""
         try:
-            for motor in self.motors.values():
-                motor.stop()
+            for pins in self.motors.values():
+                GPIO.output(pins['EN'], GPIO.HIGH)  # Disable all motors
             logger.warning("Emergency stop activated")
             messagebox.showwarning(
                 "Emergency Stop",
@@ -187,21 +130,22 @@ class MotorTestUI:
             logger.error(f"Error during emergency stop: {e}")
             messagebox.showerror("Motor Error", str(e))
             
-    def on_closing(self) -> None:
+    def on_closing(self):
         """Handle window closing."""
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
             try:
-                for motor in self.motors.values():
-                    motor.cleanup()
+                # Disable all motors
+                for pins in self.motors.values():
+                    GPIO.output(pins['EN'], GPIO.HIGH)
+                GPIO.cleanup()
                 logger.info("Application closed")
                 self.root.destroy()
             except Exception as e:
                 logger.error(f"Error during cleanup: {e}")
                 messagebox.showerror("Error", str(e))
-                self.root.destroy()
 
-def main() -> None:
-    """Main entry point for the motor test UI."""
+def main():
+    """Main entry point."""
     root = tk.Tk()
     app = MotorTestUI(root)
     root.mainloop()
