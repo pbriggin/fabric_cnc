@@ -68,6 +68,9 @@ class MotorTestUI:
             # Create UI frame
             self._create_motor_frame(name, pins, i)
             
+        # Create synchronized Y-axis frame
+        self._create_y_axis_frame()
+            
     def _create_motor_frame(self, name, pins, row):
         """Create a frame for a single motor's controls."""
         frame = ttk.LabelFrame(self.main_frame, text=f"{name} Motor")
@@ -87,6 +90,26 @@ class MotorTestUI:
         ttk.Label(frame, textvariable=status_var).grid(row=1, column=0, pady=5)
         
         return frame
+
+    def _create_y_axis_frame(self):
+        """Create frame for synchronized Y-axis control."""
+        frame = ttk.LabelFrame(self.main_frame, text="Synchronized Y-Axis")
+        frame.grid(row=2, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
+        
+        # Movement buttons
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=0, column=0, padx=5, pady=5)
+        
+        ttk.Button(btn_frame, text="Forward", 
+                  command=lambda: self._step_y_axis(True)).grid(row=0, column=0, padx=2)
+        ttk.Button(btn_frame, text="Reverse", 
+                  command=lambda: self._step_y_axis(False)).grid(row=0, column=1, padx=2)
+        
+        # Status label
+        status_var = tk.StringVar(value="Ready")
+        ttk.Label(frame, textvariable=status_var).grid(row=1, column=0, pady=5)
+        
+        return frame
         
     def _create_emergency_stop(self):
         """Create emergency stop button."""
@@ -95,7 +118,7 @@ class MotorTestUI:
             text="EMERGENCY STOP",
             command=self._emergency_stop,
             style="Emergency.TButton"
-        ).grid(row=5, column=0, sticky=(tk.W, tk.E), padx=5, pady=10)
+        ).grid(row=6, column=0, sticky=(tk.W, tk.E), padx=5, pady=10)
         
     def _step_motor(self, name, pins, direction):
         """Step a motor in the specified direction."""
@@ -116,6 +139,29 @@ class MotorTestUI:
                 
         except Exception as e:
             logger.error(f"Error stepping motor: {e}")
+            messagebox.showerror("Motor Error", str(e))
+
+    def _step_y_axis(self, direction):
+        """Step both Y motors in sync."""
+        try:
+            logger.info(f"Stepping Y-axis {'forward' if direction else 'reverse'}")
+            
+            # Set directions (Y1 is reversed)
+            GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
+            GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+            
+            # Step sequence
+            for _ in range(PULSES_PER_REV):
+                # Step both motors
+                GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
+                GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
+                time.sleep(STEP_DELAY)
+                GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
+                GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
+                time.sleep(STEP_DELAY)
+                
+        except Exception as e:
+            logger.error(f"Error stepping Y-axis: {e}")
             messagebox.showerror("Motor Error", str(e))
             
     def _emergency_stop(self):
