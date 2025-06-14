@@ -112,7 +112,7 @@ class MotorTestUI:
             simulation_mode=config.simulation_mode
         )
         self.motors['X'] = x_motor
-        self._create_motor_frame(self.main_frame, x_motor, 'X')
+        self._create_motor_frame(self.main_frame, x_motor, 'X', row)
         row += 1
         
         # Initialize Y motors and Y-axis controller
@@ -131,7 +131,7 @@ class MotorTestUI:
             simulation_mode=config.simulation_mode
         )
         self.motors['Y1'] = y1_motor
-        self._create_motor_frame(self.main_frame, y1_motor, 'Y1')
+        self._create_motor_frame(self.main_frame, y1_motor, 'Y1', row)
         row += 1
         
         y2_pins = config.gpio_pins['Y2']
@@ -149,7 +149,7 @@ class MotorTestUI:
             simulation_mode=config.simulation_mode
         )
         self.motors['Y2'] = y2_motor
-        self._create_motor_frame(self.main_frame, y2_motor, 'Y2')
+        self._create_motor_frame(self.main_frame, y2_motor, 'Y2', row)
         row += 1
         
         # Create Y-axis controller
@@ -160,7 +160,7 @@ class MotorTestUI:
         )
         
         # Create Y-axis frame
-        self._create_y_axis_frame(self.main_frame)
+        self._create_y_axis_frame(self.main_frame, row)
         
         # Initialize Z motors
         for z_name in ['Z_LIFT', 'Z_ROTATE']:
@@ -179,13 +179,13 @@ class MotorTestUI:
                 simulation_mode=config.simulation_mode
             )
             self.motors[z_name] = z_motor
-            self._create_motor_frame(self.main_frame, z_motor, z_name)
+            self._create_motor_frame(self.main_frame, z_motor, z_name, row)
             row += 1
             
-    def _create_motor_frame(self, parent, motor, name):
+    def _create_motor_frame(self, parent, motor, name, row):
         """Create a frame for a single motor's controls."""
         frame = ttk.LabelFrame(parent, text=f"{name} Motor")
-        frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
+        frame.grid(row=row, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
         
         # Movement buttons
         btn_frame = ttk.Frame(frame)
@@ -200,10 +200,10 @@ class MotorTestUI:
         
         return frame
 
-    def _create_y_axis_frame(self, parent):
+    def _create_y_axis_frame(self, parent, row):
         """Create a frame for synchronized Y-axis controls."""
         frame = ttk.LabelFrame(parent, text="Y-Axis (Synchronized)")
-        frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
+        frame.grid(row=row, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
         
         # Movement buttons
         btn_frame = ttk.Frame(frame)
