@@ -214,7 +214,7 @@ class MotorTestUI:
         ttk.Button(btn_frame, text="Reverse", 
                   command=lambda: self._move_y_axis(-10)).grid(row=0, column=1, padx=2)
         ttk.Button(btn_frame, text="Stop", 
-                  command=self._stop_y_axis).grid(row=0, column=2, padx=2)
+                  command=self.stop_y_axis).grid(row=0, column=2, padx=2)
         
         return frame
 
