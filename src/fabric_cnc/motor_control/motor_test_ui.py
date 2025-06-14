@@ -10,6 +10,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Dict, Optional
 import time
+import os
 
 from fabric_cnc.config import config
 from fabric_cnc.motor_control.driver import (
@@ -74,13 +75,22 @@ class MotorTestUI:
         
     def _setup_logging(self) -> None:
         """Set up logging configuration."""
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        # Get log level from environment or default to INFO
+        log_level = os.getenv('FABRIC_CNC_LOG_LEVEL', 'INFO').upper()
+        numeric_level = getattr(logging, log_level, logging.INFO)
+        
+        # Configure root logger
+        logging.basicConfig(
+            level=numeric_level,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
         )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
+        
+        # Set specific logger levels
+        logging.getLogger('fabric_cnc.motor_control.driver').setLevel(numeric_level)
+        logging.getLogger('fabric_cnc.motor_control.motor_test_ui').setLevel(numeric_level)
+        
+        logger.info(f"Logging level set to {log_level}")
         
     def _init_motors(self) -> None:
         """Initialize motor controllers and create UI elements."""
