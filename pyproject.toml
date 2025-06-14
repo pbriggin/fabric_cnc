@@ -1,1 +1,24 @@
- 
+[project]
+name = "fabric_cnc"
+version = "0.1.0"
+description = "CNC fabric cutter control software"
+authors = [
+    {name = "Peter Briggs", email = "pbriggs@tandem.com"},
+]
+dependencies = [
+    "RPi.GPIO>=0.7.0",
+    "tkinter",
+]
+requires-python = ">=3.8"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fabric_cnc"] 
