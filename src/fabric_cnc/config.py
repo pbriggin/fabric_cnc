@@ -69,7 +69,7 @@ class Config:
         
         self.simulation_mode = self._get_bool_env('FABRIC_CNC_SIMULATION', False)
         self.step_pulse_duration = float(
-            os.getenv('FABRIC_CNC_STEP_PULSE_DURATION', '0.0005')
+            os.getenv('FABRIC_CNC_STEP_PULSE_DURATION', '0.001')
         )
         
         if config_path and config_path.exists():
