@@ -11,7 +11,11 @@ from tkinter import ttk, messagebox
 from typing import Dict, Optional
 
 from fabric_cnc.config import config
-from fabric_cnc.motor_control.driver import MotorConfig, StepperMotor
+from fabric_cnc.motor_control.driver import (
+    MotorConfig,
+    StepperMotor,
+    YAxisController
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +58,7 @@ class MotorTestUI:
         # Initialize motors
         self.motors: Dict[str, StepperMotor] = {}
         self.motor_frames: Dict[str, ttk.Frame] = {}
+        self.y_axis: Optional[YAxisController] = None
         self._init_motors()
         
         # Create control buttons
@@ -79,72 +84,175 @@ class MotorTestUI:
     def _init_motors(self) -> None:
         """Initialize motor controllers and create UI elements."""
         row = 1
-        for name, pins in config.gpio_pins.items():
-            if 'DIR' not in pins:
-                continue
-                
-            # Create motor frame
-            frame = ttk.LabelFrame(
-                self.main_frame,
-                text=f"{name} Axis",
-                padding="5"
+        
+        # Initialize X motor
+        x_pins = config.gpio_pins['X']
+        x_config = MotorConfig(
+            dir_pin=x_pins['DIR'],
+            step_pin=x_pins['STEP'],
+            en_pin=x_pins['EN'],
+            name='X',
+            steps_per_mm=config.steps_per_mm['X'],
+            direction_inverted=config.direction_inverted['X'],
+            hall_pin=x_pins.get('HALL')
+        )
+        x_motor = StepperMotor(
+            config=x_config,
+            simulation_mode=config.simulation_mode
+        )
+        self.motors['X'] = x_motor
+        self._create_motor_frame(x_motor, row)
+        row += 1
+        
+        # Initialize Y motors and Y-axis controller
+        y1_pins = config.gpio_pins['Y1']
+        y1_config = MotorConfig(
+            dir_pin=y1_pins['DIR'],
+            step_pin=y1_pins['STEP'],
+            en_pin=y1_pins['EN'],
+            name='Y1',
+            steps_per_mm=config.steps_per_mm['Y1'],
+            direction_inverted=config.direction_inverted['Y1'],
+            hall_pin=y1_pins.get('HALL')
+        )
+        y1_motor = StepperMotor(
+            config=y1_config,
+            simulation_mode=config.simulation_mode
+        )
+        self.motors['Y1'] = y1_motor
+        
+        y2_pins = config.gpio_pins['Y2']
+        y2_config = MotorConfig(
+            dir_pin=y2_pins['DIR'],
+            step_pin=y2_pins['STEP'],
+            en_pin=y2_pins['EN'],
+            name='Y2',
+            steps_per_mm=config.steps_per_mm['Y2'],
+            direction_inverted=config.direction_inverted['Y2'],
+            hall_pin=y2_pins.get('HALL')
+        )
+        y2_motor = StepperMotor(
+            config=y2_config,
+            simulation_mode=config.simulation_mode
+        )
+        self.motors['Y2'] = y2_motor
+        
+        # Create Y-axis controller
+        self.y_axis = YAxisController(
+            y1_motor=y1_motor,
+            y2_motor=y2_motor,
+            simulation_mode=config.simulation_mode
+        )
+        
+        # Create Y-axis frame
+        y_frame = ttk.LabelFrame(
+            self.main_frame,
+            text="Y Axis (Synchronized)",
+            padding="5"
+        )
+        y_frame.grid(
+            row=row,
+            column=0,
+            sticky=(tk.W, tk.E),
+            pady=5
+        )
+        y_frame.columnconfigure(0, weight=1)
+        y_frame.columnconfigure(1, weight=1)
+        y_frame.columnconfigure(2, weight=1)
+        
+        ttk.Button(
+            y_frame,
+            text="Forward",
+            command=lambda: self.move_y_axis(True)
+        ).grid(row=0, column=0, padx=5)
+        
+        ttk.Button(
+            y_frame,
+            text="Stop",
+            command=self.stop_y_axis
+        ).grid(row=0, column=1, padx=5)
+        
+        ttk.Button(
+            y_frame,
+            text="Reverse",
+            command=lambda: self.move_y_axis(False)
+        ).grid(row=0, column=2, padx=5)
+        
+        status_var = tk.StringVar(value="Ready")
+        ttk.Label(
+            y_frame,
+            textvariable=status_var
+        ).grid(row=1, column=0, columnspan=3, pady=5)
+        
+        row += 1
+        
+        # Initialize Z motors
+        for z_name in ['Z_LIFT', 'Z_ROTATE']:
+            z_pins = config.gpio_pins[z_name]
+            z_config = MotorConfig(
+                dir_pin=z_pins['DIR'],
+                step_pin=z_pins['STEP'],
+                en_pin=z_pins['EN'],
+                name=z_name,
+                steps_per_mm=config.steps_per_mm[z_name],
+                direction_inverted=config.direction_inverted[z_name],
+                hall_pin=z_pins.get('HALL')
             )
-            frame.grid(
-                row=row,
-                column=0,
-                sticky=(tk.W, tk.E),
-                pady=5
-            )
-            frame.columnconfigure(0, weight=1)
-            frame.columnconfigure(1, weight=1)
-            frame.columnconfigure(2, weight=1)
-            
-            # Create motor config
-            motor_config = MotorConfig(
-                dir_pin=pins['DIR'],
-                step_pin=pins['STEP'],
-                en_pin=pins['EN'],
-                name=name,
-                steps_per_mm=config.steps_per_mm[name],
-                direction_inverted=config.direction_inverted[name],
-                hall_pin=pins.get('HALL')
-            )
-            
-            # Create motor controller
-            motor = StepperMotor(
-                config=motor_config,
+            z_motor = StepperMotor(
+                config=z_config,
                 simulation_mode=config.simulation_mode
             )
-            self.motors[name] = motor
-            self.motor_frames[name] = frame
-            
-            # Create control buttons
-            ttk.Button(
-                frame,
-                text="Forward",
-                command=lambda m=motor: self.move_motor(m, True)
-            ).grid(row=0, column=0, padx=5)
-            
-            ttk.Button(
-                frame,
-                text="Stop",
-                command=lambda m=motor: self.stop_motor(m)
-            ).grid(row=0, column=1, padx=5)
-            
-            ttk.Button(
-                frame,
-                text="Reverse",
-                command=lambda m=motor: self.move_motor(m, False)
-            ).grid(row=0, column=2, padx=5)
-            
-            # Create status label
-            status_var = tk.StringVar(value="Ready")
-            ttk.Label(
-                frame,
-                textvariable=status_var
-            ).grid(row=1, column=0, columnspan=3, pady=5)
-            
+            self.motors[z_name] = z_motor
+            self._create_motor_frame(z_motor, row)
             row += 1
+            
+    def _create_motor_frame(self, motor: StepperMotor, row: int) -> None:
+        """Create a frame for a single motor.
+        
+        Args:
+            motor: Motor to create frame for
+            row: Grid row for the frame
+        """
+        frame = ttk.LabelFrame(
+            self.main_frame,
+            text=f"{motor.config.name} Axis",
+            padding="5"
+        )
+        frame.grid(
+            row=row,
+            column=0,
+            sticky=(tk.W, tk.E),
+            pady=5
+        )
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(2, weight=1)
+        
+        ttk.Button(
+            frame,
+            text="Forward",
+            command=lambda m=motor: self.move_motor(m, True)
+        ).grid(row=0, column=0, padx=5)
+        
+        ttk.Button(
+            frame,
+            text="Stop",
+            command=lambda m=motor: self.stop_motor(m)
+        ).grid(row=0, column=1, padx=5)
+        
+        ttk.Button(
+            frame,
+            text="Reverse",
+            command=lambda m=motor: self.move_motor(m, False)
+        ).grid(row=0, column=2, padx=5)
+        
+        status_var = tk.StringVar(value="Ready")
+        ttk.Label(
+            frame,
+            textvariable=status_var
+        ).grid(row=1, column=0, columnspan=3, pady=5)
+        
+        self.motor_frames[motor.config.name] = frame
             
     def _create_control_buttons(self) -> None:
         """Create global control buttons."""
@@ -211,6 +319,36 @@ class MotorTestUI:
             logger.error(f"Error moving motor: {e}")
             messagebox.showerror("Motor Error", str(e))
             
+    def move_y_axis(self, direction: bool) -> None:
+        """Move both Y motors in sync.
+        
+        Args:
+            direction: True for forward, False for reverse
+        """
+        if not self.y_axis:
+            return
+            
+        try:
+            distance = 10.0  # mm
+            speed = config.motion.default_speed_mm_s
+            
+            self.status_var.set(
+                f"Moving Y-axis "
+                f"{'forward' if direction else 'reverse'}"
+            )
+            
+            self.y_axis.move_mm(direction, distance, speed)
+            
+            self.status_var.set("Ready")
+            logger.info(
+                f"Moved Y-axis "
+                f"{'forward' if direction else 'reverse'} {distance}mm"
+            )
+        except Exception as e:
+            self.status_var.set(f"Error: {str(e)}")
+            logger.error(f"Error moving Y-axis: {e}")
+            messagebox.showerror("Motor Error", str(e))
+            
     def stop_motor(self, motor: StepperMotor) -> None:
         """Stop a motor.
         
@@ -226,11 +364,27 @@ class MotorTestUI:
             logger.error(f"Error stopping motor: {e}")
             messagebox.showerror("Motor Error", str(e))
             
+    def stop_y_axis(self) -> None:
+        """Stop both Y motors."""
+        if not self.y_axis:
+            return
+            
+        try:
+            self.y_axis.disable()
+            self.status_var.set("Stopped Y-axis")
+            logger.info("Stopped Y-axis")
+        except Exception as e:
+            self.status_var.set(f"Error: {str(e)}")
+            logger.error(f"Error stopping Y-axis: {e}")
+            messagebox.showerror("Motor Error", str(e))
+            
     def enable_all_motors(self) -> None:
         """Enable all motors."""
         try:
             for motor in self.motors.values():
                 motor.enable()
+            if self.y_axis:
+                self.y_axis.enable()
             self.status_var.set("All motors enabled")
             logger.info("All motors enabled")
         except Exception as e:
@@ -243,6 +397,8 @@ class MotorTestUI:
         try:
             for motor in self.motors.values():
                 motor.disable()
+            if self.y_axis:
+                self.y_axis.disable()
             self.status_var.set("All motors disabled")
             logger.info("All motors disabled")
         except Exception as e:
@@ -255,6 +411,8 @@ class MotorTestUI:
         try:
             for motor in self.motors.values():
                 motor.disable()
+            if self.y_axis:
+                self.y_axis.disable()
             self.status_var.set("EMERGENCY STOP")
             logger.warning("Emergency stop activated")
             messagebox.showwarning(
@@ -272,6 +430,8 @@ class MotorTestUI:
             try:
                 for motor in self.motors.values():
                     motor.cleanup()
+                if self.y_axis:
+                    self.y_axis.cleanup()
                 logger.info("Application closed")
                 self.root.destroy()
             except Exception as e:
