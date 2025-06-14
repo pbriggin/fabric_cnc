@@ -17,6 +17,10 @@ DIR_PIN = 21
 STEP_PIN = 19
 EN_PIN = 23
 
+# Motor configuration
+PULSES_PER_REV = 3200
+STEP_DELAY = 0.00025  # 0.25ms between pulses = 2000 steps/sec
+
 def setup_gpio():
     """Set up GPIO pins for Y1 motor."""
     GPIO.setmode(GPIO.BCM)
@@ -31,21 +35,22 @@ def setup_gpio():
     
     logger.info("GPIO pins set up successfully")
 
-def step_motor(direction, steps=1):
-    """Step the motor once in the specified direction."""
+def step_motor(direction, steps=PULSES_PER_REV):
+    """Step the motor in the specified direction."""
     try:
         # Set direction
         logger.debug(f"Setting direction pin {DIR_PIN} to {'HIGH' if direction else 'LOW'}")
         GPIO.output(DIR_PIN, GPIO.HIGH if direction else GPIO.LOW)
         
+        logger.info(f"Stepping {'forward' if direction else 'reverse'} for {steps} steps...")
         for i in range(steps):
             # Step pulse
-            logger.debug(f"Step {i+1}/{steps}: Setting step pin {STEP_PIN} to HIGH")
             GPIO.output(STEP_PIN, GPIO.HIGH)
-            time.sleep(0.002)  # 2ms pulse
-            logger.debug(f"Step {i+1}/{steps}: Setting step pin {STEP_PIN} to LOW")
+            time.sleep(STEP_DELAY)
             GPIO.output(STEP_PIN, GPIO.LOW)
-            time.sleep(0.002)  # 2ms delay
+            time.sleep(STEP_DELAY)
+            
+        logger.info("Step sequence complete")
             
     except Exception as e:
         logger.error(f"Error stepping motor: {e}")
@@ -53,6 +58,7 @@ def step_motor(direction, steps=1):
 
 def cleanup():
     """Clean up GPIO resources."""
+    GPIO.output(EN_PIN, GPIO.HIGH)  # Disable motor
     GPIO.cleanup([DIR_PIN, STEP_PIN, EN_PIN])
     logger.info("GPIO cleanup complete")
 
@@ -61,15 +67,17 @@ def main():
     try:
         setup_gpio()
         
-        # Test forward movement
-        logger.info("Testing forward movement (100 steps)")
-        step_motor(True, 100)
-        time.sleep(2)  # Wait 2 seconds between directions
+        # Test forward movement (one full revolution)
+        logger.info("Testing forward movement (one full revolution)")
+        step_motor(True)
+        time.sleep(1)  # Wait 1 second between directions
         
-        # Test reverse movement
-        logger.info("Testing reverse movement (100 steps)")
-        step_motor(False, 100)
+        # Test reverse movement (one full revolution)
+        logger.info("Testing reverse movement (one full revolution)")
+        step_motor(False)
         
+    except KeyboardInterrupt:
+        logger.info("Test interrupted by user")
     except Exception as e:
         logger.error(f"Test failed: {e}")
     finally:
