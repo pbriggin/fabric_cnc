@@ -9,6 +9,7 @@ import logging
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Dict, Optional
+import time
 
 from fabric_cnc.config import config
 from fabric_cnc.motor_control.driver import (
@@ -329,6 +330,12 @@ class MotorTestUI:
             return
             
         try:
+            # Enable motors if they're not already enabled
+            if not self.y_axis._enabled:
+                self.y_axis.enable()
+                self.status_var.set("Enabled Y-axis motors")
+                time.sleep(0.1)  # Give motors time to enable
+                
             distance = 10.0  # mm
             speed = config.motion.default_speed_mm_s
             
