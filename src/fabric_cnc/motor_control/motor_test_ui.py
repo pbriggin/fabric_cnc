@@ -192,11 +192,11 @@ class MotorTestUI:
         btn_frame.grid(row=0, column=0, padx=5, pady=5)
         
         ttk.Button(btn_frame, text="Forward", 
-                  command=lambda: self._move_motor(motor, 10)).grid(row=0, column=0, padx=2)
+                  command=lambda: self.move_motor(motor, True)).grid(row=0, column=0, padx=2)
         ttk.Button(btn_frame, text="Reverse", 
-                  command=lambda: self._move_motor(motor, -10)).grid(row=0, column=1, padx=2)
+                  command=lambda: self.move_motor(motor, False)).grid(row=0, column=1, padx=2)
         ttk.Button(btn_frame, text="Stop", 
-                  command=lambda: self._stop_motor(motor)).grid(row=0, column=2, padx=2)
+                  command=lambda: self.stop_motor(motor)).grid(row=0, column=2, padx=2)
         
         return frame
 
@@ -210,9 +210,9 @@ class MotorTestUI:
         btn_frame.grid(row=0, column=0, padx=5, pady=5)
         
         ttk.Button(btn_frame, text="Forward", 
-                  command=lambda: self._move_y_axis(10)).grid(row=0, column=0, padx=2)
+                  command=lambda: self.move_y_axis(True)).grid(row=0, column=0, padx=2)
         ttk.Button(btn_frame, text="Reverse", 
-                  command=lambda: self._move_y_axis(-10)).grid(row=0, column=1, padx=2)
+                  command=lambda: self.move_y_axis(False)).grid(row=0, column=1, padx=2)
         ttk.Button(btn_frame, text="Stop", 
                   command=self.stop_y_axis).grid(row=0, column=2, padx=2)
         
@@ -258,19 +258,20 @@ class MotorTestUI:
         """
         try:
             distance = 10.0  # mm
-            speed = config.motion.default_speed_mm_s
-            
+            if not direction:
+                distance = -distance
+                
             self.status_var.set(
                 f"Moving {motor.config.name} "
                 f"{'forward' if direction else 'reverse'}"
             )
             
-            motor.move_mm(direction, distance, speed)
+            motor.move_mm(distance)
             
             self.status_var.set("Ready")
             logger.info(
                 f"Moved {motor.config.name} "
-                f"{'forward' if direction else 'reverse'} {distance}mm"
+                f"{'forward' if direction else 'reverse'} {abs(distance)}mm"
             )
         except Exception as e:
             self.status_var.set(f"Error: {str(e)}")
@@ -287,26 +288,21 @@ class MotorTestUI:
             return
             
         try:
-            # Enable motors if they're not already enabled
-            if not self.y_axis._enabled:
-                self.y_axis.enable()
-                self.status_var.set("Enabled Y-axis motors")
-                time.sleep(0.1)  # Give motors time to enable
-                
             distance = 10.0  # mm
-            speed = config.motion.default_speed_mm_s
-            
+            if not direction:
+                distance = -distance
+                
             self.status_var.set(
                 f"Moving Y-axis "
                 f"{'forward' if direction else 'reverse'}"
             )
             
-            self.y_axis.move_mm(direction, distance, speed)
+            self.y_axis.move_mm(distance)
             
             self.status_var.set("Ready")
             logger.info(
                 f"Moved Y-axis "
-                f"{'forward' if direction else 'reverse'} {distance}mm"
+                f"{'forward' if direction else 'reverse'} {abs(distance)}mm"
             )
         except Exception as e:
             self.status_var.set(f"Error: {str(e)}")
@@ -320,7 +316,7 @@ class MotorTestUI:
             motor: Motor to stop
         """
         try:
-            motor.disable()
+            motor.stop()
             self.status_var.set(f"Stopped {motor.config.name}")
             logger.info(f"Stopped {motor.config.name}")
         except Exception as e:
@@ -334,7 +330,7 @@ class MotorTestUI:
             return
             
         try:
-            self.y_axis.disable()
+            self.y_axis.stop()
             self.status_var.set("Stopped Y-axis")
             logger.info("Stopped Y-axis")
         except Exception as e:
@@ -346,14 +342,14 @@ class MotorTestUI:
         """Emergency stop all motors."""
         try:
             for motor in self.motors.values():
-                motor.disable()
+                motor.stop()
             if self.y_axis:
-                self.y_axis.disable()
+                self.y_axis.stop()
             self.status_var.set("EMERGENCY STOP")
             logger.warning("Emergency stop activated")
             messagebox.showwarning(
                 "Emergency Stop",
-                "All motors have been disabled"
+                "All motors have been stopped"
             )
         except Exception as e:
             self.status_var.set(f"Error: {str(e)}")
