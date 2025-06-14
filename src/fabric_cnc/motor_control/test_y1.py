@@ -19,7 +19,7 @@ EN = 23  # Enable pin (active low)
 
 # Motor configuration
 PULSES_PER_REV = 3200
-STEP_DELAY = 0.00025  # 0.25ms between pulses = 2000 steps/sec
+STEP_DELAY = 0.00025  # 0.5 ms between pulses = 2000 steps/sec
 
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(STEP, GPIO.OUT)
