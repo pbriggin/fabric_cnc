@@ -12,12 +12,13 @@ import time
 import RPi.GPIO as GPIO
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Motor configuration
 PULSES_PER_REV = 3200
 STEP_DELAY = 0.00025  # 0.25ms between pulses = 2000 steps/sec
+JOG_STEPS = 100  # Number of steps for each jog movement
 
 class MotorTestUI:
     """Simple UI for testing individual motors."""
@@ -47,8 +48,21 @@ class MotorTestUI:
         # Setup motor pins and create UI
         self._setup_motors()
         
+        # Create jog controls
+        self._create_jog_controls()
+        
         # Create emergency stop button
         self._create_emergency_stop()
+        
+        # Bind arrow keys
+        self.root.bind('<Up>', lambda e: self._jog_y_axis(True))
+        self.root.bind('<Down>', lambda e: self._jog_y_axis(False))
+        self.root.bind('<Left>', lambda e: self._jog_motor('X', False))
+        self.root.bind('<Right>', lambda e: self._jog_motor('X', True))
+        self.root.bind('<Prior>', lambda e: self._jog_motor('Z_LIFT', True))  # Page Up
+        self.root.bind('<Next>', lambda e: self._jog_motor('Z_LIFT', False))  # Page Down
+        self.root.bind('<Home>', lambda e: self._jog_motor('Z_ROTATE', True))
+        self.root.bind('<End>', lambda e: self._jog_motor('Z_ROTATE', False))
         
         logger.info("Motor test UI initialized")
         
@@ -56,7 +70,6 @@ class MotorTestUI:
         """Setup GPIO pins for all motors and create UI elements."""
         for i, (name, pins) in enumerate(self.motors.items()):
             # Setup GPIO pins
-            logger.debug(f"Setting up {name} motor pins: STEP={pins['STEP']}, DIR={pins['DIR']}, EN={pins['EN']}")
             GPIO.setup(pins['STEP'], GPIO.OUT)
             GPIO.setup(pins['DIR'], GPIO.OUT)
             GPIO.setup(pins['EN'], GPIO.OUT)
@@ -65,7 +78,6 @@ class MotorTestUI:
             GPIO.output(pins['STEP'], GPIO.LOW)
             GPIO.output(pins['DIR'], GPIO.LOW)
             GPIO.output(pins['EN'], GPIO.LOW)  # Enable motor
-            logger.debug(f"Initialized {name} pins: STEP=LOW, DIR=LOW, EN=LOW")
             
             # Create UI frame
             self._create_motor_frame(name, pins, i)
@@ -112,6 +124,29 @@ class MotorTestUI:
         ttk.Label(frame, textvariable=status_var).grid(row=1, column=0, pady=5)
         
         return frame
+
+    def _create_jog_controls(self):
+        """Create jog control frame with arrow buttons."""
+        frame = ttk.LabelFrame(self.main_frame, text="Jog Controls")
+        frame.grid(row=3, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
+        
+        # Create arrow buttons in a grid
+        ttk.Button(frame, text="↑", command=lambda: self._jog_y_axis(True)).grid(row=0, column=1, padx=2, pady=2)
+        ttk.Button(frame, text="↓", command=lambda: self._jog_y_axis(False)).grid(row=2, column=1, padx=2, pady=2)
+        ttk.Button(frame, text="←", command=lambda: self._jog_motor('X', False)).grid(row=1, column=0, padx=2, pady=2)
+        ttk.Button(frame, text="→", command=lambda: self._jog_motor('X', True)).grid(row=1, column=2, padx=2, pady=2)
+        
+        # Z-axis controls
+        ttk.Button(frame, text="PgUp", command=lambda: self._jog_motor('Z_LIFT', True)).grid(row=0, column=3, padx=2, pady=2)
+        ttk.Button(frame, text="PgDn", command=lambda: self._jog_motor('Z_LIFT', False)).grid(row=2, column=3, padx=2, pady=2)
+        ttk.Button(frame, text="Home", command=lambda: self._jog_motor('Z_ROTATE', True)).grid(row=0, column=4, padx=2, pady=2)
+        ttk.Button(frame, text="End", command=lambda: self._jog_motor('Z_ROTATE', False)).grid(row=2, column=4, padx=2, pady=2)
+        
+        # Add key binding hints
+        ttk.Label(frame, text="Use arrow keys to jog X/Y").grid(row=3, column=0, columnspan=3, pady=5)
+        ttk.Label(frame, text="PgUp/Dn: Z Lift, Home/End: Z Rotate").grid(row=3, column=3, columnspan=2, pady=5)
+        
+        return frame
         
     def _create_emergency_stop(self):
         """Create emergency stop button."""
@@ -126,16 +161,12 @@ class MotorTestUI:
         """Step a motor in the specified direction."""
         try:
             logger.info(f"Stepping {name} {'forward' if direction else 'reverse'}")
-            logger.debug(f"Motor {name} pins: STEP={pins['STEP']}, DIR={pins['DIR']}, EN={pins['EN']}")
             
             # Set direction
             GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
-            logger.debug(f"Set {name} DIR pin {pins['DIR']} to {'HIGH' if direction else 'LOW'}")
             
             # Step sequence
-            for i in range(PULSES_PER_REV):
-                if i % 100 == 0:  # Log every 100 steps
-                    logger.debug(f"{name} step {i}/{PULSES_PER_REV}")
+            for _ in range(PULSES_PER_REV):
                 GPIO.output(pins['STEP'], GPIO.HIGH)
                 time.sleep(STEP_DELAY)
                 GPIO.output(pins['STEP'], GPIO.LOW)
@@ -143,6 +174,26 @@ class MotorTestUI:
                 
         except Exception as e:
             logger.error(f"Error stepping motor: {e}")
+            messagebox.showerror("Motor Error", str(e))
+
+    def _jog_motor(self, name, direction):
+        """Jog a motor a small amount in the specified direction."""
+        try:
+            logger.info(f"Jogging {name} {'forward' if direction else 'reverse'}")
+            pins = self.motors[name]
+            
+            # Set direction
+            GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+            
+            # Step sequence
+            for _ in range(JOG_STEPS):
+                GPIO.output(pins['STEP'], GPIO.HIGH)
+                time.sleep(STEP_DELAY)
+                GPIO.output(pins['STEP'], GPIO.LOW)
+                time.sleep(STEP_DELAY)
+                
+        except Exception as e:
+            logger.error(f"Error jogging motor: {e}")
             messagebox.showerror("Motor Error", str(e))
 
     def _step_y_axis(self, direction):
@@ -166,6 +217,29 @@ class MotorTestUI:
                 
         except Exception as e:
             logger.error(f"Error stepping Y-axis: {e}")
+            messagebox.showerror("Motor Error", str(e))
+
+    def _jog_y_axis(self, direction):
+        """Jog both Y motors in sync."""
+        try:
+            logger.info(f"Jogging Y-axis {'forward' if direction else 'reverse'}")
+            
+            # Set directions (Y1 is reversed)
+            GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
+            GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+            
+            # Step sequence
+            for _ in range(JOG_STEPS):
+                # Step both motors
+                GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
+                GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
+                time.sleep(STEP_DELAY)
+                GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
+                GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
+                time.sleep(STEP_DELAY)
+                
+        except Exception as e:
+            logger.error(f"Error jogging Y-axis: {e}")
             messagebox.showerror("Motor Error", str(e))
             
     def _emergency_stop(self):
