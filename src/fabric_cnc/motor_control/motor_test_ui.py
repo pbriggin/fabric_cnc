@@ -45,7 +45,7 @@ class MotorTestUI:
             'Z_ROTATE': {'STEP': 15, 'DIR': 14, 'EN': 16}
         }
         
-        # Setup motor pins and create UI
+        # Setup motor pins
         self._setup_motors()
         
         # Create jog controls
@@ -67,8 +67,8 @@ class MotorTestUI:
         logger.info("Motor test UI initialized")
         
     def _setup_motors(self):
-        """Setup GPIO pins for all motors and create UI elements."""
-        for i, (name, pins) in enumerate(self.motors.items()):
+        """Setup GPIO pins for all motors."""
+        for name, pins in self.motors.items():
             # Setup GPIO pins
             GPIO.setup(pins['STEP'], GPIO.OUT)
             GPIO.setup(pins['DIR'], GPIO.OUT)
@@ -79,56 +79,10 @@ class MotorTestUI:
             GPIO.output(pins['DIR'], GPIO.LOW)
             GPIO.output(pins['EN'], GPIO.LOW)  # Enable motor
             
-            # Create UI frame
-            self._create_motor_frame(name, pins, i)
-            
-        # Create synchronized Y-axis frame
-        self._create_y_axis_frame()
-            
-    def _create_motor_frame(self, name, pins, row):
-        """Create a frame for a single motor's controls."""
-        frame = ttk.LabelFrame(self.main_frame, text=f"{name} Motor")
-        frame.grid(row=row, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
-        
-        # Movement buttons
-        btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=0, column=0, padx=5, pady=5)
-        
-        ttk.Button(btn_frame, text="Forward", 
-                  command=lambda: self._step_motor(name, pins, True)).grid(row=0, column=0, padx=2)
-        ttk.Button(btn_frame, text="Reverse", 
-                  command=lambda: self._step_motor(name, pins, False)).grid(row=0, column=1, padx=2)
-        
-        # Status label
-        status_var = tk.StringVar(value="Ready")
-        ttk.Label(frame, textvariable=status_var).grid(row=1, column=0, pady=5)
-        
-        return frame
-
-    def _create_y_axis_frame(self):
-        """Create frame for synchronized Y-axis control."""
-        frame = ttk.LabelFrame(self.main_frame, text="Synchronized Y-Axis")
-        frame.grid(row=2, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
-        
-        # Movement buttons
-        btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=0, column=0, padx=5, pady=5)
-        
-        ttk.Button(btn_frame, text="Forward", 
-                  command=lambda: self._step_y_axis(True)).grid(row=0, column=0, padx=2)
-        ttk.Button(btn_frame, text="Reverse", 
-                  command=lambda: self._step_y_axis(False)).grid(row=0, column=1, padx=2)
-        
-        # Status label
-        status_var = tk.StringVar(value="Ready")
-        ttk.Label(frame, textvariable=status_var).grid(row=1, column=0, pady=5)
-        
-        return frame
-
     def _create_jog_controls(self):
         """Create jog control frame with arrow buttons."""
         frame = ttk.LabelFrame(self.main_frame, text="Jog Controls")
-        frame.grid(row=3, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
+        frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
         
         # Create arrow buttons in a grid
         ttk.Button(frame, text="↑", command=lambda: self._jog_y_axis(True)).grid(row=0, column=1, padx=2, pady=2)
@@ -155,29 +109,8 @@ class MotorTestUI:
             text="EMERGENCY STOP",
             command=self._emergency_stop,
             style="Emergency.TButton"
-        ).grid(row=6, column=0, sticky=(tk.W, tk.E), padx=5, pady=10)
+        ).grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=10)
         
-    def _step_motor(self, name, pins, direction):
-        """Step a motor in the specified direction."""
-        try:
-            logger.info(f"Stepping {name} {'forward' if direction else 'reverse'}")
-            
-            # Set direction (reverse for Y1 and X)
-            if name in ['Y1', 'X']:
-                direction = not direction
-            GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
-            
-            # Step sequence
-            for _ in range(PULSES_PER_REV):
-                GPIO.output(pins['STEP'], GPIO.HIGH)
-                time.sleep(STEP_DELAY)
-                GPIO.output(pins['STEP'], GPIO.LOW)
-                time.sleep(STEP_DELAY)
-                
-        except Exception as e:
-            logger.error(f"Error stepping motor: {e}")
-            messagebox.showerror("Motor Error", str(e))
-
     def _jog_motor(self, name, direction):
         """Jog a motor a small amount in the specified direction."""
         try:
@@ -198,29 +131,6 @@ class MotorTestUI:
                 
         except Exception as e:
             logger.error(f"Error jogging motor: {e}")
-            messagebox.showerror("Motor Error", str(e))
-
-    def _step_y_axis(self, direction):
-        """Step both Y motors in sync."""
-        try:
-            logger.info(f"Stepping Y-axis {'forward' if direction else 'reverse'}")
-            
-            # Set directions (Y1 is reversed)
-            GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
-            GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if direction else GPIO.LOW)
-            
-            # Step sequence
-            for _ in range(PULSES_PER_REV):
-                # Step both motors
-                GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
-                GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
-                time.sleep(STEP_DELAY)
-                GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
-                GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
-                time.sleep(STEP_DELAY)
-                
-        except Exception as e:
-            logger.error(f"Error stepping Y-axis: {e}")
             messagebox.showerror("Motor Error", str(e))
 
     def _jog_y_axis(self, direction):
