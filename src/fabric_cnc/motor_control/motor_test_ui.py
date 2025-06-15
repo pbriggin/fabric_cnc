@@ -84,16 +84,46 @@ class MotorTestUI:
         frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
         
         # Create arrow buttons in a grid
-        ttk.Button(frame, text="↑", command=lambda: self._start_jog_y_axis(True)).grid(row=0, column=1, padx=2, pady=2)
-        ttk.Button(frame, text="↓", command=lambda: self._start_jog_y_axis(False)).grid(row=2, column=1, padx=2, pady=2)
-        ttk.Button(frame, text="←", command=lambda: self._start_jog_motor('X', False)).grid(row=1, column=0, padx=2, pady=2)
-        ttk.Button(frame, text="→", command=lambda: self._start_jog_motor('X', True)).grid(row=1, column=2, padx=2, pady=2)
+        up_btn = ttk.Button(frame, text="↑")
+        up_btn.grid(row=0, column=1, padx=2, pady=2)
+        up_btn.bind('<ButtonPress>', lambda e: self._start_jog_y_axis(True))
+        up_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        
+        down_btn = ttk.Button(frame, text="↓")
+        down_btn.grid(row=2, column=1, padx=2, pady=2)
+        down_btn.bind('<ButtonPress>', lambda e: self._start_jog_y_axis(False))
+        down_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        
+        left_btn = ttk.Button(frame, text="←")
+        left_btn.grid(row=1, column=0, padx=2, pady=2)
+        left_btn.bind('<ButtonPress>', lambda e: self._start_jog_motor('X', False))
+        left_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        
+        right_btn = ttk.Button(frame, text="→")
+        right_btn.grid(row=1, column=2, padx=2, pady=2)
+        right_btn.bind('<ButtonPress>', lambda e: self._start_jog_motor('X', True))
+        right_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
         
         # Z-axis controls
-        ttk.Button(frame, text="PgUp", command=lambda: self._start_jog_motor('Z_LIFT', True)).grid(row=0, column=3, padx=2, pady=2)
-        ttk.Button(frame, text="PgDn", command=lambda: self._start_jog_motor('Z_LIFT', False)).grid(row=2, column=3, padx=2, pady=2)
-        ttk.Button(frame, text="Home", command=lambda: self._start_jog_motor('Z_ROTATE', True)).grid(row=0, column=4, padx=2, pady=2)
-        ttk.Button(frame, text="End", command=lambda: self._start_jog_motor('Z_ROTATE', False)).grid(row=2, column=4, padx=2, pady=2)
+        pgup_btn = ttk.Button(frame, text="PgUp")
+        pgup_btn.grid(row=0, column=3, padx=2, pady=2)
+        pgup_btn.bind('<ButtonPress>', lambda e: self._start_jog_motor('Z_LIFT', True))
+        pgup_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        
+        pgdn_btn = ttk.Button(frame, text="PgDn")
+        pgdn_btn.grid(row=2, column=3, padx=2, pady=2)
+        pgdn_btn.bind('<ButtonPress>', lambda e: self._start_jog_motor('Z_LIFT', False))
+        pgdn_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        
+        home_btn = ttk.Button(frame, text="Home")
+        home_btn.grid(row=0, column=4, padx=2, pady=2)
+        home_btn.bind('<ButtonPress>', lambda e: self._start_jog_motor('Z_ROTATE', True))
+        home_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        
+        end_btn = ttk.Button(frame, text="End")
+        end_btn.grid(row=2, column=4, padx=2, pady=2)
+        end_btn.bind('<ButtonPress>', lambda e: self._start_jog_motor('Z_ROTATE', False))
+        end_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
         
         # Add key binding hints
         ttk.Label(frame, text="Use arrow keys to jog X/Y").grid(row=3, column=0, columnspan=3, pady=5)
