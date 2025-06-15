@@ -162,7 +162,9 @@ class MotorTestUI:
         try:
             logger.info(f"Stepping {name} {'forward' if direction else 'reverse'}")
             
-            # Set direction
+            # Set direction (reverse for Y1 and X)
+            if name in ['Y1', 'X']:
+                direction = not direction
             GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
             
             # Step sequence
@@ -182,7 +184,9 @@ class MotorTestUI:
             logger.info(f"Jogging {name} {'forward' if direction else 'reverse'}")
             pins = self.motors[name]
             
-            # Set direction
+            # Set direction (reverse for Y1 and X)
+            if name in ['Y1', 'X']:
+                direction = not direction
             GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
             
             # Step sequence
