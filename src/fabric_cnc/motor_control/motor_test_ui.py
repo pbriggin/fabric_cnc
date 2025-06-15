@@ -10,6 +10,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import time
 import RPi.GPIO as GPIO
+import threading
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -54,15 +55,13 @@ class MotorTestUI:
         # Create emergency stop button
         self._create_emergency_stop()
         
+        # Initialize jogging state
+        self.jogging = False
+        self.jog_thread = None
+        
         # Bind arrow keys
-        self.root.bind('<Up>', lambda e: self._jog_y_axis(True))
-        self.root.bind('<Down>', lambda e: self._jog_y_axis(False))
-        self.root.bind('<Left>', lambda e: self._jog_motor('X', False))
-        self.root.bind('<Right>', lambda e: self._jog_motor('X', True))
-        self.root.bind('<Prior>', lambda e: self._jog_motor('Z_LIFT', True))  # Page Up
-        self.root.bind('<Next>', lambda e: self._jog_motor('Z_LIFT', False))  # Page Down
-        self.root.bind('<Home>', lambda e: self._jog_motor('Z_ROTATE', True))
-        self.root.bind('<End>', lambda e: self._jog_motor('Z_ROTATE', False))
+        self.root.bind('<KeyPress>', self._handle_key_press)
+        self.root.bind('<KeyRelease>', self._handle_key_release)
         
         logger.info("Motor test UI initialized")
         
@@ -85,16 +84,16 @@ class MotorTestUI:
         frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
         
         # Create arrow buttons in a grid
-        ttk.Button(frame, text="↑", command=lambda: self._jog_y_axis(True)).grid(row=0, column=1, padx=2, pady=2)
-        ttk.Button(frame, text="↓", command=lambda: self._jog_y_axis(False)).grid(row=2, column=1, padx=2, pady=2)
-        ttk.Button(frame, text="←", command=lambda: self._jog_motor('X', False)).grid(row=1, column=0, padx=2, pady=2)
-        ttk.Button(frame, text="→", command=lambda: self._jog_motor('X', True)).grid(row=1, column=2, padx=2, pady=2)
+        ttk.Button(frame, text="↑", command=lambda: self._start_jog_y_axis(True)).grid(row=0, column=1, padx=2, pady=2)
+        ttk.Button(frame, text="↓", command=lambda: self._start_jog_y_axis(False)).grid(row=2, column=1, padx=2, pady=2)
+        ttk.Button(frame, text="←", command=lambda: self._start_jog_motor('X', False)).grid(row=1, column=0, padx=2, pady=2)
+        ttk.Button(frame, text="→", command=lambda: self._start_jog_motor('X', True)).grid(row=1, column=2, padx=2, pady=2)
         
         # Z-axis controls
-        ttk.Button(frame, text="PgUp", command=lambda: self._jog_motor('Z_LIFT', True)).grid(row=0, column=3, padx=2, pady=2)
-        ttk.Button(frame, text="PgDn", command=lambda: self._jog_motor('Z_LIFT', False)).grid(row=2, column=3, padx=2, pady=2)
-        ttk.Button(frame, text="Home", command=lambda: self._jog_motor('Z_ROTATE', True)).grid(row=0, column=4, padx=2, pady=2)
-        ttk.Button(frame, text="End", command=lambda: self._jog_motor('Z_ROTATE', False)).grid(row=2, column=4, padx=2, pady=2)
+        ttk.Button(frame, text="PgUp", command=lambda: self._start_jog_motor('Z_LIFT', True)).grid(row=0, column=3, padx=2, pady=2)
+        ttk.Button(frame, text="PgDn", command=lambda: self._start_jog_motor('Z_LIFT', False)).grid(row=2, column=3, padx=2, pady=2)
+        ttk.Button(frame, text="Home", command=lambda: self._start_jog_motor('Z_ROTATE', True)).grid(row=0, column=4, padx=2, pady=2)
+        ttk.Button(frame, text="End", command=lambda: self._start_jog_motor('Z_ROTATE', False)).grid(row=2, column=4, padx=2, pady=2)
         
         # Add key binding hints
         ttk.Label(frame, text="Use arrow keys to jog X/Y").grid(row=3, column=0, columnspan=3, pady=5)
@@ -110,11 +109,71 @@ class MotorTestUI:
             command=self._emergency_stop,
             style="Emergency.TButton"
         ).grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=10)
-        
-    def _jog_motor(self, name, direction):
-        """Jog a motor a small amount in the specified direction."""
+
+    def _handle_key_press(self, event):
+        """Handle key press events for continuous jogging."""
+        if self.jogging:
+            return
+            
+        if event.keysym == 'Up':
+            self._start_jog_y_axis(True)
+        elif event.keysym == 'Down':
+            self._start_jog_y_axis(False)
+        elif event.keysym == 'Left':
+            self._start_jog_motor('X', False)
+        elif event.keysym == 'Right':
+            self._start_jog_motor('X', True)
+        elif event.keysym == 'Prior':  # Page Up
+            self._start_jog_motor('Z_LIFT', True)
+        elif event.keysym == 'Next':   # Page Down
+            self._start_jog_motor('Z_LIFT', False)
+        elif event.keysym == 'Home':
+            self._start_jog_motor('Z_ROTATE', True)
+        elif event.keysym == 'End':
+            self._start_jog_motor('Z_ROTATE', False)
+
+    def _handle_key_release(self, event):
+        """Handle key release events to stop jogging."""
+        if event.keysym in ['Up', 'Down', 'Left', 'Right', 'Prior', 'Next', 'Home', 'End']:
+            self._stop_jogging()
+
+    def _start_jog_motor(self, name, direction):
+        """Start continuous jogging for a single motor."""
+        if self.jogging:
+            return
+            
+        self.jogging = True
+        self.jog_thread = threading.Thread(
+            target=self._jog_motor_continuous,
+            args=(name, direction),
+            daemon=True
+        )
+        self.jog_thread.start()
+
+    def _start_jog_y_axis(self, direction):
+        """Start continuous jogging for Y axis."""
+        if self.jogging:
+            return
+            
+        self.jogging = True
+        self.jog_thread = threading.Thread(
+            target=self._jog_y_axis_continuous,
+            args=(direction,),
+            daemon=True
+        )
+        self.jog_thread.start()
+
+    def _stop_jogging(self):
+        """Stop continuous jogging."""
+        self.jogging = False
+        if self.jog_thread:
+            self.jog_thread.join(timeout=0.1)
+            self.jog_thread = None
+
+    def _jog_motor_continuous(self, name, direction):
+        """Continuously jog a motor until stopped."""
         try:
-            logger.info(f"Jogging {name} {'forward' if direction else 'reverse'}")
+            logger.info(f"Starting continuous jog for {name} {'forward' if direction else 'reverse'}")
             pins = self.motors[name]
             
             # Set direction (reverse for Y1 and X)
@@ -123,7 +182,7 @@ class MotorTestUI:
             GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
             
             # Step sequence
-            for _ in range(JOG_STEPS):
+            while self.jogging:
                 GPIO.output(pins['STEP'], GPIO.HIGH)
                 time.sleep(STEP_DELAY)
                 GPIO.output(pins['STEP'], GPIO.LOW)
@@ -132,18 +191,20 @@ class MotorTestUI:
         except Exception as e:
             logger.error(f"Error jogging motor: {e}")
             messagebox.showerror("Motor Error", str(e))
+        finally:
+            self.jogging = False
 
-    def _jog_y_axis(self, direction):
-        """Jog both Y motors in sync."""
+    def _jog_y_axis_continuous(self, direction):
+        """Continuously jog both Y motors until stopped."""
         try:
-            logger.info(f"Jogging Y-axis {'forward' if direction else 'reverse'}")
+            logger.info(f"Starting continuous Y-axis jog {'forward' if direction else 'reverse'}")
             
             # Set directions (Y1 is reversed)
             GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
             GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if direction else GPIO.LOW)
             
             # Step sequence
-            for _ in range(JOG_STEPS):
+            while self.jogging:
                 # Step both motors
                 GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
                 GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
@@ -155,10 +216,13 @@ class MotorTestUI:
         except Exception as e:
             logger.error(f"Error jogging Y-axis: {e}")
             messagebox.showerror("Motor Error", str(e))
+        finally:
+            self.jogging = False
             
     def _emergency_stop(self):
         """Emergency stop all motors."""
         try:
+            self._stop_jogging()
             for pins in self.motors.values():
                 GPIO.output(pins['EN'], GPIO.HIGH)  # Disable all motors
             logger.warning("Emergency stop activated")
@@ -174,6 +238,7 @@ class MotorTestUI:
         """Handle window closing."""
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
             try:
+                self._stop_jogging()
                 # Disable all motors
                 for pins in self.motors.values():
                     GPIO.output(pins['EN'], GPIO.HIGH)
