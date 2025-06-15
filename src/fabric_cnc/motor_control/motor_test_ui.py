@@ -37,7 +37,7 @@ class MotorTestUI:
         
         # Initialize motors
         self.motors = {
-            'X': {'STEP': 0, 'DIR': 5, 'EN': 6},
+            'X': {'STEP': 5, 'DIR': 6, 'EN': 13},
             'Y1': {'STEP': 10, 'DIR': 9, 'EN': 11},
             'Y2': {'STEP': 17, 'DIR': 27, 'EN': 22},
             'Z_LIFT': {'STEP': 12, 'DIR': 11, 'EN': 13},
@@ -56,6 +56,7 @@ class MotorTestUI:
         """Setup GPIO pins for all motors and create UI elements."""
         for i, (name, pins) in enumerate(self.motors.items()):
             # Setup GPIO pins
+            logger.debug(f"Setting up {name} motor pins: STEP={pins['STEP']}, DIR={pins['DIR']}, EN={pins['EN']}")
             GPIO.setup(pins['STEP'], GPIO.OUT)
             GPIO.setup(pins['DIR'], GPIO.OUT)
             GPIO.setup(pins['EN'], GPIO.OUT)
@@ -64,6 +65,7 @@ class MotorTestUI:
             GPIO.output(pins['STEP'], GPIO.LOW)
             GPIO.output(pins['DIR'], GPIO.LOW)
             GPIO.output(pins['EN'], GPIO.LOW)  # Enable motor
+            logger.debug(f"Initialized {name} pins: STEP=LOW, DIR=LOW, EN=LOW")
             
             # Create UI frame
             self._create_motor_frame(name, pins, i)
@@ -124,14 +126,16 @@ class MotorTestUI:
         """Step a motor in the specified direction."""
         try:
             logger.info(f"Stepping {name} {'forward' if direction else 'reverse'}")
+            logger.debug(f"Motor {name} pins: STEP={pins['STEP']}, DIR={pins['DIR']}, EN={pins['EN']}")
             
-            # Set direction (reverse for Y1)
-            if name == 'Y1':
-                direction = not direction
+            # Set direction
             GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+            logger.debug(f"Set {name} DIR pin {pins['DIR']} to {'HIGH' if direction else 'LOW'}")
             
             # Step sequence
-            for _ in range(PULSES_PER_REV):
+            for i in range(PULSES_PER_REV):
+                if i % 100 == 0:  # Log every 100 steps
+                    logger.debug(f"{name} step {i}/{PULSES_PER_REV}")
                 GPIO.output(pins['STEP'], GPIO.HIGH)
                 time.sleep(STEP_DELAY)
                 GPIO.output(pins['STEP'], GPIO.LOW)
