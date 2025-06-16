@@ -56,28 +56,6 @@ class MotorTestUI:
         # Setup motor pins
         self._setup_motors()
         
-        # Create jog controls
-        self._create_jog_controls()
-        
-        # Create emergency stop button
-        self._create_emergency_stop()
-        
-        # Initialize motor control
-        self.stop_event = threading.Event()
-        self.motor_state = {
-            'active': False,
-            'motor': None,
-            'direction': None,
-            'last_change': 0,
-            'lock': threading.Lock()  # Add lock for thread safety
-        }
-        
-        # Start control threads
-        self.motor_thread = threading.Thread(target=self._motor_control_loop, daemon=True)
-        self.motor_thread.start()
-        self.key_thread = threading.Thread(target=self._key_poll_loop, daemon=True)
-        self.key_thread.start()
-        
         # Initialize key state with timestamps
         self.key_state = {
             'Left': {'pressed': False, 'last_change': 0},
@@ -101,6 +79,28 @@ class MotorTestUI:
             'Home': ('Z_ROTATE', True),
             'End': ('Z_ROTATE', False)
         }
+        
+        # Initialize motor control
+        self.stop_event = threading.Event()
+        self.motor_state = {
+            'active': False,
+            'motor': None,
+            'direction': None,
+            'last_change': 0,
+            'lock': threading.Lock()  # Add lock for thread safety
+        }
+        
+        # Create jog controls
+        self._create_jog_controls()
+        
+        # Create emergency stop button
+        self._create_emergency_stop()
+        
+        # Start control threads
+        self.motor_thread = threading.Thread(target=self._motor_control_loop, daemon=True)
+        self.motor_thread.start()
+        self.key_thread = threading.Thread(target=self._key_poll_loop, daemon=True)
+        self.key_thread.start()
         
         # Bind keys
         self._bind_keys()
@@ -331,6 +331,21 @@ class MotorTestUI:
             messagebox.showerror("Error", str(e))
         finally:
             self.root.destroy()
+
+    def _step_motor(self, motor, direction):
+        """Step a single motor in the specified direction."""
+        pins = self.motors[motor]
+        
+        # Set direction (reverse for Y1 and X)
+        if motor in ['Y1', 'X']:
+            direction = not direction
+        GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+        
+        # Step pulse
+        GPIO.output(pins['STEP'], GPIO.HIGH)
+        time.sleep(STEP_DELAY/2)
+        GPIO.output(pins['STEP'], GPIO.LOW)
+        time.sleep(STEP_DELAY/2)
 
 def main():
     """Main entry point."""
