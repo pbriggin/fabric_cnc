@@ -57,7 +57,6 @@ class MotorTestUI:
         self._create_emergency_stop()
         
         # Initialize motor control
-        self.command_queue = queue.Queue()
         self.stop_event = threading.Event()
         self.motor_thread = threading.Thread(target=self._motor_control_loop, daemon=True)
         self.motor_thread.start()
@@ -165,78 +164,70 @@ class MotorTestUI:
 
     def _start_jog_motor(self, name, direction):
         """Start continuous jogging for a single motor."""
-        self.command_queue.put(('motor', name, direction))
+        self.current_motor = name
+        self.current_direction = direction
         logger.info(f"Starting continuous jog for {name} {'forward' if direction else 'reverse'}")
 
     def _start_jog_y_axis(self, direction):
         """Start continuous jogging for Y axis."""
-        self.command_queue.put(('y_axis', direction))
+        self.current_motor = 'y_axis'
+        self.current_direction = direction
         logger.info(f"Starting continuous Y-axis jog {'forward' if direction else 'reverse'}")
 
     def _stop_jogging(self):
         """Stop continuous jogging."""
-        self.command_queue.put(('stop', None, None))
+        self.current_motor = None
+        self.current_direction = None
 
     def _motor_control_loop(self):
         """Main motor control loop."""
-        current_command = None
+        self.current_motor = None
+        self.current_direction = None
         
         while not self.stop_event.is_set():
             try:
-                # Get next command from queue without blocking
-                try:
-                    current_command = self.command_queue.get_nowait()
-                except queue.Empty:
-                    if current_command is None:
-                        time.sleep(0.001)  # Small delay when idle
-                        continue
-                
-                if current_command[0] == 'stop':
-                    current_command = None
+                if self.current_motor is None:
+                    time.sleep(0.001)  # Small delay when idle
                     continue
                 
-                if current_command[0] == 'motor':
-                    name, direction = current_command[1:]
-                    pins = self.motors[name]
-                    
-                    # Set direction (reverse for Y1 and X)
-                    if name in ['Y1', 'X']:
-                        direction = not direction
-                    GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
-                    
-                    # Step pulse - simplified timing
-                    GPIO.output(pins['STEP'], GPIO.HIGH)
-                    time.sleep(STEP_DELAY)
-                    GPIO.output(pins['STEP'], GPIO.LOW)
-                    
-                elif current_command[0] == 'y_axis':
-                    direction = current_command[1]
-                    
+                if self.current_motor == 'y_axis':
                     # Set directions (Y1 is reversed)
-                    GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
-                    GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+                    GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if self.current_direction else GPIO.HIGH)
+                    GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if self.current_direction else GPIO.LOW)
                     
-                    # Step both motors - simplified timing
+                    # Step both motors
                     GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
                     GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
-                    time.sleep(STEP_DELAY)
+                    time.sleep(STEP_DELAY/2)
                     GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
                     GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
+                    time.sleep(STEP_DELAY/2)
+                else:
+                    pins = self.motors[self.current_motor]
+                    
+                    # Set direction (reverse for Y1 and X)
+                    if self.current_motor in ['Y1', 'X']:
+                        direction = not self.current_direction
+                    else:
+                        direction = self.current_direction
+                    GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+                    
+                    # Step pulse
+                    GPIO.output(pins['STEP'], GPIO.HIGH)
+                    time.sleep(STEP_DELAY/2)
+                    GPIO.output(pins['STEP'], GPIO.LOW)
+                    time.sleep(STEP_DELAY/2)
                     
             except Exception as e:
                 logger.error(f"Error in motor control loop: {e}")
-                current_command = None
+                self.current_motor = None
+                self.current_direction = None
 
     def _disable_all_motors(self):
         """Disable all motors and cleanup GPIO."""
         try:
             # Stop the motor control thread
             self.stop_event.set()
-            self.command_queue.put(('stop', None, None))
-            
-            # Wait for motor thread to stop
-            if self.motor_thread.is_alive():
-                self.motor_thread.join(timeout=1.0)
             
             # Set GPIO mode before cleanup
             GPIO.setmode(GPIO.BCM)
@@ -267,11 +258,6 @@ class MotorTestUI:
         try:
             # Stop the motor control thread
             self.stop_event.set()
-            self.command_queue.put(('stop', None, None))
-            
-            # Wait for motor thread to stop
-            if self.motor_thread.is_alive():
-                self.motor_thread.join(timeout=1.0)
             
             # Set GPIO mode before cleanup
             GPIO.setmode(GPIO.BCM)
