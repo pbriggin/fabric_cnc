@@ -164,20 +164,24 @@ class MotorTestUI:
 
     def _start_jog_motor(self, name, direction):
         """Start continuous jogging for a single motor."""
-        self.current_motor = name
-        self.current_direction = direction
-        logger.info(f"Starting continuous jog for {name} {'forward' if direction else 'reverse'}")
+        if self.current_motor != name or self.current_direction != direction:
+            self.current_motor = name
+            self.current_direction = direction
+            logger.info(f"Starting continuous jog for {name} {'forward' if direction else 'reverse'}")
 
     def _start_jog_y_axis(self, direction):
         """Start continuous jogging for Y axis."""
-        self.current_motor = 'y_axis'
-        self.current_direction = direction
-        logger.info(f"Starting continuous Y-axis jog {'forward' if direction else 'reverse'}")
+        if self.current_motor != 'y_axis' or self.current_direction != direction:
+            self.current_motor = 'y_axis'
+            self.current_direction = direction
+            logger.info(f"Starting continuous Y-axis jog {'forward' if direction else 'reverse'}")
 
     def _stop_jogging(self):
         """Stop continuous jogging."""
-        self.current_motor = None
-        self.current_direction = None
+        if self.current_motor is not None:
+            self.current_motor = None
+            self.current_direction = None
+            logger.info("Stopping jog")
 
     def _motor_control_loop(self):
         """Main motor control loop."""
