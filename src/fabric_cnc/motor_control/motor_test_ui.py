@@ -21,12 +21,6 @@ PULSES_PER_REV = 3200
 STEP_DELAY = 0.00025  # 0.25ms between pulses = 2000 steps/sec
 JOG_STEPS = 100  # Number of steps for each jog movement
 
-def busy_wait(duration):
-    """Busy wait for precise timing."""
-    start = time.perf_counter()
-    while time.perf_counter() - start < duration:
-        pass
-
 class MotorTestUI:
     """Simple UI for testing individual motors."""
     
@@ -217,9 +211,9 @@ class MotorTestUI:
             while not self.stop_event.is_set():
                 # Single step with precise timing
                 GPIO.output(pins['STEP'], GPIO.HIGH)
-                busy_wait(STEP_DELAY/2)  # Half the delay for high
+                time.sleep(STEP_DELAY/2)  # Half the delay for high
                 GPIO.output(pins['STEP'], GPIO.LOW)
-                busy_wait(STEP_DELAY/2)  # Half the delay for low
+                time.sleep(STEP_DELAY/2)  # Half the delay for low
                 
         except Exception as e:
             logger.error(f"Error jogging motor: {e}")
@@ -241,10 +235,10 @@ class MotorTestUI:
                 # Step both motors with precise timing
                 GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
                 GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
-                busy_wait(STEP_DELAY/2)  # Half the delay for high
+                time.sleep(STEP_DELAY/2)  # Half the delay for high
                 GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
                 GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
-                busy_wait(STEP_DELAY/2)  # Half the delay for low
+                time.sleep(STEP_DELAY/2)  # Half the delay for low
                 
         except Exception as e:
             logger.error(f"Error jogging Y-axis: {e}")
