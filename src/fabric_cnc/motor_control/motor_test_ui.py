@@ -300,10 +300,6 @@ class MotorTestUI:
             # GPIO.cleanup()
             
             logger.warning("Emergency stop activated")
-            messagebox.showwarning(
-                "Emergency Stop",
-                "All motors have been stopped and disabled"
-            )
         except Exception as e:
             logger.error(f"Error during emergency stop: {e}")
             messagebox.showerror("Motor Error", str(e))
