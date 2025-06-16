@@ -246,6 +246,14 @@ class MotorTestUI:
                 GPIO.output(pins['DIR'], GPIO.LOW)
                 GPIO.output(pins['EN'], GPIO.HIGH)  # Disable motor
             
+            # Double-check Y motors
+            GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
+            GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW)
+            GPIO.output(self.motors['Y1']['EN'], GPIO.HIGH)
+            GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
+            GPIO.output(self.motors['Y2']['DIR'], GPIO.LOW)
+            GPIO.output(self.motors['Y2']['EN'], GPIO.HIGH)
+            
             # Wait for motor thread to stop
             if self.motor_thread.is_alive():
                 self.motor_thread.join(timeout=1.0)
@@ -271,6 +279,14 @@ class MotorTestUI:
                 GPIO.output(pins['STEP'], GPIO.LOW)
                 GPIO.output(pins['DIR'], GPIO.LOW)
                 GPIO.output(pins['EN'], GPIO.HIGH)  # Disable motor
+            
+            # Double-check Y motors
+            GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
+            GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW)
+            GPIO.output(self.motors['Y1']['EN'], GPIO.HIGH)
+            GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
+            GPIO.output(self.motors['Y2']['DIR'], GPIO.LOW)
+            GPIO.output(self.motors['Y2']['EN'], GPIO.HIGH)
             
             # Wait for motor thread to stop
             if self.motor_thread.is_alive():
