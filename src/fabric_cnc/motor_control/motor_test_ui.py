@@ -34,6 +34,10 @@ class MotorTestUI:
         self.root.title("Motor Test")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
+        # Disable key repeat
+        self.root.option_add('*TEntry*repeatRate', 0)
+        self.root.option_add('*TEntry*repeatDelay', 0)
+        
         # Setup GPIO
         GPIO.setmode(GPIO.BCM)
         
@@ -67,7 +71,7 @@ class MotorTestUI:
             'direction': None,
             'last_change': 0
         }
-        self.last_key_event = None
+        self.active_keys = set()  # Track currently pressed keys
         self.motor_thread = threading.Thread(target=self._motor_control_loop, daemon=True)
         self.motor_thread.start()
         
@@ -175,15 +179,11 @@ class MotorTestUI:
 
     def _handle_key_press(self, motor, direction):
         """Handle key press events."""
-        # Create a unique key event identifier
-        key_event = (motor, direction, 'press')
+        # Add key to active set
+        key = (motor, direction)
+        self.active_keys.add(key)
         
-        # Ignore if this is a repeat of the last event
-        if key_event == self.last_key_event:
-            return
-            
-        self.last_key_event = key_event
-        
+        # Only start motor if it's not already running
         if not self.motor_state['active']:
             self.motor_state['active'] = True
             self.motor_state['motor'] = motor
@@ -193,16 +193,12 @@ class MotorTestUI:
 
     def _handle_key_release(self, motor):
         """Handle key release events."""
-        # Create a unique key event identifier
-        key_event = (motor, None, 'release')
+        # Remove all keys for this motor from active set
+        keys_to_remove = {k for k in self.active_keys if k[0] == motor}
+        self.active_keys -= keys_to_remove
         
-        # Ignore if this is a repeat of the last event
-        if key_event == self.last_key_event:
-            return
-            
-        self.last_key_event = key_event
-        
-        if self.motor_state['active'] and self.motor_state['motor'] == motor:
+        # Only stop motor if no keys are active
+        if not self.active_keys and self.motor_state['active'] and self.motor_state['motor'] == motor:
             self.motor_state['active'] = False
             self.motor_state['motor'] = None
             self.motor_state['direction'] = None
