@@ -11,6 +11,7 @@ from tkinter import ttk, messagebox
 import time
 import RPi.GPIO as GPIO
 import threading
+import queue
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -55,10 +56,11 @@ class MotorTestUI:
         # Create emergency stop button
         self._create_emergency_stop()
         
-        # Initialize jogging state
-        self.jogging = False
-        self.jog_thread = None
+        # Initialize motor control
+        self.command_queue = queue.Queue()
         self.stop_event = threading.Event()
+        self.motor_thread = threading.Thread(target=self._motor_control_loop, daemon=True)
+        self.motor_thread.start()
         
         # Bind arrow keys
         self._bind_keys()
@@ -163,93 +165,79 @@ class MotorTestUI:
 
     def _start_jog_motor(self, name, direction):
         """Start continuous jogging for a single motor."""
-        if self.jog_thread is not None:
-            self._stop_jogging()
-        
-        self.stop_event.clear()
-        self.jog_thread = threading.Thread(
-            target=self._jog_motor_continuous,
-            args=(name, direction)
-        )
-        self.jog_thread.daemon = True
-        self.jog_thread.start()
+        self.command_queue.put(('motor', name, direction))
         logger.info(f"Starting continuous jog for {name} {'forward' if direction else 'reverse'}")
 
     def _start_jog_y_axis(self, direction):
         """Start continuous jogging for Y axis."""
-        if self.jog_thread is not None:
-            self._stop_jogging()
-        
-        self.stop_event.clear()
-        self.jog_thread = threading.Thread(
-            target=self._jog_y_axis_continuous,
-            args=(direction,)
-        )
-        self.jog_thread.daemon = True
-        self.jog_thread.start()
+        self.command_queue.put(('y_axis', direction))
         logger.info(f"Starting continuous Y-axis jog {'forward' if direction else 'reverse'}")
 
     def _stop_jogging(self):
         """Stop continuous jogging."""
-        self.stop_event.set()
-        if self.jog_thread:
-            self.jog_thread.join(timeout=0.1)
-            self.jog_thread = None
+        self.command_queue.put(('stop', None, None))
 
-    def _jog_motor_continuous(self, name, direction):
-        """Continuously jog a motor until stopped."""
-        try:
-            logger.info(f"Starting continuous jog for {name} {'forward' if direction else 'reverse'}")
-            pins = self.motors[name]
-            
-            # Set direction (reverse for Y1 and X)
-            if name in ['Y1', 'X']:
-                direction = not direction
-            GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
-            
-            # Step sequence with precise timing
-            while not self.stop_event.is_set():
-                # Single step with precise timing
-                GPIO.output(pins['STEP'], GPIO.HIGH)
-                time.sleep(STEP_DELAY/2)  # Half the delay for high
-                GPIO.output(pins['STEP'], GPIO.LOW)
-                time.sleep(STEP_DELAY/2)  # Half the delay for low
+    def _motor_control_loop(self):
+        """Main motor control loop."""
+        current_command = None
+        
+        while not self.stop_event.is_set():
+            try:
+                # Get next command from queue
+                if not self.command_queue.empty():
+                    current_command = self.command_queue.get_nowait()
                 
-        except Exception as e:
-            logger.error(f"Error jogging motor: {e}")
-            messagebox.showerror("Motor Error", str(e))
-        finally:
-            self.stop_event.set()
-
-    def _jog_y_axis_continuous(self, direction):
-        """Continuously jog both Y motors until stopped."""
-        try:
-            logger.info(f"Starting continuous Y-axis jog {'forward' if direction else 'reverse'}")
-            
-            # Set directions (Y1 is reversed)
-            GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
-            GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if direction else GPIO.LOW)
-            
-            # Step sequence with precise timing
-            while not self.stop_event.is_set():
-                # Step both motors with precise timing
-                GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
-                GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
-                time.sleep(STEP_DELAY/2)  # Half the delay for high
-                GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
-                GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
-                time.sleep(STEP_DELAY/2)  # Half the delay for low
+                if current_command is None:
+                    time.sleep(0.001)  # Small delay when idle
+                    continue
                 
-        except Exception as e:
-            logger.error(f"Error jogging Y-axis: {e}")
-            messagebox.showerror("Motor Error", str(e))
-        finally:
-            self.stop_event.set()
+                cmd_type, *args = current_command
+                
+                if cmd_type == 'stop':
+                    current_command = None
+                    continue
+                
+                if cmd_type == 'motor':
+                    name, direction = args
+                    pins = self.motors[name]
+                    
+                    # Set direction (reverse for Y1 and X)
+                    if name in ['Y1', 'X']:
+                        direction = not direction
+                    GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+                    
+                    # Step pulse
+                    GPIO.output(pins['STEP'], GPIO.HIGH)
+                    time.sleep(STEP_DELAY/2)
+                    GPIO.output(pins['STEP'], GPIO.LOW)
+                    time.sleep(STEP_DELAY/2)
+                    
+                elif cmd_type == 'y_axis':
+                    direction = args[0]
+                    
+                    # Set directions (Y1 is reversed)
+                    GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
+                    GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+                    
+                    # Step both motors
+                    GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
+                    GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
+                    time.sleep(STEP_DELAY/2)
+                    GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
+                    GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
+                    time.sleep(STEP_DELAY/2)
+                    
+            except queue.Empty:
+                time.sleep(0.001)  # Small delay when queue is empty
+            except Exception as e:
+                logger.error(f"Error in motor control loop: {e}")
+                current_command = None
 
     def _emergency_stop(self):
         """Emergency stop all motors."""
         try:
-            self._stop_jogging()
+            self.stop_event.set()
+            self.command_queue.put(('stop', None, None))
             for name, pins in self.motors.items():
                 GPIO.output(pins['STEP'], GPIO.LOW)
                 GPIO.output(pins['DIR'], GPIO.LOW)
@@ -266,7 +254,8 @@ class MotorTestUI:
     def on_closing(self):
         """Handle window closing."""
         try:
-            self._stop_jogging()
+            self.stop_event.set()
+            self.command_queue.put(('stop', None, None))
             for name, pins in self.motors.items():
                 GPIO.output(pins['STEP'], GPIO.LOW)
                 GPIO.output(pins['DIR'], GPIO.LOW)
