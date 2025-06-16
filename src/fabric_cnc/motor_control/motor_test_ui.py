@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Motor configuration
 PULSES_PER_REV = 3200
-STEP_DELAY = 0.00025  # 0.25ms between pulses = 2000 steps/sec
+STEP_DELAY = 0.001  # 1ms between pulses = 500 steps/sec (slower for safety)
 JOG_STEPS = 100  # Number of steps for each jog movement
 
 class MotorTestUI:
@@ -206,8 +206,8 @@ class MotorTestUI:
             logger.info(f"Starting continuous jog for {name} {'forward' if direction else 'reverse'}")
             pins = self.motors[name]
             
-            # Set direction (reverse for Y1 and X)
-            if name in ['Y1', 'X']:
+            # Set direction (reverse for Y1 only)
+            if name == 'Y1':
                 direction = not direction
             GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
             
