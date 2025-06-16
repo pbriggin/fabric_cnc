@@ -68,7 +68,8 @@ class MotorTestUI:
             'active': False,
             'motor': None,
             'direction': None,
-            'last_change': 0
+            'last_change': 0,
+            'lock': threading.Lock()  # Add lock for thread safety
         }
         
         # Start control threads
@@ -77,16 +78,16 @@ class MotorTestUI:
         self.key_thread = threading.Thread(target=self._key_poll_loop, daemon=True)
         self.key_thread.start()
         
-        # Initialize key state
+        # Initialize key state with timestamps
         self.key_state = {
-            'Left': False,
-            'Right': False,
-            'Up': False,
-            'Down': False,
-            'Prior': False,  # Page Up
-            'Next': False,   # Page Down
-            'Home': False,
-            'End': False
+            'Left': {'pressed': False, 'last_change': 0},
+            'Right': {'pressed': False, 'last_change': 0},
+            'Up': {'pressed': False, 'last_change': 0},
+            'Down': {'pressed': False, 'last_change': 0},
+            'Prior': {'pressed': False, 'last_change': 0},  # Page Up
+            'Next': {'pressed': False, 'last_change': 0},   # Page Down
+            'Home': {'pressed': False, 'last_change': 0},
+            'End': {'pressed': False, 'last_change': 0}
         }
         
         # Map keys to motor/direction
@@ -188,86 +189,76 @@ class MotorTestUI:
             self.root.bind(f'<KeyRelease-{key}>', lambda e, k=key: self._update_key_state(k, False))
 
     def _update_key_state(self, key, state):
-        """Update the state of a key."""
+        """Update the state of a key with debouncing."""
         if key in self.key_state:
-            self.key_state[key] = state
+            current_time = time.time()
+            # Only update if enough time has passed since last change
+            if current_time - self.key_state[key]['last_change'] > 0.05:  # 50ms debounce
+                self.key_state[key]['pressed'] = state
+                self.key_state[key]['last_change'] = current_time
 
     def _key_poll_loop(self):
         """Poll key states and update motor control."""
         while not self.stop_event.is_set():
             try:
                 # Check for active keys
-                active_keys = [k for k, v in self.key_state.items() if v]
+                active_keys = [k for k, v in self.key_state.items() if v['pressed']]
                 
-                if active_keys:
-                    # Get the first active key
-                    key = active_keys[0]
-                    motor, direction = self.key_map[key]
-                    
-                    # Start motor if not already running
-                    if not self.motor_state['active']:
-                        self.motor_state['active'] = True
-                        self.motor_state['motor'] = motor
-                        self.motor_state['direction'] = direction
-                        self.motor_state['last_change'] = time.time()
-                        logger.info(f"Starting continuous jog for {motor} {'forward' if direction else 'reverse'}")
-                else:
-                    # Stop motor if no keys are pressed
-                    if self.motor_state['active']:
-                        self.motor_state['active'] = False
-                        self.motor_state['motor'] = None
-                        self.motor_state['direction'] = None
-                        logger.info("Stopping jog")
+                with self.motor_state['lock']:
+                    if active_keys:
+                        # Get the first active key
+                        key = active_keys[0]
+                        motor, direction = self.key_map[key]
+                        
+                        # Only start if not already running or if it's the same motor
+                        if not self.motor_state['active'] or self.motor_state['motor'] == motor:
+                            self.motor_state['active'] = True
+                            self.motor_state['motor'] = motor
+                            self.motor_state['direction'] = direction
+                            self.motor_state['last_change'] = time.time()
+                            logger.info(f"Starting continuous jog for {motor} {'forward' if direction else 'reverse'}")
+                    else:
+                        # Stop motor if no keys are pressed
+                        if self.motor_state['active']:
+                            self.motor_state['active'] = False
+                            self.motor_state['motor'] = None
+                            self.motor_state['direction'] = None
+                            logger.info("Stopping jog")
                 
                 time.sleep(0.01)  # Poll every 10ms
                 
             except Exception as e:
                 logger.error(f"Error in key poll loop: {e}")
-                self.motor_state['active'] = False
-                self.motor_state['motor'] = None
-                self.motor_state['direction'] = None
+                with self.motor_state['lock']:
+                    self.motor_state['active'] = False
+                    self.motor_state['motor'] = None
+                    self.motor_state['direction'] = None
 
     def _motor_control_loop(self):
         """Main motor control loop."""
         while not self.stop_event.is_set():
             try:
-                if not self.motor_state['active']:
-                    time.sleep(0.001)  # Small delay when idle
-                    continue
-                
-                if self.motor_state['motor'] == 'y_axis':
-                    # Set directions (Y1 is reversed)
-                    GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if self.motor_state['direction'] else GPIO.HIGH)
-                    GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if self.motor_state['direction'] else GPIO.LOW)
-                    
-                    # Step both motors
-                    GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
-                    GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
-                    time.sleep(STEP_DELAY/2)
-                    GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
-                    GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
-                    time.sleep(STEP_DELAY/2)
-                else:
-                    pins = self.motors[self.motor_state['motor']]
-                    
-                    # Set direction (reverse for Y1 and X)
-                    if self.motor_state['motor'] in ['Y1', 'X']:
-                        direction = not self.motor_state['direction']
-                    else:
+                with self.motor_state['lock']:
+                    if self.motor_state['active']:
+                        motor = self.motor_state['motor']
                         direction = self.motor_state['direction']
-                    GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
-                    
-                    # Step pulse
-                    GPIO.output(pins['STEP'], GPIO.HIGH)
-                    time.sleep(STEP_DELAY/2)
-                    GPIO.output(pins['STEP'], GPIO.LOW)
-                    time.sleep(STEP_DELAY/2)
-                    
+                        
+                        if motor == 'y_axis':
+                            # Handle Y-axis (both motors)
+                            self._step_motor('Y1', direction)
+                            self._step_motor('Y2', direction)
+                        else:
+                            # Handle single motor
+                            self._step_motor(motor, direction)
+                
+                time.sleep(STEP_DELAY)
+                
             except Exception as e:
                 logger.error(f"Error in motor control loop: {e}")
-                self.motor_state['active'] = False
-                self.motor_state['motor'] = None
-                self.motor_state['direction'] = None
+                with self.motor_state['lock']:
+                    self.motor_state['active'] = False
+                    self.motor_state['motor'] = None
+                    self.motor_state['direction'] = None
 
     def _disable_all_motors(self):
         """Disable all motors and cleanup GPIO."""
