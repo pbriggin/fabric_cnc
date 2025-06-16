@@ -20,7 +20,7 @@ GPIO.setwarnings(False)
 
 # Motor configuration
 PULSES_PER_REV = 3200
-STEP_DELAY = 0.00025  # 0.25ms between pulses = 2000 steps/sec
+STEP_DELAY = 0.0001  # 0.1ms between pulses = 5000 steps/sec
 MM_PER_REV = 2  # 2mm per revolution (adjust based on your setup)
 
 class CircleDrawer:
@@ -179,8 +179,8 @@ def main():
     try:
         drawer = CircleDrawer()
         
-        # Draw a small circle
-        drawer.draw_circle(25, 25, 10)  # Center at (25, 25)mm, radius 10mm
+        # Draw a tiny circle
+        drawer.draw_circle(10, 10, 5)  # Center at (10, 10)mm, radius 5mm
         
     except KeyboardInterrupt:
         logger.info("Operation cancelled by user")
