@@ -190,4 +190,32 @@ DEFAULT_SPEED_MM_S = config.motion.default_speed_mm_s
 DEFAULT_ACCEL_MM_S2 = config.motion.default_accel_mm_s2
 LIFT_HEIGHT_MM = config.motion.lift_height_mm
 USE_SIMULATION_MODE = config.simulation_mode
-STEP_PULSE_DURATION = config.step_pulse_duration 
+STEP_PULSE_DURATION = config.step_pulse_duration
+
+# Motor configuration
+MOTOR_CONFIG = {
+    'X': {
+        'STEP': 5,
+        'DIR': 6,
+        'EN': 13,
+        'PULSES_PER_REV': 800,  # DIP switches set for 800 steps per revolution
+        'MM_PER_REV': 20,  # 20mm per revolution (adjusted based on observed movement)
+        'STEP_DELAY': 0.0005,  # 0.5ms between pulses = 1000 steps/sec
+    },
+    'Y1': {
+        'STEP': 10,
+        'DIR': 9,
+        'EN': 11,
+        'PULSES_PER_REV': 800,  # DIP switches set for 800 steps per revolution
+        'MM_PER_REV': 20,  # 20mm per revolution (adjusted based on observed movement)
+        'STEP_DELAY': 0.0005,  # 0.5ms between pulses = 1000 steps/sec
+    },
+    'Y2': {
+        'STEP': 17,
+        'DIR': 27,
+        'EN': 22,
+        'PULSES_PER_REV': 800,  # DIP switches set for 800 steps per revolution
+        'MM_PER_REV': 20,  # 20mm per revolution (adjusted based on observed movement)
+        'STEP_DELAY': 0.0005,  # 0.5ms between pulses = 1000 steps/sec
+    }
+} 
