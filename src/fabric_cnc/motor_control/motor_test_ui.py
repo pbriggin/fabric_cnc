@@ -204,11 +204,10 @@ class MotorTestUI:
                         direction = not direction
                     GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
                     
-                    # Step pulse
+                    # Step pulse - simplified timing
                     GPIO.output(pins['STEP'], GPIO.HIGH)
-                    time.sleep(STEP_DELAY/2)
+                    time.sleep(STEP_DELAY)
                     GPIO.output(pins['STEP'], GPIO.LOW)
-                    time.sleep(STEP_DELAY/2)
                     
                 elif current_command[0] == 'y_axis':
                     direction = current_command[1]
@@ -217,13 +216,12 @@ class MotorTestUI:
                     GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
                     GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if direction else GPIO.LOW)
                     
-                    # Step both motors
+                    # Step both motors - simplified timing
                     GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
                     GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
-                    time.sleep(STEP_DELAY/2)
+                    time.sleep(STEP_DELAY)
                     GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
                     GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
-                    time.sleep(STEP_DELAY/2)
                     
             except Exception as e:
                 logger.error(f"Error in motor control loop: {e}")
