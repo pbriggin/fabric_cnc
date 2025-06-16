@@ -271,7 +271,34 @@ class MotorTestUI:
     def _emergency_stop(self):
         """Emergency stop all motors."""
         try:
-            self._disable_all_motors()
+            # Stop the motor control thread
+            self.stop_event.set()
+            self.command_queue.put(('stop', None, None))
+            
+            # Wait for motor thread to stop
+            if self.motor_thread.is_alive():
+                self.motor_thread.join(timeout=1.0)
+            
+            # Set GPIO mode before cleanup
+            GPIO.setmode(GPIO.BCM)
+            
+            # Disable all motors
+            for name, pins in self.motors.items():
+                GPIO.output(pins['STEP'], GPIO.LOW)
+                GPIO.output(pins['DIR'], GPIO.LOW)
+                GPIO.output(pins['EN'], GPIO.HIGH)  # Disable motor
+            
+            # Double-check Y motors
+            GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
+            GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW)
+            GPIO.output(self.motors['Y1']['EN'], GPIO.HIGH)
+            GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
+            GPIO.output(self.motors['Y2']['DIR'], GPIO.LOW)
+            GPIO.output(self.motors['Y2']['EN'], GPIO.HIGH)
+            
+            # Don't cleanup GPIO to keep pins in disabled state
+            # GPIO.cleanup()
+            
             logger.warning("Emergency stop activated")
             messagebox.showwarning(
                 "Emergency Stop",
