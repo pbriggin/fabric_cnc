@@ -181,15 +181,15 @@ class MotorTestUI:
             current_time = time.time()
             motor, direction = self.key_map[event.keysym]
             
-            # Check if enough time has passed since last event
-            if event.keysym in self.last_event_time:
-                time_since_last = current_time - self.last_event_time[event.keysym]
-                if time_since_last < self.event_delay:
-                    return
-            
-            self.last_event_time[event.keysym] = current_time
-            
             if event.type == '2':  # KeyPress
+                # Only filter key press events
+                if event.keysym in self.last_event_time:
+                    time_since_last = current_time - self.last_event_time[event.keysym]
+                    if time_since_last < self.event_delay:
+                        return
+                
+                self.last_event_time[event.keysym] = current_time
+                
                 if event.keysym not in self.key_state:
                     self.key_state[event.keysym] = True
                     if not self.motor_state['active']:
@@ -200,6 +200,7 @@ class MotorTestUI:
                         logger.info(f"Starting continuous jog for {motor} {'forward' if direction else 'reverse'}")
             
             elif event.type == '3':  # KeyRelease
+                # Always process key release events
                 if event.keysym in self.key_state:
                     del self.key_state[event.keysym]
                     if not self.key_state and self.motor_state['active'] and self.motor_state['motor'] == motor:
