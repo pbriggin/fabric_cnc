@@ -206,8 +206,8 @@ class MotorTestUI:
             logger.info(f"Starting continuous jog for {name} {'forward' if direction else 'reverse'}")
             pins = self.motors[name]
             
-            # Set direction (reverse for Y1 only)
-            if name == 'Y1':
+            # Set direction (reverse for Y1 and X)
+            if name in ['Y1', 'X']:
                 direction = not direction
             GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
             
