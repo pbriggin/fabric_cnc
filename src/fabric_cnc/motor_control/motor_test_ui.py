@@ -21,6 +21,12 @@ PULSES_PER_REV = 3200
 STEP_DELAY = 0.00025  # 0.25ms between pulses = 2000 steps/sec
 JOG_STEPS = 100  # Number of steps for each jog movement
 
+def busy_wait(duration):
+    """Busy wait for precise timing."""
+    start = time.perf_counter()
+    while time.perf_counter() - start < duration:
+        pass
+
 class MotorTestUI:
     """Simple UI for testing individual motors."""
     
@@ -207,13 +213,13 @@ class MotorTestUI:
                 direction = not direction
             GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
             
-            # Step sequence
+            # Step sequence with precise timing
             while not self.stop_event.is_set():
                 # Single step with precise timing
                 GPIO.output(pins['STEP'], GPIO.HIGH)
-                time.sleep(STEP_DELAY/2)  # Half the delay for high
+                busy_wait(STEP_DELAY/2)  # Half the delay for high
                 GPIO.output(pins['STEP'], GPIO.LOW)
-                time.sleep(STEP_DELAY/2)  # Half the delay for low
+                busy_wait(STEP_DELAY/2)  # Half the delay for low
                 
         except Exception as e:
             logger.error(f"Error jogging motor: {e}")
@@ -230,15 +236,15 @@ class MotorTestUI:
             GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
             GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if direction else GPIO.LOW)
             
-            # Step sequence
+            # Step sequence with precise timing
             while not self.stop_event.is_set():
                 # Step both motors with precise timing
                 GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
                 GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
-                time.sleep(STEP_DELAY/2)  # Half the delay for high
+                busy_wait(STEP_DELAY/2)  # Half the delay for high
                 GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
                 GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
-                time.sleep(STEP_DELAY/2)  # Half the delay for low
+                busy_wait(STEP_DELAY/2)  # Half the delay for low
                 
         except Exception as e:
             logger.error(f"Error jogging Y-axis: {e}")
@@ -248,19 +254,34 @@ class MotorTestUI:
 
     def _emergency_stop(self):
         """Emergency stop all motors."""
-        self._stop_jogging()
-        for name, pins in self.motors.items():
-            GPIO.output(pins['STEP'], GPIO.LOW)
-            GPIO.output(pins['DIR'], GPIO.LOW)
-        messagebox.showinfo("Emergency Stop", "All motors stopped")
+        try:
+            self._stop_jogging()
+            for name, pins in self.motors.items():
+                GPIO.output(pins['STEP'], GPIO.LOW)
+                GPIO.output(pins['DIR'], GPIO.LOW)
+                GPIO.output(pins['EN'], GPIO.HIGH)  # Disable motor
+            logger.warning("Emergency stop activated")
+            messagebox.showwarning(
+                "Emergency Stop",
+                "All motors have been stopped and disabled"
+            )
+        except Exception as e:
+            logger.error(f"Error during emergency stop: {e}")
+            messagebox.showerror("Motor Error", str(e))
 
     def on_closing(self):
         """Handle window closing."""
-        self._stop_jogging()
-        for name, pins in self.motors.items():
-            GPIO.output(pins['STEP'], GPIO.LOW)
-            GPIO.output(pins['DIR'], GPIO.LOW)
-            GPIO.output(pins['EN'], GPIO.HIGH)  # Disable motor
+        try:
+            self._stop_jogging()
+            for name, pins in self.motors.items():
+                GPIO.output(pins['STEP'], GPIO.LOW)
+                GPIO.output(pins['DIR'], GPIO.LOW)
+                GPIO.output(pins['EN'], GPIO.HIGH)  # Disable motor
+            GPIO.cleanup()
+            logger.info("Application closed")
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+            messagebox.showerror("Error", str(e))
         self.root.destroy()
 
 def main():
