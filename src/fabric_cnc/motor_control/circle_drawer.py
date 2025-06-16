@@ -20,7 +20,8 @@ GPIO.setwarnings(False)
 
 # Motor configuration
 PULSES_PER_REV = 3200
-STEP_DELAY = 0.0001  # 0.1ms between pulses = 5000 steps/sec
+MICROSTEPS = 8  # Divide each step into 8 microsteps
+STEP_DELAY = 0.0005  # 0.5ms between pulses = 1000 steps/sec
 MM_PER_REV = 2  # 2mm per revolution (adjust based on your setup)
 
 class CircleDrawer:
@@ -101,16 +102,36 @@ class CircleDrawer:
         self.current_position['Y'] += 1 if direction else -1
 
     def _move_to_position(self, target_x, target_y):
-        """Move to target position in steps."""
-        while not self.stop_event.is_set():
-            # Calculate remaining steps
-            dx = target_x - self.current_position['X']
-            dy = target_y - self.current_position['Y']
+        """Move to target position in steps with acceleration/deceleration."""
+        # Calculate total distance
+        dx = target_x - self.current_position['X']
+        dy = target_y - self.current_position['Y']
+        total_steps = max(abs(dx), abs(dy))
+        
+        if total_steps == 0:
+            return
             
-            # If we're close enough, stop
-            if abs(dx) < 1 and abs(dy) < 1:
+        # Acceleration parameters
+        accel_steps = min(total_steps // 4, 50)  # Accelerate for first 1/4 of movement or 50 steps
+        decel_steps = min(total_steps // 4, 50)  # Decelerate for last 1/4 of movement or 50 steps
+        cruise_steps = total_steps - accel_steps - decel_steps
+        
+        # Movement loop with acceleration/deceleration
+        for i in range(total_steps):
+            if self.stop_event.is_set():
                 break
-            
+                
+            # Calculate current delay based on position in movement
+            if i < accel_steps:
+                # Accelerate
+                delay = STEP_DELAY * (1 + (accel_steps - i) / accel_steps)
+            elif i >= total_steps - decel_steps:
+                # Decelerate
+                delay = STEP_DELAY * (1 + (i - (total_steps - decel_steps)) / decel_steps)
+            else:
+                # Cruise at constant speed
+                delay = STEP_DELAY
+                
             # Move X
             if abs(dx) > 0:
                 self._step_motor('X', dx > 0)
@@ -119,7 +140,7 @@ class CircleDrawer:
             if abs(dy) > 0:
                 self._step_y_axis(dy > 0)
             
-            time.sleep(STEP_DELAY)
+            time.sleep(delay)
 
     def draw_circle(self, center_x, center_y, radius, steps=360):
         """Draw a circle with given center, radius, and number of steps."""
