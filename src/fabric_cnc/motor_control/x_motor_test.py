@@ -19,7 +19,7 @@ GPIO.setwarnings(False)
 # Motor configuration
 PULSES_PER_REV = 800  # DIP switches set for 800 steps per revolution
 STEP_DELAY = 0.0005  # 0.5ms between pulses = 1000 steps/sec
-MM_PER_REV = 8  # 8mm per revolution (adjust based on your setup)
+MM_PER_REV = 40  # 40mm per revolution (20 teeth × 2mm GT2 pitch)
 
 class XMotorTest:
     """Test X motor movement."""
