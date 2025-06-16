@@ -179,8 +179,8 @@ def main():
     try:
         drawer = CircleDrawer()
         
-        # Draw a smaller circle first for testing
-        drawer.draw_circle(50, 50, 25)  # Center at (50, 50)mm, radius 25mm
+        # Draw a small circle
+        drawer.draw_circle(25, 25, 10)  # Center at (25, 25)mm, radius 10mm
         
     except KeyboardInterrupt:
         logger.info("Operation cancelled by user")
