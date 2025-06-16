@@ -17,6 +17,9 @@ import queue
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Disable GPIO warnings
+GPIO.setwarnings(False)
+
 # Motor configuration
 PULSES_PER_REV = 3200
 STEP_DELAY = 0.00025  # 0.25ms between pulses = 2000 steps/sec
@@ -199,9 +202,6 @@ class MotorTestUI:
 
     def _motor_control_loop(self):
         """Main motor control loop."""
-        self.current_motor = None
-        self.current_direction = None
-        
         while not self.stop_event.is_set():
             try:
                 if self.current_motor is None:
