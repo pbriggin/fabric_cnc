@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 # Motor configuration
 PULSES_PER_REV = 3200
 STEP_DELAY = 0.00025  # 0.25ms between pulses = 2000 steps/sec
+STEP_PULSE_WIDTH = 0.0001  # 0.1ms pulse width
+STEP_CYCLE_DELAY = 0.0001  # 0.1ms delay after each step cycle
 JOG_STEPS = 100  # Number of steps for each jog movement
 
 class MotorTestUI:
@@ -210,13 +212,20 @@ class MotorTestUI:
             if name in ['Y1', 'X']:
                 direction = not direction
             GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+            time.sleep(0.001)  # Small delay after direction change
             
             # Step sequence
             while self.jogging:
+                # Step pulse
                 GPIO.output(pins['STEP'], GPIO.HIGH)
-                time.sleep(STEP_DELAY)
+                time.sleep(STEP_PULSE_WIDTH)
                 GPIO.output(pins['STEP'], GPIO.LOW)
-                time.sleep(STEP_DELAY)
+                
+                # Wait for next step
+                time.sleep(STEP_DELAY - STEP_PULSE_WIDTH)
+                
+                # Small delay after each step cycle
+                time.sleep(STEP_CYCLE_DELAY)
                 
         except Exception as e:
             logger.error(f"Error jogging motor: {e}")
@@ -232,16 +241,22 @@ class MotorTestUI:
             # Set directions (Y1 is reversed)
             GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
             GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+            time.sleep(0.001)  # Small delay after direction change
             
             # Step sequence
             while self.jogging:
                 # Step both motors
                 GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
                 GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
-                time.sleep(STEP_DELAY)
+                time.sleep(STEP_PULSE_WIDTH)
                 GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
                 GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
-                time.sleep(STEP_DELAY)
+                
+                # Wait for next step
+                time.sleep(STEP_DELAY - STEP_PULSE_WIDTH)
+                
+                # Small delay after each step cycle
+                time.sleep(STEP_CYCLE_DELAY)
                 
         except Exception as e:
             logger.error(f"Error jogging Y-axis: {e}")
