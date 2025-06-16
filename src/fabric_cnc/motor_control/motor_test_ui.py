@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Motor configuration
 PULSES_PER_REV = 3200
-STEP_DELAY = 0.001  # 1ms between pulses = 500 steps/sec (slower for safety)
+STEP_DELAY = 0.00025  # 0.25ms between pulses = 2000 steps/sec
 JOG_STEPS = 100  # Number of steps for each jog movement
 
 class MotorTestUI:
