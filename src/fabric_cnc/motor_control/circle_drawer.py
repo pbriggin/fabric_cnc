@@ -86,8 +86,8 @@ class CircleDrawer:
     def _step_y_axis(self, direction):
         """Step both Y motors together to maintain sync."""
         # Set directions (Y1 is reversed)
-        GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
-        GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+        GPIO.output(self.motors['Y1']['DIR'], GPIO.HIGH if direction else GPIO.LOW)  # Y1 is reversed
+        GPIO.output(self.motors['Y2']['DIR'], GPIO.LOW if direction else GPIO.HIGH)  # Y2 is normal
         
         # Step both motors together
         GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
