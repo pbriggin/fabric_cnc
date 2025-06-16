@@ -236,12 +236,20 @@ class MotorTestUI:
     def _emergency_stop(self):
         """Emergency stop all motors."""
         try:
+            # Stop the motor control thread
             self.stop_event.set()
             self.command_queue.put(('stop', None, None))
+            
+            # Disable all motors
             for name, pins in self.motors.items():
                 GPIO.output(pins['STEP'], GPIO.LOW)
                 GPIO.output(pins['DIR'], GPIO.LOW)
                 GPIO.output(pins['EN'], GPIO.HIGH)  # Disable motor
+            
+            # Wait for motor thread to stop
+            if self.motor_thread.is_alive():
+                self.motor_thread.join(timeout=1.0)
+            
             logger.warning("Emergency stop activated")
             messagebox.showwarning(
                 "Emergency Stop",
@@ -254,18 +262,28 @@ class MotorTestUI:
     def on_closing(self):
         """Handle window closing."""
         try:
+            # Stop the motor control thread
             self.stop_event.set()
             self.command_queue.put(('stop', None, None))
+            
+            # Disable all motors
             for name, pins in self.motors.items():
                 GPIO.output(pins['STEP'], GPIO.LOW)
                 GPIO.output(pins['DIR'], GPIO.LOW)
                 GPIO.output(pins['EN'], GPIO.HIGH)  # Disable motor
+            
+            # Wait for motor thread to stop
+            if self.motor_thread.is_alive():
+                self.motor_thread.join(timeout=1.0)
+            
+            # Cleanup GPIO
             GPIO.cleanup()
             logger.info("Application closed")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
             messagebox.showerror("Error", str(e))
-        self.root.destroy()
+        finally:
+            self.root.destroy()
 
 def main():
     """Main entry point."""
