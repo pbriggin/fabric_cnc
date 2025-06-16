@@ -11,7 +11,6 @@ from tkinter import ttk, messagebox
 import time
 import RPi.GPIO as GPIO
 import threading
-import queue
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -71,11 +70,38 @@ class MotorTestUI:
             'direction': None,
             'last_change': 0
         }
-        self.key_state = {}  # Track key states
+        
+        # Start control threads
         self.motor_thread = threading.Thread(target=self._motor_control_loop, daemon=True)
         self.motor_thread.start()
+        self.key_thread = threading.Thread(target=self._key_poll_loop, daemon=True)
+        self.key_thread.start()
         
-        # Bind arrow keys
+        # Initialize key state
+        self.key_state = {
+            'Left': False,
+            'Right': False,
+            'Up': False,
+            'Down': False,
+            'Prior': False,  # Page Up
+            'Next': False,   # Page Down
+            'Home': False,
+            'End': False
+        }
+        
+        # Map keys to motor/direction
+        self.key_map = {
+            'Left': ('X', False),
+            'Right': ('X', True),
+            'Up': ('y_axis', True),
+            'Down': ('y_axis', False),
+            'Prior': ('Z_LIFT', True),  # Page Up
+            'Next': ('Z_LIFT', False),  # Page Down
+            'Home': ('Z_ROTATE', True),
+            'End': ('Z_ROTATE', False)
+        }
+        
+        # Bind keys
         self._bind_keys()
         
         logger.info("Motor test UI initialized")
@@ -101,44 +127,44 @@ class MotorTestUI:
         # Create arrow buttons in a grid
         up_btn = ttk.Button(frame, text="↑")
         up_btn.grid(row=0, column=1, padx=2, pady=2)
-        up_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Up'))
-        up_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Up'))
+        up_btn.bind('<ButtonPress>', lambda e: self._update_key_state('Up', True))
+        up_btn.bind('<ButtonRelease>', lambda e: self._update_key_state('Up', False))
         
         down_btn = ttk.Button(frame, text="↓")
         down_btn.grid(row=2, column=1, padx=2, pady=2)
-        down_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Down'))
-        down_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Down'))
+        down_btn.bind('<ButtonPress>', lambda e: self._update_key_state('Down', True))
+        down_btn.bind('<ButtonRelease>', lambda e: self._update_key_state('Down', False))
         
         left_btn = ttk.Button(frame, text="←")
         left_btn.grid(row=1, column=0, padx=2, pady=2)
-        left_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Left'))
-        left_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Left'))
+        left_btn.bind('<ButtonPress>', lambda e: self._update_key_state('Left', True))
+        left_btn.bind('<ButtonRelease>', lambda e: self._update_key_state('Left', False))
         
         right_btn = ttk.Button(frame, text="→")
         right_btn.grid(row=1, column=2, padx=2, pady=2)
-        right_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Right'))
-        right_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Right'))
+        right_btn.bind('<ButtonPress>', lambda e: self._update_key_state('Right', True))
+        right_btn.bind('<ButtonRelease>', lambda e: self._update_key_state('Right', False))
         
         # Z-axis controls
         pgup_btn = ttk.Button(frame, text="PgUp")
         pgup_btn.grid(row=0, column=3, padx=2, pady=2)
-        pgup_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Prior'))
-        pgup_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Prior'))
+        pgup_btn.bind('<ButtonPress>', lambda e: self._update_key_state('Prior', True))
+        pgup_btn.bind('<ButtonRelease>', lambda e: self._update_key_state('Prior', False))
         
         pgdn_btn = ttk.Button(frame, text="PgDn")
         pgdn_btn.grid(row=2, column=3, padx=2, pady=2)
-        pgdn_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Next'))
-        pgdn_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Next'))
+        pgdn_btn.bind('<ButtonPress>', lambda e: self._update_key_state('Next', True))
+        pgdn_btn.bind('<ButtonRelease>', lambda e: self._update_key_state('Next', False))
         
         home_btn = ttk.Button(frame, text="Home")
         home_btn.grid(row=0, column=4, padx=2, pady=2)
-        home_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Home'))
-        home_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Home'))
+        home_btn.bind('<ButtonPress>', lambda e: self._update_key_state('Home', True))
+        home_btn.bind('<ButtonRelease>', lambda e: self._update_key_state('Home', False))
         
         end_btn = ttk.Button(frame, text="End")
         end_btn.grid(row=2, column=4, padx=2, pady=2)
-        end_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('End'))
-        end_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('End'))
+        end_btn.bind('<ButtonPress>', lambda e: self._update_key_state('End', True))
+        end_btn.bind('<ButtonRelease>', lambda e: self._update_key_state('End', False))
         
         # Add key binding hints
         ttk.Label(frame, text="Use arrow keys to jog X/Y").grid(row=3, column=0, columnspan=3, pady=5)
@@ -157,47 +183,49 @@ class MotorTestUI:
 
     def _bind_keys(self):
         """Bind arrow keys for jogging."""
-        # Map keys to motor/direction
-        self.key_map = {
-            'Left': ('X', False),
-            'Right': ('X', True),
-            'Up': ('y_axis', True),
-            'Down': ('y_axis', False),
-            'Prior': ('Z_LIFT', True),  # Page Up
-            'Next': ('Z_LIFT', False),  # Page Down
-            'Home': ('Z_ROTATE', True),
-            'End': ('Z_ROTATE', False)
-        }
-        
-        # Bind all key events
         for key in self.key_map:
-            self.root.bind(f'<{key}>', lambda e, k=key: self._handle_key_press(k))
-            self.root.bind(f'<KeyRelease-{key}>', lambda e, k=key: self._handle_key_release(k))
+            self.root.bind(f'<{key}>', lambda e, k=key: self._update_key_state(k, True))
+            self.root.bind(f'<KeyRelease-{key}>', lambda e, k=key: self._update_key_state(k, False))
 
-    def _handle_key_press(self, key):
-        """Handle key press events."""
-        if key in self.key_map and key not in self.key_state:
-            motor, direction = self.key_map[key]
-            self.key_state[key] = True
-            
-            if not self.motor_state['active']:
-                self.motor_state['active'] = True
-                self.motor_state['motor'] = motor
-                self.motor_state['direction'] = direction
-                self.motor_state['last_change'] = time.time()
-                logger.info(f"Starting continuous jog for {motor} {'forward' if direction else 'reverse'}")
+    def _update_key_state(self, key, state):
+        """Update the state of a key."""
+        if key in self.key_state:
+            self.key_state[key] = state
 
-    def _handle_key_release(self, key):
-        """Handle key release events."""
-        if key in self.key_map and key in self.key_state:
-            motor, _ = self.key_map[key]
-            del self.key_state[key]
-            
-            if not self.key_state and self.motor_state['active'] and self.motor_state['motor'] == motor:
+    def _key_poll_loop(self):
+        """Poll key states and update motor control."""
+        while not self.stop_event.is_set():
+            try:
+                # Check for active keys
+                active_keys = [k for k, v in self.key_state.items() if v]
+                
+                if active_keys:
+                    # Get the first active key
+                    key = active_keys[0]
+                    motor, direction = self.key_map[key]
+                    
+                    # Start motor if not already running
+                    if not self.motor_state['active']:
+                        self.motor_state['active'] = True
+                        self.motor_state['motor'] = motor
+                        self.motor_state['direction'] = direction
+                        self.motor_state['last_change'] = time.time()
+                        logger.info(f"Starting continuous jog for {motor} {'forward' if direction else 'reverse'}")
+                else:
+                    # Stop motor if no keys are pressed
+                    if self.motor_state['active']:
+                        self.motor_state['active'] = False
+                        self.motor_state['motor'] = None
+                        self.motor_state['direction'] = None
+                        logger.info("Stopping jog")
+                
+                time.sleep(0.01)  # Poll every 10ms
+                
+            except Exception as e:
+                logger.error(f"Error in key poll loop: {e}")
                 self.motor_state['active'] = False
                 self.motor_state['motor'] = None
                 self.motor_state['direction'] = None
-                logger.info("Stopping jog")
 
     def _motor_control_loop(self):
         """Main motor control loop."""
