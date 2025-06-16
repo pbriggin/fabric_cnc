@@ -183,22 +183,20 @@ class MotorTestUI:
         
         while not self.stop_event.is_set():
             try:
-                # Get next command from queue
-                if not self.command_queue.empty():
+                # Get next command from queue without blocking
+                try:
                     current_command = self.command_queue.get_nowait()
+                except queue.Empty:
+                    if current_command is None:
+                        time.sleep(0.001)  # Small delay when idle
+                        continue
                 
-                if current_command is None:
-                    time.sleep(0.001)  # Small delay when idle
-                    continue
-                
-                cmd_type, *args = current_command
-                
-                if cmd_type == 'stop':
+                if current_command[0] == 'stop':
                     current_command = None
                     continue
                 
-                if cmd_type == 'motor':
-                    name, direction = args
+                if current_command[0] == 'motor':
+                    name, direction = current_command[1:]
                     pins = self.motors[name]
                     
                     # Set direction (reverse for Y1 and X)
@@ -212,8 +210,8 @@ class MotorTestUI:
                     GPIO.output(pins['STEP'], GPIO.LOW)
                     time.sleep(STEP_DELAY/2)
                     
-                elif cmd_type == 'y_axis':
-                    direction = args[0]
+                elif current_command[0] == 'y_axis':
+                    direction = current_command[1]
                     
                     # Set directions (Y1 is reversed)
                     GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
@@ -227,8 +225,6 @@ class MotorTestUI:
                     GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
                     time.sleep(STEP_DELAY/2)
                     
-            except queue.Empty:
-                time.sleep(0.001)  # Small delay when queue is empty
             except Exception as e:
                 logger.error(f"Error in motor control loop: {e}")
                 current_command = None
