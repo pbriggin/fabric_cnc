@@ -284,7 +284,7 @@ class MotorTestUI:
     def on_closing(self):
         """Handle window closing."""
         try:
-            self._disable_all_motors()
+            self._emergency_stop()
             logger.info("Application closed")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
@@ -299,8 +299,8 @@ def main():
     try:
         root.mainloop()
     finally:
-        # Ensure motors are disabled even if mainloop exits unexpectedly
-        app._disable_all_motors()
+        # Use emergency stop to ensure motors are disabled
+        app._emergency_stop()
 
 if __name__ == "__main__":
     main() 
