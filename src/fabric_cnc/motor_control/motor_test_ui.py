@@ -233,42 +233,8 @@ class MotorTestUI:
                 logger.error(f"Error in motor control loop: {e}")
                 current_command = None
 
-    def _emergency_stop(self):
-        """Emergency stop all motors."""
-        try:
-            # Stop the motor control thread
-            self.stop_event.set()
-            self.command_queue.put(('stop', None, None))
-            
-            # Disable all motors
-            for name, pins in self.motors.items():
-                GPIO.output(pins['STEP'], GPIO.LOW)
-                GPIO.output(pins['DIR'], GPIO.LOW)
-                GPIO.output(pins['EN'], GPIO.HIGH)  # Disable motor
-            
-            # Double-check Y motors
-            GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
-            GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW)
-            GPIO.output(self.motors['Y1']['EN'], GPIO.HIGH)
-            GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
-            GPIO.output(self.motors['Y2']['DIR'], GPIO.LOW)
-            GPIO.output(self.motors['Y2']['EN'], GPIO.HIGH)
-            
-            # Wait for motor thread to stop
-            if self.motor_thread.is_alive():
-                self.motor_thread.join(timeout=1.0)
-            
-            logger.warning("Emergency stop activated")
-            messagebox.showwarning(
-                "Emergency Stop",
-                "All motors have been stopped and disabled"
-            )
-        except Exception as e:
-            logger.error(f"Error during emergency stop: {e}")
-            messagebox.showerror("Motor Error", str(e))
-
-    def on_closing(self):
-        """Handle window closing."""
+    def _disable_all_motors(self):
+        """Disable all motors and cleanup GPIO."""
         try:
             # Stop the motor control thread
             self.stop_event.set()
@@ -294,6 +260,28 @@ class MotorTestUI:
             
             # Cleanup GPIO
             GPIO.cleanup()
+            logger.info("All motors disabled and GPIO cleaned up")
+        except Exception as e:
+            logger.error(f"Error during motor cleanup: {e}")
+            raise
+
+    def _emergency_stop(self):
+        """Emergency stop all motors."""
+        try:
+            self._disable_all_motors()
+            logger.warning("Emergency stop activated")
+            messagebox.showwarning(
+                "Emergency Stop",
+                "All motors have been stopped and disabled"
+            )
+        except Exception as e:
+            logger.error(f"Error during emergency stop: {e}")
+            messagebox.showerror("Motor Error", str(e))
+
+    def on_closing(self):
+        """Handle window closing."""
+        try:
+            self._disable_all_motors()
             logger.info("Application closed")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
@@ -305,7 +293,11 @@ def main():
     """Main entry point."""
     root = tk.Tk()
     app = MotorTestUI(root)
-    root.mainloop()
+    try:
+        root.mainloop()
+    finally:
+        # Ensure motors are disabled even if mainloop exits unexpectedly
+        app._disable_all_motors()
 
 if __name__ == "__main__":
     main() 
