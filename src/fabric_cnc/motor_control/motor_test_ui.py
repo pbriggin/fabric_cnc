@@ -72,8 +72,6 @@ class MotorTestUI:
             'last_change': 0
         }
         self.key_state = {}  # Track key states
-        self.last_event_time = {}  # Track last event time for each key
-        self.event_delay = 0.5  # Minimum time between events in seconds
         self.motor_thread = threading.Thread(target=self._motor_control_loop, daemon=True)
         self.motor_thread.start()
         
@@ -103,44 +101,44 @@ class MotorTestUI:
         # Create arrow buttons in a grid
         up_btn = ttk.Button(frame, text="↑")
         up_btn.grid(row=0, column=1, padx=2, pady=2)
-        up_btn.bind('<ButtonPress>', lambda e: self._handle_key_event(tk.Event(type='2', keysym='Up')))
-        up_btn.bind('<ButtonRelease>', lambda e: self._handle_key_event(tk.Event(type='3', keysym='Up')))
+        up_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Up'))
+        up_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Up'))
         
         down_btn = ttk.Button(frame, text="↓")
         down_btn.grid(row=2, column=1, padx=2, pady=2)
-        down_btn.bind('<ButtonPress>', lambda e: self._handle_key_event(tk.Event(type='2', keysym='Down')))
-        down_btn.bind('<ButtonRelease>', lambda e: self._handle_key_event(tk.Event(type='3', keysym='Down')))
+        down_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Down'))
+        down_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Down'))
         
         left_btn = ttk.Button(frame, text="←")
         left_btn.grid(row=1, column=0, padx=2, pady=2)
-        left_btn.bind('<ButtonPress>', lambda e: self._handle_key_event(tk.Event(type='2', keysym='Left')))
-        left_btn.bind('<ButtonRelease>', lambda e: self._handle_key_event(tk.Event(type='3', keysym='Left')))
+        left_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Left'))
+        left_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Left'))
         
         right_btn = ttk.Button(frame, text="→")
         right_btn.grid(row=1, column=2, padx=2, pady=2)
-        right_btn.bind('<ButtonPress>', lambda e: self._handle_key_event(tk.Event(type='2', keysym='Right')))
-        right_btn.bind('<ButtonRelease>', lambda e: self._handle_key_event(tk.Event(type='3', keysym='Right')))
+        right_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Right'))
+        right_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Right'))
         
         # Z-axis controls
         pgup_btn = ttk.Button(frame, text="PgUp")
         pgup_btn.grid(row=0, column=3, padx=2, pady=2)
-        pgup_btn.bind('<ButtonPress>', lambda e: self._handle_key_event(tk.Event(type='2', keysym='Prior')))
-        pgup_btn.bind('<ButtonRelease>', lambda e: self._handle_key_event(tk.Event(type='3', keysym='Prior')))
+        pgup_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Prior'))
+        pgup_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Prior'))
         
         pgdn_btn = ttk.Button(frame, text="PgDn")
         pgdn_btn.grid(row=2, column=3, padx=2, pady=2)
-        pgdn_btn.bind('<ButtonPress>', lambda e: self._handle_key_event(tk.Event(type='2', keysym='Next')))
-        pgdn_btn.bind('<ButtonRelease>', lambda e: self._handle_key_event(tk.Event(type='3', keysym='Next')))
+        pgdn_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Next'))
+        pgdn_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Next'))
         
         home_btn = ttk.Button(frame, text="Home")
         home_btn.grid(row=0, column=4, padx=2, pady=2)
-        home_btn.bind('<ButtonPress>', lambda e: self._handle_key_event(tk.Event(type='2', keysym='Home')))
-        home_btn.bind('<ButtonRelease>', lambda e: self._handle_key_event(tk.Event(type='3', keysym='Home')))
+        home_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Home'))
+        home_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Home'))
         
         end_btn = ttk.Button(frame, text="End")
         end_btn.grid(row=2, column=4, padx=2, pady=2)
-        end_btn.bind('<ButtonPress>', lambda e: self._handle_key_event(tk.Event(type='2', keysym='End')))
-        end_btn.bind('<ButtonRelease>', lambda e: self._handle_key_event(tk.Event(type='3', keysym='End')))
+        end_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('End'))
+        end_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('End'))
         
         # Add key binding hints
         ttk.Label(frame, text="Use arrow keys to jog X/Y").grid(row=3, column=0, columnspan=3, pady=5)
@@ -172,42 +170,34 @@ class MotorTestUI:
         }
         
         # Bind all key events
-        self.root.bind_all('<Key>', self._handle_key_event)
-        self.root.bind_all('<KeyRelease>', self._handle_key_event)
+        for key in self.key_map:
+            self.root.bind(f'<{key}>', lambda e, k=key: self._handle_key_press(k))
+            self.root.bind(f'<KeyRelease-{key}>', lambda e, k=key: self._handle_key_release(k))
 
-    def _handle_key_event(self, event):
-        """Handle all key events."""
-        if event.keysym in self.key_map:
-            current_time = time.time()
-            motor, direction = self.key_map[event.keysym]
+    def _handle_key_press(self, key):
+        """Handle key press events."""
+        if key in self.key_map and key not in self.key_state:
+            motor, direction = self.key_map[key]
+            self.key_state[key] = True
             
-            if event.type == '2':  # KeyPress
-                # Only filter key press events
-                if event.keysym in self.last_event_time:
-                    time_since_last = current_time - self.last_event_time[event.keysym]
-                    if time_since_last < self.event_delay:
-                        return
-                
-                self.last_event_time[event.keysym] = current_time
-                
-                if event.keysym not in self.key_state:
-                    self.key_state[event.keysym] = True
-                    if not self.motor_state['active']:
-                        self.motor_state['active'] = True
-                        self.motor_state['motor'] = motor
-                        self.motor_state['direction'] = direction
-                        self.motor_state['last_change'] = current_time
-                        logger.info(f"Starting continuous jog for {motor} {'forward' if direction else 'reverse'}")
+            if not self.motor_state['active']:
+                self.motor_state['active'] = True
+                self.motor_state['motor'] = motor
+                self.motor_state['direction'] = direction
+                self.motor_state['last_change'] = time.time()
+                logger.info(f"Starting continuous jog for {motor} {'forward' if direction else 'reverse'}")
+
+    def _handle_key_release(self, key):
+        """Handle key release events."""
+        if key in self.key_map and key in self.key_state:
+            motor, _ = self.key_map[key]
+            del self.key_state[key]
             
-            elif event.type == '3':  # KeyRelease
-                # Always process key release events
-                if event.keysym in self.key_state:
-                    del self.key_state[event.keysym]
-                    if not self.key_state and self.motor_state['active'] and self.motor_state['motor'] == motor:
-                        self.motor_state['active'] = False
-                        self.motor_state['motor'] = None
-                        self.motor_state['direction'] = None
-                        logger.info("Stopping jog")
+            if not self.key_state and self.motor_state['active'] and self.motor_state['motor'] == motor:
+                self.motor_state['active'] = False
+                self.motor_state['motor'] = None
+                self.motor_state['direction'] = None
+                logger.info("Stopping jog")
 
     def _motor_control_loop(self):
         """Main motor control loop."""
