@@ -72,6 +72,8 @@ class MotorTestUI:
             'last_change': 0
         }
         self.key_state = {}  # Track key states
+        self.last_event_time = {}  # Track last event time for each key
+        self.event_delay = 0.5  # Minimum time between events in seconds
         self.motor_thread = threading.Thread(target=self._motor_control_loop, daemon=True)
         self.motor_thread.start()
         
@@ -176,7 +178,16 @@ class MotorTestUI:
     def _handle_key_event(self, event):
         """Handle all key events."""
         if event.keysym in self.key_map:
+            current_time = time.time()
             motor, direction = self.key_map[event.keysym]
+            
+            # Check if enough time has passed since last event
+            if event.keysym in self.last_event_time:
+                time_since_last = current_time - self.last_event_time[event.keysym]
+                if time_since_last < self.event_delay:
+                    return
+            
+            self.last_event_time[event.keysym] = current_time
             
             if event.type == '2':  # KeyPress
                 if event.keysym not in self.key_state:
@@ -185,7 +196,7 @@ class MotorTestUI:
                         self.motor_state['active'] = True
                         self.motor_state['motor'] = motor
                         self.motor_state['direction'] = direction
-                        self.motor_state['last_change'] = time.time()
+                        self.motor_state['last_change'] = current_time
                         logger.info(f"Starting continuous jog for {motor} {'forward' if direction else 'reverse'}")
             
             elif event.type == '3':  # KeyRelease
