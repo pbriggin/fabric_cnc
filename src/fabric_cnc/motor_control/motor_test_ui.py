@@ -58,6 +58,10 @@ class MotorTestUI:
         
         # Initialize motor control
         self.stop_event = threading.Event()
+        self.current_motor = None
+        self.current_direction = None
+        self.last_state_change = 0
+        self.state_change_delay = 0.25  # 1/4 second delay
         self.motor_thread = threading.Thread(target=self._motor_control_loop, daemon=True)
         self.motor_thread.start()
         
@@ -165,23 +169,32 @@ class MotorTestUI:
 
     def _start_jog_motor(self, name, direction):
         """Start continuous jogging for a single motor."""
-        if self.current_motor != name or self.current_direction != direction:
+        current_time = time.time()
+        if (self.current_motor != name or self.current_direction != direction) and \
+           (current_time - self.last_state_change) >= self.state_change_delay:
             self.current_motor = name
             self.current_direction = direction
+            self.last_state_change = current_time
             logger.info(f"Starting continuous jog for {name} {'forward' if direction else 'reverse'}")
 
     def _start_jog_y_axis(self, direction):
         """Start continuous jogging for Y axis."""
-        if self.current_motor != 'y_axis' or self.current_direction != direction:
+        current_time = time.time()
+        if (self.current_motor != 'y_axis' or self.current_direction != direction) and \
+           (current_time - self.last_state_change) >= self.state_change_delay:
             self.current_motor = 'y_axis'
             self.current_direction = direction
+            self.last_state_change = current_time
             logger.info(f"Starting continuous Y-axis jog {'forward' if direction else 'reverse'}")
 
     def _stop_jogging(self):
         """Stop continuous jogging."""
-        if self.current_motor is not None:
+        current_time = time.time()
+        if self.current_motor is not None and \
+           (current_time - self.last_state_change) >= self.state_change_delay:
             self.current_motor = None
             self.current_direction = None
+            self.last_state_change = current_time
             logger.info("Stopping jog")
 
     def _motor_control_loop(self):
