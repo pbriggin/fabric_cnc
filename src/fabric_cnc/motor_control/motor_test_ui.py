@@ -61,10 +61,12 @@ class MotorTestUI:
         
         # Initialize motor control
         self.stop_event = threading.Event()
-        self.current_motor = None
-        self.current_direction = None
-        self.last_state_change = 0
-        self.state_change_delay = 0.25  # 1/4 second delay
+        self.motor_state = {
+            'active': False,
+            'motor': None,
+            'direction': None,
+            'last_change': 0
+        }
         self.motor_thread = threading.Thread(target=self._motor_control_loop, daemon=True)
         self.motor_thread.start()
         
@@ -94,44 +96,44 @@ class MotorTestUI:
         # Create arrow buttons in a grid
         up_btn = ttk.Button(frame, text="↑")
         up_btn.grid(row=0, column=1, padx=2, pady=2)
-        up_btn.bind('<ButtonPress>', lambda e: self._start_jog_y_axis(True))
-        up_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        up_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('y_axis', True))
+        up_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('y_axis'))
         
         down_btn = ttk.Button(frame, text="↓")
         down_btn.grid(row=2, column=1, padx=2, pady=2)
-        down_btn.bind('<ButtonPress>', lambda e: self._start_jog_y_axis(False))
-        down_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        down_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('y_axis', False))
+        down_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('y_axis'))
         
         left_btn = ttk.Button(frame, text="←")
         left_btn.grid(row=1, column=0, padx=2, pady=2)
-        left_btn.bind('<ButtonPress>', lambda e: self._start_jog_motor('X', False))
-        left_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        left_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('X', False))
+        left_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('X'))
         
         right_btn = ttk.Button(frame, text="→")
         right_btn.grid(row=1, column=2, padx=2, pady=2)
-        right_btn.bind('<ButtonPress>', lambda e: self._start_jog_motor('X', True))
-        right_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        right_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('X', True))
+        right_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('X'))
         
         # Z-axis controls
         pgup_btn = ttk.Button(frame, text="PgUp")
         pgup_btn.grid(row=0, column=3, padx=2, pady=2)
-        pgup_btn.bind('<ButtonPress>', lambda e: self._start_jog_motor('Z_LIFT', True))
-        pgup_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        pgup_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Z_LIFT', True))
+        pgup_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Z_LIFT'))
         
         pgdn_btn = ttk.Button(frame, text="PgDn")
         pgdn_btn.grid(row=2, column=3, padx=2, pady=2)
-        pgdn_btn.bind('<ButtonPress>', lambda e: self._start_jog_motor('Z_LIFT', False))
-        pgdn_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        pgdn_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Z_LIFT', False))
+        pgdn_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Z_LIFT'))
         
         home_btn = ttk.Button(frame, text="Home")
         home_btn.grid(row=0, column=4, padx=2, pady=2)
-        home_btn.bind('<ButtonPress>', lambda e: self._start_jog_motor('Z_ROTATE', True))
-        home_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        home_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Z_ROTATE', True))
+        home_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Z_ROTATE'))
         
         end_btn = ttk.Button(frame, text="End")
         end_btn.grid(row=2, column=4, padx=2, pady=2)
-        end_btn.bind('<ButtonPress>', lambda e: self._start_jog_motor('Z_ROTATE', False))
-        end_btn.bind('<ButtonRelease>', lambda e: self._stop_jogging())
+        end_btn.bind('<ButtonPress>', lambda e: self._handle_key_press('Z_ROTATE', False))
+        end_btn.bind('<ButtonRelease>', lambda e: self._handle_key_release('Z_ROTATE'))
         
         # Add key binding hints
         ttk.Label(frame, text="Use arrow keys to jog X/Y").grid(row=3, column=0, columnspan=3, pady=5)
@@ -151,67 +153,54 @@ class MotorTestUI:
     def _bind_keys(self):
         """Bind arrow keys for jogging."""
         # Key press bindings
-        self.root.bind('<KeyPress-Left>', lambda e: self._start_jog_motor('X', False))
-        self.root.bind('<KeyPress-Right>', lambda e: self._start_jog_motor('X', True))
-        self.root.bind('<KeyPress-Up>', lambda e: self._start_jog_y_axis(True))
-        self.root.bind('<KeyPress-Down>', lambda e: self._start_jog_y_axis(False))
-        self.root.bind('<KeyPress-Prior>', lambda e: self._start_jog_motor('Z_LIFT', True))  # Page Up
-        self.root.bind('<KeyPress-Next>', lambda e: self._start_jog_motor('Z_LIFT', False))  # Page Down
-        self.root.bind('<KeyPress-Home>', lambda e: self._start_jog_motor('Z_ROTATE', True))
-        self.root.bind('<KeyPress-End>', lambda e: self._start_jog_motor('Z_ROTATE', False))
+        self.root.bind('<KeyPress-Left>', lambda e: self._handle_key_press('X', False))
+        self.root.bind('<KeyPress-Right>', lambda e: self._handle_key_press('X', True))
+        self.root.bind('<KeyPress-Up>', lambda e: self._handle_key_press('y_axis', True))
+        self.root.bind('<KeyPress-Down>', lambda e: self._handle_key_press('y_axis', False))
+        self.root.bind('<KeyPress-Prior>', lambda e: self._handle_key_press('Z_LIFT', True))  # Page Up
+        self.root.bind('<KeyPress-Next>', lambda e: self._handle_key_press('Z_LIFT', False))  # Page Down
+        self.root.bind('<KeyPress-Home>', lambda e: self._handle_key_press('Z_ROTATE', True))
+        self.root.bind('<KeyPress-End>', lambda e: self._handle_key_press('Z_ROTATE', False))
         
         # Key release bindings
-        self.root.bind('<KeyRelease-Left>', lambda e: self._stop_jogging())
-        self.root.bind('<KeyRelease-Right>', lambda e: self._stop_jogging())
-        self.root.bind('<KeyRelease-Up>', lambda e: self._stop_jogging())
-        self.root.bind('<KeyRelease-Down>', lambda e: self._stop_jogging())
-        self.root.bind('<KeyRelease-Prior>', lambda e: self._stop_jogging())
-        self.root.bind('<KeyRelease-Next>', lambda e: self._stop_jogging())
-        self.root.bind('<KeyRelease-Home>', lambda e: self._stop_jogging())
-        self.root.bind('<KeyRelease-End>', lambda e: self._stop_jogging())
+        self.root.bind('<KeyRelease-Left>', lambda e: self._handle_key_release('X'))
+        self.root.bind('<KeyRelease-Right>', lambda e: self._handle_key_release('X'))
+        self.root.bind('<KeyRelease-Up>', lambda e: self._handle_key_release('y_axis'))
+        self.root.bind('<KeyRelease-Down>', lambda e: self._handle_key_release('y_axis'))
+        self.root.bind('<KeyRelease-Prior>', lambda e: self._handle_key_release('Z_LIFT'))
+        self.root.bind('<KeyRelease-Next>', lambda e: self._handle_key_release('Z_LIFT'))
+        self.root.bind('<KeyRelease-Home>', lambda e: self._handle_key_release('Z_ROTATE'))
+        self.root.bind('<KeyRelease-End>', lambda e: self._handle_key_release('Z_ROTATE'))
 
-    def _start_jog_motor(self, name, direction):
-        """Start continuous jogging for a single motor."""
-        current_time = time.time()
-        if (self.current_motor != name or self.current_direction != direction) and \
-           (current_time - self.last_state_change) >= self.state_change_delay:
-            self.current_motor = name
-            self.current_direction = direction
-            self.last_state_change = current_time
-            logger.info(f"Starting continuous jog for {name} {'forward' if direction else 'reverse'}")
+    def _handle_key_press(self, motor, direction):
+        """Handle key press events."""
+        if not self.motor_state['active']:
+            self.motor_state['active'] = True
+            self.motor_state['motor'] = motor
+            self.motor_state['direction'] = direction
+            self.motor_state['last_change'] = time.time()
+            logger.info(f"Starting continuous jog for {motor} {'forward' if direction else 'reverse'}")
 
-    def _start_jog_y_axis(self, direction):
-        """Start continuous jogging for Y axis."""
-        current_time = time.time()
-        if (self.current_motor != 'y_axis' or self.current_direction != direction) and \
-           (current_time - self.last_state_change) >= self.state_change_delay:
-            self.current_motor = 'y_axis'
-            self.current_direction = direction
-            self.last_state_change = current_time
-            logger.info(f"Starting continuous Y-axis jog {'forward' if direction else 'reverse'}")
-
-    def _stop_jogging(self):
-        """Stop continuous jogging."""
-        current_time = time.time()
-        if self.current_motor is not None and \
-           (current_time - self.last_state_change) >= self.state_change_delay:
-            self.current_motor = None
-            self.current_direction = None
-            self.last_state_change = current_time
+    def _handle_key_release(self, motor):
+        """Handle key release events."""
+        if self.motor_state['active'] and self.motor_state['motor'] == motor:
+            self.motor_state['active'] = False
+            self.motor_state['motor'] = None
+            self.motor_state['direction'] = None
             logger.info("Stopping jog")
 
     def _motor_control_loop(self):
         """Main motor control loop."""
         while not self.stop_event.is_set():
             try:
-                if self.current_motor is None:
+                if not self.motor_state['active']:
                     time.sleep(0.001)  # Small delay when idle
                     continue
                 
-                if self.current_motor == 'y_axis':
+                if self.motor_state['motor'] == 'y_axis':
                     # Set directions (Y1 is reversed)
-                    GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if self.current_direction else GPIO.HIGH)
-                    GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if self.current_direction else GPIO.LOW)
+                    GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if self.motor_state['direction'] else GPIO.HIGH)
+                    GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if self.motor_state['direction'] else GPIO.LOW)
                     
                     # Step both motors
                     GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
@@ -221,13 +210,13 @@ class MotorTestUI:
                     GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
                     time.sleep(STEP_DELAY/2)
                 else:
-                    pins = self.motors[self.current_motor]
+                    pins = self.motors[self.motor_state['motor']]
                     
                     # Set direction (reverse for Y1 and X)
-                    if self.current_motor in ['Y1', 'X']:
-                        direction = not self.current_direction
+                    if self.motor_state['motor'] in ['Y1', 'X']:
+                        direction = not self.motor_state['direction']
                     else:
-                        direction = self.current_direction
+                        direction = self.motor_state['direction']
                     GPIO.output(pins['DIR'], GPIO.HIGH if direction else GPIO.LOW)
                     
                     # Step pulse
@@ -238,8 +227,9 @@ class MotorTestUI:
                     
             except Exception as e:
                 logger.error(f"Error in motor control loop: {e}")
-                self.current_motor = None
-                self.current_direction = None
+                self.motor_state['active'] = False
+                self.motor_state['motor'] = None
+                self.motor_state['direction'] = None
 
     def _disable_all_motors(self):
         """Disable all motors and cleanup GPIO."""
