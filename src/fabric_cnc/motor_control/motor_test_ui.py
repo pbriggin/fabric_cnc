@@ -143,14 +143,15 @@ class MotorTestUI:
 
     def _bind_keys(self):
         """Bind arrow keys for jogging."""
-        self.root.bind('<Left>', lambda e: self._start_jog_motor('X', False))
-        self.root.bind('<Right>', lambda e: self._start_jog_motor('X', True))
-        self.root.bind('<Up>', lambda e: self._start_jog_y_axis(True))
-        self.root.bind('<Down>', lambda e: self._start_jog_y_axis(False))
-        self.root.bind('<Prior>', lambda e: self._start_jog_motor('Z_LIFT', True))  # Page Up
-        self.root.bind('<Next>', lambda e: self._start_jog_motor('Z_LIFT', False))  # Page Down
-        self.root.bind('<Home>', lambda e: self._start_jog_motor('Z_ROTATE', True))
-        self.root.bind('<End>', lambda e: self._start_jog_motor('Z_ROTATE', False))
+        # Key press bindings
+        self.root.bind('<KeyPress-Left>', lambda e: self._start_jog_motor('X', False))
+        self.root.bind('<KeyPress-Right>', lambda e: self._start_jog_motor('X', True))
+        self.root.bind('<KeyPress-Up>', lambda e: self._start_jog_y_axis(True))
+        self.root.bind('<KeyPress-Down>', lambda e: self._start_jog_y_axis(False))
+        self.root.bind('<KeyPress-Prior>', lambda e: self._start_jog_motor('Z_LIFT', True))  # Page Up
+        self.root.bind('<KeyPress-Next>', lambda e: self._start_jog_motor('Z_LIFT', False))  # Page Down
+        self.root.bind('<KeyPress-Home>', lambda e: self._start_jog_motor('Z_ROTATE', True))
+        self.root.bind('<KeyPress-End>', lambda e: self._start_jog_motor('Z_ROTATE', False))
         
         # Key release bindings
         self.root.bind('<KeyRelease-Left>', lambda e: self._stop_jogging())
