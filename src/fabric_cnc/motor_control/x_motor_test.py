@@ -19,7 +19,7 @@ GPIO.setwarnings(False)
 # Motor configuration
 PULSES_PER_REV = 800  # DIP switches set for 800 steps per revolution
 STEP_DELAY = 0.0005  # 0.5ms between pulses = 1000 steps/sec
-MM_PER_REV = 2  # 2mm per revolution (adjust based on your setup)
+MM_PER_REV = 8  # 8mm per revolution (adjust based on your setup)
 
 class XMotorTest:
     """Test X motor movement."""
@@ -62,13 +62,24 @@ class XMotorTest:
         """Move the specified distance with acceleration/deceleration."""
         try:
             # Convert mm to steps
-            total_steps = int(distance_mm * PULSES_PER_REV / MM_PER_REV)
-            logger.info(f"Moving {distance_mm}mm ({total_steps} steps)")
+            revolutions = distance_mm / MM_PER_REV
+            total_steps = int(revolutions * PULSES_PER_REV)
+            
+            logger.info(f"Movement calculations:")
+            logger.info(f"  Distance: {distance_mm}mm")
+            logger.info(f"  Revolutions needed: {revolutions:.2f}")
+            logger.info(f"  Steps per revolution: {PULSES_PER_REV}")
+            logger.info(f"  Total steps: {total_steps}")
             
             # Acceleration parameters
             accel_steps = min(total_steps // 4, 100)  # Accelerate for first 1/4 of movement
             decel_steps = min(total_steps // 4, 100)  # Decelerate for last 1/4 of movement
             cruise_steps = total_steps - accel_steps - decel_steps
+            
+            logger.info(f"Movement profile:")
+            logger.info(f"  Acceleration steps: {accel_steps}")
+            logger.info(f"  Cruise steps: {cruise_steps}")
+            logger.info(f"  Deceleration steps: {decel_steps}")
             
             # Movement loop with acceleration/deceleration
             for i in range(total_steps):
