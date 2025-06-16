@@ -240,6 +240,13 @@ class MotorTestUI:
             self.stop_event.set()
             self.command_queue.put(('stop', None, None))
             
+            # Wait for motor thread to stop
+            if self.motor_thread.is_alive():
+                self.motor_thread.join(timeout=1.0)
+            
+            # Set GPIO mode before cleanup
+            GPIO.setmode(GPIO.BCM)
+            
             # Disable all motors
             for name, pins in self.motors.items():
                 GPIO.output(pins['STEP'], GPIO.LOW)
@@ -253,10 +260,6 @@ class MotorTestUI:
             GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
             GPIO.output(self.motors['Y2']['DIR'], GPIO.LOW)
             GPIO.output(self.motors['Y2']['EN'], GPIO.HIGH)
-            
-            # Wait for motor thread to stop
-            if self.motor_thread.is_alive():
-                self.motor_thread.join(timeout=1.0)
             
             # Cleanup GPIO
             GPIO.cleanup()
