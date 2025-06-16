@@ -68,12 +68,12 @@ def main():
     try:
         while True:
             # Move forward
-            step_motor(True, 1000)  # 1000 steps forward
+            step_motor(True, 10000)  # 10000 steps forward
             print("Moving backward...")
             time.sleep(0.5)  # Pause between directions
             
             # Move backward
-            step_motor(False, 1000)  # 1000 steps backward
+            step_motor(False, 10000)  # 10000 steps backward
             print("Moving forward...")
             time.sleep(0.5)  # Pause between directions
             
