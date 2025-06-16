@@ -83,6 +83,23 @@ class CircleDrawer:
             else:  # Y2
                 self.current_position['Y'] += 1 if direction else -1
 
+    def _step_y_axis(self, direction):
+        """Step both Y motors together to maintain sync."""
+        # Set directions (Y1 is reversed)
+        GPIO.output(self.motors['Y1']['DIR'], GPIO.LOW if direction else GPIO.HIGH)
+        GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+        
+        # Step both motors together
+        GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
+        GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
+        time.sleep(STEP_DELAY/2)
+        GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
+        GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
+        time.sleep(STEP_DELAY/2)
+        
+        # Update position
+        self.current_position['Y'] += 1 if direction else -1
+
     def _move_to_position(self, target_x, target_y):
         """Move to target position in steps."""
         while not self.stop_event.is_set():
@@ -98,11 +115,9 @@ class CircleDrawer:
             if abs(dx) > 0:
                 self._step_motor('X', dx > 0)
             
-            # Move Y (both motors)
+            # Move Y (both motors together)
             if abs(dy) > 0:
-                # Y motors move in opposite directions
-                self._step_motor('Y1', dy < 0)  # Inverted direction for Y1
-                self._step_motor('Y2', dy > 0)
+                self._step_y_axis(dy > 0)
             
             time.sleep(STEP_DELAY)
 
