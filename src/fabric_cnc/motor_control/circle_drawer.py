@@ -77,7 +77,11 @@ class CircleDrawer:
         if motor == 'X':
             self.current_position['X'] += 1 if direction else -1
         elif motor in ['Y1', 'Y2']:
-            self.current_position['Y'] += 1 if direction else -1
+            # Y motors move in opposite directions
+            if motor == 'Y1':
+                self.current_position['Y'] += 1 if not direction else -1
+            else:  # Y2
+                self.current_position['Y'] += 1 if direction else -1
 
     def _move_to_position(self, target_x, target_y):
         """Move to target position in steps."""
@@ -96,7 +100,8 @@ class CircleDrawer:
             
             # Move Y (both motors)
             if abs(dy) > 0:
-                self._step_motor('Y1', dy > 0)
+                # Y motors move in opposite directions
+                self._step_motor('Y1', dy < 0)  # Inverted direction for Y1
                 self._step_motor('Y2', dy > 0)
             
             time.sleep(STEP_DELAY)
@@ -111,6 +116,8 @@ class CircleDrawer:
             center_y_steps = int(center_y * PULSES_PER_REV / MM_PER_REV)
             radius_steps = int(radius * PULSES_PER_REV / MM_PER_REV)
             
+            logger.info(f"Steps: center_x={center_x_steps}, center_y={center_y_steps}, radius={radius_steps}")
+            
             # Calculate points on circle
             for i in range(steps + 1):
                 if self.stop_event.is_set():
@@ -120,6 +127,10 @@ class CircleDrawer:
                 angle = 2 * math.pi * i / steps
                 x = center_x_steps + radius_steps * math.cos(angle)
                 y = center_y_steps + radius_steps * math.sin(angle)
+                
+                # Log every 45 degrees
+                if i % 45 == 0:
+                    logger.info(f"Step {i}: angle={angle:.2f}, x={x:.0f}, y={y:.0f}")
                 
                 # Move to position
                 self._move_to_position(int(x), int(y))
@@ -153,8 +164,8 @@ def main():
     try:
         drawer = CircleDrawer()
         
-        # Draw a circle: center at (100, 100)mm, radius 50mm
-        drawer.draw_circle(100, 100, 50)
+        # Draw a smaller circle first for testing
+        drawer.draw_circle(50, 50, 25)  # Center at (50, 50)mm, radius 25mm
         
     except KeyboardInterrupt:
         logger.info("Operation cancelled by user")
