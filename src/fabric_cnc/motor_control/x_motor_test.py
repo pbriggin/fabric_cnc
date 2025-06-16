@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 GPIO.setwarnings(False)
 
 # Motor configuration
-PULSES_PER_REV = 3200
+PULSES_PER_REV = 800  # DIP switches set for 800 steps per revolution
 STEP_DELAY = 0.0005  # 0.5ms between pulses = 1000 steps/sec
 MM_PER_REV = 2  # 2mm per revolution (adjust based on your setup)
 
