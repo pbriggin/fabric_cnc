@@ -26,6 +26,9 @@ class MotorTestUI:
         # Initialize motor controller
         self.controller = MotorController()
         
+        # Configure styles
+        self._configure_styles()
+        
         # Create GUI elements
         self._create_widgets()
         
@@ -33,6 +36,14 @@ class MotorTestUI:
         self._update_loop()
         
         logger.info("GUI initialized")
+
+    def _configure_styles(self):
+        """Configure button styles."""
+        style = ttk.Style()
+        style.configure('Homing.TButton', 
+                       background='orange',
+                       foreground='black',
+                       font=('Arial', 12, 'bold'))
 
     def _create_widgets(self):
         """Create GUI widgets."""
@@ -44,7 +55,11 @@ class MotorTestUI:
         x_frame = ttk.LabelFrame(main_frame, text="X Axis", padding="5")
         x_frame.grid(row=0, column=0, padx=5, pady=5, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        ttk.Button(x_frame, text="Home X", command=self._home_x, style='Homing.TButton').grid(row=0, column=0, padx=5, pady=5)
+        # Home X button
+        home_x_btn = ttk.Button(x_frame, text="Home X", command=self._home_x, style='Homing.TButton', width=15)
+        home_x_btn.grid(row=0, column=0, padx=5, pady=5)
+        
+        # X movement buttons
         ttk.Button(x_frame, text="←", command=lambda: self._move_x(-GUI_CONFIG['MOVE_INCREMENT'])).grid(row=0, column=1, padx=5, pady=5)
         ttk.Button(x_frame, text="→", command=lambda: self._move_x(GUI_CONFIG['MOVE_INCREMENT'])).grid(row=0, column=2, padx=5, pady=5)
         
@@ -52,7 +67,11 @@ class MotorTestUI:
         y_frame = ttk.LabelFrame(main_frame, text="Y Axis", padding="5")
         y_frame.grid(row=1, column=0, padx=5, pady=5, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        ttk.Button(y_frame, text="Home Y", command=self._home_y, style='Homing.TButton').grid(row=0, column=0, padx=5, pady=5)
+        # Home Y button
+        home_y_btn = ttk.Button(y_frame, text="Home Y", command=self._home_y, style='Homing.TButton', width=15)
+        home_y_btn.grid(row=0, column=0, padx=5, pady=5)
+        
+        # Y movement buttons
         ttk.Button(y_frame, text="↑", command=lambda: self._move_y(GUI_CONFIG['MOVE_INCREMENT'])).grid(row=0, column=1, padx=5, pady=5)
         ttk.Button(y_frame, text="↓", command=lambda: self._move_y(-GUI_CONFIG['MOVE_INCREMENT'])).grid(row=0, column=2, padx=5, pady=5)
         
@@ -60,10 +79,6 @@ class MotorTestUI:
         self.status_var = tk.StringVar(value="Ready")
         status_label = ttk.Label(main_frame, textvariable=self.status_var)
         status_label.grid(row=2, column=0, padx=5, pady=5)
-        
-        # Configure styles
-        style = ttk.Style()
-        style.configure('Homing.TButton', background=GUI_CONFIG['HOMING_BUTTON_COLOR'])
 
     def _move_x(self, distance_mm):
         """Move X axis."""
