@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-GUI for controlling the Fabric CNC machine motors.
+GUI for testing the Fabric CNC machine motors.
 """
 
 import tkinter as tk
@@ -14,13 +14,13 @@ from fabric_cnc.config import GUI_CONFIG
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class MotorControlGUI:
-    """GUI for controlling the Fabric CNC machine motors."""
+class MotorTestUI:
+    """GUI for testing the Fabric CNC machine motors."""
     
     def __init__(self, root):
         """Initialize the GUI."""
         self.root = root
-        self.root.title("Fabric CNC Motor Control")
+        self.root.title("Fabric CNC Motor Test")
         self.root.geometry(f"{GUI_CONFIG['WINDOW_SIZE'][0]}x{GUI_CONFIG['WINDOW_SIZE'][1]}")
         
         # Initialize motor controller
@@ -113,7 +113,7 @@ class MotorControlGUI:
 def main():
     """Main entry point."""
     root = tk.Tk()
-    app = MotorControlGUI(root)
+    app = MotorTestUI(root)
     root.mainloop()
 
 if __name__ == "__main__":
