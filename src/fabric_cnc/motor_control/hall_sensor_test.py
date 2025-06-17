@@ -28,8 +28,8 @@ class HallSensorTest:
         # Define sensor pins
         self.sensor_pins = {
             'Y2': 16,
-            'Y1': 20,
-            'X': 21
+            'X': 20,
+            'Y1': 21
         }
         
         # Setup sensor pins as inputs with pull-up resistors
