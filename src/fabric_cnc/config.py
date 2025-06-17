@@ -195,27 +195,55 @@ STEP_PULSE_DURATION = config.step_pulse_duration
 # Motor configuration
 MOTOR_CONFIG = {
     'X': {
-        'STEP': 5,
-        'DIR': 6,
-        'EN': 13,
         'PULSES_PER_REV': 800,  # DIP switches set for 800 steps per revolution
         'MM_PER_REV': 20,  # 20mm per revolution (adjusted based on observed movement)
         'STEP_DELAY': 0.0005,  # 0.5ms between pulses = 1000 steps/sec
+        'STEP': 17,  # GPIO17 (Pin 11)
+        'DIR': 27,   # GPIO27 (Pin 13)
+        'EN': 22,    # GPIO22 (Pin 15)
+        'HALL': 20,  # GPIO20 (Pin 38) - Hall effect sensor pin
+        'HOME_DIRECTION': -1,  # Negative direction for homing
+        'HOME_SPEED': 0.001,  # Slower speed for homing (1ms between pulses)
+        'VERIFY_SPEED': 0.002  # Even slower speed for verification (2ms between pulses)
     },
     'Y1': {
-        'STEP': 10,
-        'DIR': 9,
-        'EN': 11,
-        'PULSES_PER_REV': 800,  # DIP switches set for 800 steps per revolution
-        'MM_PER_REV': 20,  # 20mm per revolution (adjusted based on observed movement)
-        'STEP_DELAY': 0.0005,  # 0.5ms between pulses = 1000 steps/sec
+        'PULSES_PER_REV': 800,
+        'MM_PER_REV': 20,
+        'STEP_DELAY': 0.0005,
+        'STEP': 23,  # GPIO23 (Pin 16)
+        'DIR': 24,   # GPIO24 (Pin 18)
+        'EN': 25,    # GPIO25 (Pin 22)
+        'HALL': 21,  # GPIO21 (Pin 40) - Hall effect sensor pin
+        'HOME_DIRECTION': -1,
+        'HOME_SPEED': 0.001,
+        'VERIFY_SPEED': 0.002
     },
     'Y2': {
-        'STEP': 17,
-        'DIR': 27,
-        'EN': 22,
-        'PULSES_PER_REV': 800,  # DIP switches set for 800 steps per revolution
-        'MM_PER_REV': 20,  # 20mm per revolution (adjusted based on observed movement)
-        'STEP_DELAY': 0.0005,  # 0.5ms between pulses = 1000 steps/sec
+        'PULSES_PER_REV': 800,
+        'MM_PER_REV': 20,
+        'STEP_DELAY': 0.0005,
+        'STEP': 5,   # GPIO5 (Pin 29)
+        'DIR': 6,    # GPIO6 (Pin 31)
+        'EN': 13,    # GPIO13 (Pin 33)
+        'HALL': 16,  # GPIO16 (Pin 36) - Hall effect sensor pin
+        'HOME_DIRECTION': -1,
+        'HOME_SPEED': 0.001,
+        'VERIFY_SPEED': 0.002
     }
+}
+
+# Machine configuration
+MACHINE_CONFIG = {
+    'MAX_X': 1000,  # Maximum X travel in mm
+    'MAX_Y': 1000,  # Maximum Y travel in mm
+    'HOMING_OFFSET': 5,  # Distance to move after hitting home sensor (mm)
+    'VERIFICATION_DISTANCE': 10  # Distance to move for verification (mm)
+}
+
+# GUI configuration
+GUI_CONFIG = {
+    'WINDOW_SIZE': (800, 600),
+    'UPDATE_RATE': 100,  # ms between updates
+    'MOVE_INCREMENT': 10,  # mm per button press
+    'HOMING_BUTTON_COLOR': '#FFA500'  # Orange color for homing button
 } 
