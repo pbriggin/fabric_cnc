@@ -359,7 +359,7 @@ class MotorTestUI:
         logger.info("Starting X homing...")
         GPIO.setup(HALL_X, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.output(MOTOR['EN'], GPIO.LOW)
-        GPIO.output(MOTOR['DIR'], GPIO.LOW)  # Negative direction
+        GPIO.output(MOTOR['DIR'], GPIO.HIGH)  # Negative direction (reversed)
         while GPIO.input(HALL_X) != GPIO.LOW:
             GPIO.output(MOTOR['STEP'], GPIO.HIGH)
             time.sleep(0.001)
