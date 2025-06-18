@@ -360,12 +360,16 @@ class MotorTestUI:
         GPIO.setup(HALL_X, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.output(MOTOR['EN'], GPIO.LOW)
         GPIO.output(MOTOR['DIR'], GPIO.HIGH)  # Negative direction (reversed)
+        last_state = GPIO.input(HALL_X)
         while GPIO.input(HALL_X) != GPIO.LOW:
             GPIO.output(MOTOR['STEP'], GPIO.HIGH)
             time.sleep(0.001)
             GPIO.output(MOTOR['STEP'], GPIO.LOW)
             time.sleep(0.001)
-        GPIO.output(MOTOR['EN'], GPIO.HIGH)
+            current_state = GPIO.input(HALL_X)
+            if last_state == GPIO.LOW and current_state == GPIO.HIGH:
+                print("[HALL X] Sensor state: HIGH (not triggered)")
+            last_state = current_state
         logger.info("X homed.")
         messagebox.showinfo("Homing", "X axis homed!")
 
