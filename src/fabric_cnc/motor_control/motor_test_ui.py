@@ -59,6 +59,9 @@ class MotorTestUI:
         # Create jog controls
         self._create_jog_controls()
         
+        # Add homing buttons below jog controls
+        self._create_homing_buttons()
+        
         # Create emergency stop button
         self._create_emergency_stop()
         
@@ -170,12 +173,15 @@ class MotorTestUI:
         ttk.Label(frame, text="Use arrow keys to jog X/Y").grid(row=3, column=0, columnspan=3, pady=5)
         ttk.Label(frame, text="PgUp/Dn: Z Lift, Home/End: Z Rotate").grid(row=3, column=3, columnspan=2, pady=5)
         
-        # Add homing buttons below jog controls
+        return frame
+
+    def _create_homing_buttons(self):
+        """Create homing buttons for X and Y axes."""
         home_frame = ttk.Frame(self.main_frame)
         home_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
-        ttk.Button(home_frame, text="Home X Axis", command=self._home_x_axis, style="Accent.TButton").grid(row=0, column=0, padx=10, pady=5)
-        ttk.Button(home_frame, text="Home Y Axis", command=self._home_y_axis, style="Accent.TButton").grid(row=0, column=1, padx=10, pady=5)
-        return frame
+        ttk.Label(home_frame, text="Homing Controls:", font=("Arial", 10, "bold")).grid(row=0, column=0, columnspan=2, pady=(0, 5))
+        ttk.Button(home_frame, text="Home X Axis", command=self._home_x_axis, style="Accent.TButton").grid(row=1, column=0, padx=10, pady=5)
+        ttk.Button(home_frame, text="Home Y Axis", command=self._home_y_axis, style="Accent.TButton").grid(row=1, column=1, padx=10, pady=5)
 
     def _create_emergency_stop(self):
         """Create emergency stop button."""
@@ -184,7 +190,7 @@ class MotorTestUI:
             text="EMERGENCY STOP",
             command=self._emergency_stop,
             style="Emergency.TButton"
-        ).grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=10)
+        ).grid(row=2, column=0, sticky=(tk.W, tk.E), padx=5, pady=10)
 
     def _bind_keys(self):
         """Bind arrow keys for jogging."""
