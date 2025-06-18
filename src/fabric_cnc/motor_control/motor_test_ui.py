@@ -170,6 +170,11 @@ class MotorTestUI:
         ttk.Label(frame, text="Use arrow keys to jog X/Y").grid(row=3, column=0, columnspan=3, pady=5)
         ttk.Label(frame, text="PgUp/Dn: Z Lift, Home/End: Z Rotate").grid(row=3, column=3, columnspan=2, pady=5)
         
+        # Add homing buttons below jog controls
+        home_frame = ttk.Frame(self.main_frame)
+        home_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
+        ttk.Button(home_frame, text="Home X Axis", command=self._home_x_axis, style="Accent.TButton").grid(row=0, column=0, padx=10, pady=5)
+        ttk.Button(home_frame, text="Home Y Axis", command=self._home_y_axis, style="Accent.TButton").grid(row=0, column=1, padx=10, pady=5)
         return frame
 
     def _create_emergency_stop(self):
@@ -340,6 +345,48 @@ class MotorTestUI:
             messagebox.showerror("Error", str(e))
         finally:
             self.root.destroy()
+
+    def _home_x_axis(self):
+        """Home the X axis using hall effect sensor on pin 20."""
+        HALL_X = 20
+        MOTOR = self.motors['X']
+        logger.info("Starting X homing...")
+        GPIO.setup(HALL_X, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.output(MOTOR['EN'], GPIO.LOW)
+        GPIO.output(MOTOR['DIR'], GPIO.LOW)  # Negative direction
+        while GPIO.input(HALL_X) != GPIO.LOW:
+            GPIO.output(MOTOR['STEP'], GPIO.HIGH)
+            time.sleep(0.001)
+            GPIO.output(MOTOR['STEP'], GPIO.LOW)
+            time.sleep(0.001)
+        GPIO.output(MOTOR['EN'], GPIO.HIGH)
+        logger.info("X homed.")
+        messagebox.showinfo("Homing", "X axis homed!")
+
+    def _home_y_axis(self):
+        """Home the Y axis using hall effect sensors on pins 21 (Y1) and 16 (Y2)."""
+        HALL_Y1 = 21
+        HALL_Y2 = 16
+        MOTOR1 = self.motors['Y1']
+        MOTOR2 = self.motors['Y2']
+        logger.info("Starting Y homing...")
+        GPIO.setup(HALL_Y1, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.setup(HALL_Y2, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.output(MOTOR1['EN'], GPIO.LOW)
+        GPIO.output(MOTOR2['EN'], GPIO.LOW)
+        GPIO.output(MOTOR1['DIR'], GPIO.LOW)  # Negative direction
+        GPIO.output(MOTOR2['DIR'], GPIO.HIGH) # Negative direction for Y2
+        while GPIO.input(HALL_Y1) != GPIO.LOW or GPIO.input(HALL_Y2) != GPIO.LOW:
+            GPIO.output(MOTOR1['STEP'], GPIO.HIGH)
+            GPIO.output(MOTOR2['STEP'], GPIO.HIGH)
+            time.sleep(0.001)
+            GPIO.output(MOTOR1['STEP'], GPIO.LOW)
+            GPIO.output(MOTOR2['STEP'], GPIO.LOW)
+            time.sleep(0.001)
+        GPIO.output(MOTOR1['EN'], GPIO.HIGH)
+        GPIO.output(MOTOR2['EN'], GPIO.HIGH)
+        logger.info("Y homed.")
+        messagebox.showinfo("Homing", "Y axis homed!")
 
 def main():
     """Main entry point."""
