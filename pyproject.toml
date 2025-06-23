@@ -21,4 +21,7 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/fabric_cnc"] 
+packages = ["src/fabric_cnc"]
+
+[tool.poetry.dependencies]
+ezdxf = "^1.1.1" 
