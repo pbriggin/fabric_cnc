@@ -364,7 +364,7 @@ class MotorTestUI:
         
         # Homing parameters
         FAST_DELAY = 0.0005  # 0.5ms for fast movement (was 0.2ms)
-        SLOW_DELAY = 0.001   # 1ms for precise homing
+        SLOW_DELAY = 0.002   # 2ms for precise homing (was 1ms)
         BACKOFF_STEPS = 500  # Steps to back off from sensor
         
         print(f"[HALL X] Initial state: {'LOW (triggered)' if GPIO.input(HALL_X) == GPIO.LOW else 'HIGH (not triggered)'}")
@@ -485,7 +485,7 @@ class MotorTestUI:
         
         # Homing parameters
         FAST_DELAY = 0.0005  # 0.5ms for fast movement (was 0.2ms)
-        SLOW_DELAY = 0.001   # 1ms for precise homing
+        SLOW_DELAY = 0.002   # 2ms for precise homing (was 1ms)
         BACKOFF_STEPS = 500  # Steps to back off from sensor
         
         print(f"[HALL Y] Initial state - Y1: {'LOW' if GPIO.input(HALL_Y1) == GPIO.LOW else 'HIGH'}, Y2: {'LOW' if GPIO.input(HALL_Y2) == GPIO.LOW else 'HIGH'}")
