@@ -74,12 +74,6 @@ class MotorTestUI:
             'last_change': 0
         }
         
-        # Start control threads
-        self.motor_thread = threading.Thread(target=self._motor_control_loop, daemon=True)
-        self.motor_thread.start()
-        self.key_thread = threading.Thread(target=self._key_poll_loop, daemon=True)
-        self.key_thread.start()
-        
         # Initialize key state
         self.key_state = {
             'Left': False,
@@ -106,6 +100,12 @@ class MotorTestUI:
         
         # Bind keys
         self._bind_keys()
+        
+        # Start control threads
+        self.motor_thread = threading.Thread(target=self._motor_control_loop, daemon=True)
+        self.motor_thread.start()
+        self.key_thread = threading.Thread(target=self._key_poll_loop, daemon=True)
+        self.key_thread.start()
         
         logger.info("Motor test UI initialized")
 
@@ -179,9 +179,11 @@ class MotorTestUI:
         """Create homing buttons for X and Y axes."""
         home_frame = ttk.Frame(self.main_frame)
         home_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
-        ttk.Label(home_frame, text="Homing Controls:", font=("Arial", 10, "bold")).grid(row=0, column=0, columnspan=2, pady=(0, 5))
+        ttk.Label(home_frame, text="Homing Controls:", font=("Arial", 10, "bold")).grid(row=0, column=0, columnspan=3, pady=(0, 5))
         ttk.Button(home_frame, text="Home X Axis", command=self._home_x_axis, style="Accent.TButton").grid(row=1, column=0, padx=10, pady=5)
         ttk.Button(home_frame, text="Home Y Axis", command=self._home_y_axis, style="Accent.TButton").grid(row=1, column=1, padx=10, pady=5)
+        ttk.Button(home_frame, text="Move Away (X)", command=self._move_away_x, style="Accent.TButton").grid(row=2, column=0, padx=10, pady=5)
+        ttk.Button(home_frame, text="Move Away (Y)", command=self._move_away_y, style="Accent.TButton").grid(row=2, column=1, padx=10, pady=5)
 
     def _create_emergency_stop(self):
         """Create emergency stop button."""
@@ -359,25 +361,28 @@ class MotorTestUI:
         logger.info("Starting X homing...")
         GPIO.setup(HALL_X, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.output(MOTOR['EN'], GPIO.LOW)
-        GPIO.output(MOTOR['DIR'], GPIO.HIGH)  # Negative direction (reversed)
         
-        # Faster homing parameters
+        # Homing parameters
         FAST_DELAY = 0.0002  # 0.2ms for fast movement
-        SLOW_DELAY = 0.0005  # 0.5ms for final approach
+        SLOW_DELAY = 0.001   # 1ms for precise homing
+        BACKOFF_STEPS = 500  # Steps to back off from sensor
         
         print(f"[HALL X] Initial state: {'LOW (triggered)' if GPIO.input(HALL_X) == GPIO.LOW else 'HIGH (not triggered)'}")
         
         # Test sensor before starting
         print(f"[HALL X] Pre-movement sensor test:")
-        for i in range(10):
+        for i in range(5):
             sensor_state = GPIO.input(HALL_X)
             print(f"  Test {i+1}: {'LOW' if sensor_state == GPIO.LOW else 'HIGH'}")
             time.sleep(0.1)
         
-        # Fast approach until sensor gets close
+        # Step 1: Fast approach to find sensor
+        print(f"[HALL X] Step 1: Fast approach to find sensor...")
+        GPIO.output(MOTOR['DIR'], GPIO.HIGH)  # Negative direction (toward home)
+        
         steps_count = 0
         sensor_triggered = False
-        while not sensor_triggered and steps_count < 10000:  # Limit to prevent runaway
+        while not sensor_triggered and steps_count < 10000:
             GPIO.output(MOTOR['STEP'], GPIO.HIGH)
             time.sleep(FAST_DELAY/2)
             GPIO.output(MOTOR['STEP'], GPIO.LOW)
@@ -388,54 +393,83 @@ class MotorTestUI:
             sensor_state = GPIO.input(HALL_X)
             if sensor_state == GPIO.LOW:
                 sensor_triggered = True
-                print(f"[HALL X] SENSOR TRIGGERED at step {steps_count}!")
+                print(f"[HALL X] Sensor found at step {steps_count}!")
                 break
             
             # Print progress every 1000 steps
             if steps_count % 1000 == 0:
                 print(f"[HALL X] Fast approach: {steps_count} steps - Sensor: {'LOW' if sensor_state == GPIO.LOW else 'HIGH'}")
         
-        # If not triggered in fast approach, continue with slow approach
         if not sensor_triggered:
-            print(f"[HALL X] Fast approach completed at {steps_count} steps, starting slow approach...")
-            while not sensor_triggered and steps_count < 15000:
-                GPIO.output(MOTOR['STEP'], GPIO.HIGH)
-                time.sleep(SLOW_DELAY/2)
-                GPIO.output(MOTOR['STEP'], GPIO.LOW)
-                time.sleep(SLOW_DELAY/2)
-                steps_count += 1
-                
-                # Check sensor state
-                sensor_state = GPIO.input(HALL_X)
-                if sensor_state == GPIO.LOW:
-                    sensor_triggered = True
-                    print(f"[HALL X] SENSOR TRIGGERED at step {steps_count}!")
-                    break
-                
-                if steps_count % 100 == 0:
-                    print(f"[HALL X] Slow approach: {steps_count} steps - Sensor: {'LOW' if sensor_state == GPIO.LOW else 'HIGH'}")
+            print(f"[HALL X] Homing failed - sensor not found in fast approach")
+            logger.warning("X homing failed - sensor not found")
+            messagebox.showwarning("Homing Failed", "X axis homing failed - sensor not found")
+            return
         
-        # Post-trigger analysis
+        # Step 2: Back off from sensor
+        print(f"[HALL X] Step 2: Backing off {BACKOFF_STEPS} steps from sensor...")
+        GPIO.output(MOTOR['DIR'], GPIO.LOW)  # Positive direction (away from home)
+        
+        for i in range(BACKOFF_STEPS):
+            GPIO.output(MOTOR['STEP'], GPIO.HIGH)
+            time.sleep(FAST_DELAY/2)
+            GPIO.output(MOTOR['STEP'], GPIO.LOW)
+            time.sleep(FAST_DELAY/2)
+            
+            if i % 100 == 0:
+                print(f"[HALL X] Backoff progress: {i}/{BACKOFF_STEPS} steps")
+        
+        # Verify sensor is no longer triggered
+        sensor_state = GPIO.input(HALL_X)
+        print(f"[HALL X] After backoff - Sensor: {'LOW' if sensor_state == GPIO.LOW else 'HIGH'}")
+        
+        # Step 3: Slow re-home for precise positioning
+        print(f"[HALL X] Step 3: Slow re-home for precise positioning...")
+        GPIO.output(MOTOR['DIR'], GPIO.HIGH)  # Negative direction (toward home)
+        
+        final_steps = 0
+        sensor_triggered = False
+        while not sensor_triggered and final_steps < 2000:  # Limit for slow approach
+            GPIO.output(MOTOR['STEP'], GPIO.HIGH)
+            time.sleep(SLOW_DELAY/2)
+            GPIO.output(MOTOR['STEP'], GPIO.LOW)
+            time.sleep(SLOW_DELAY/2)
+            final_steps += 1
+            
+            # Check sensor state
+            sensor_state = GPIO.input(HALL_X)
+            if sensor_state == GPIO.LOW:
+                sensor_triggered = True
+                print(f"[HALL X] Precise home position found at {final_steps} slow steps!")
+                break
+            
+            if final_steps % 100 == 0:
+                print(f"[HALL X] Slow approach: {final_steps} steps - Sensor: {'LOW' if sensor_state == GPIO.LOW else 'HIGH'}")
+        
+        # Final analysis
+        total_steps = steps_count + BACKOFF_STEPS + final_steps
         print(f"[HALL X] Final analysis:")
-        print(f"  Total steps: {steps_count}")
-        print(f"  Sensor triggered: {sensor_triggered}")
+        print(f"  Fast approach: {steps_count} steps")
+        print(f"  Backoff: {BACKOFF_STEPS} steps")
+        print(f"  Slow re-home: {final_steps} steps")
+        print(f"  Total steps: {total_steps}")
         print(f"  Final sensor state: {'LOW' if GPIO.input(HALL_X) == GPIO.LOW else 'HIGH'}")
         
-        # Test sensor stability after movement
-        print(f"[HALL X] Post-movement sensor test:")
-        for i in range(10):
+        # Test sensor stability after homing
+        print(f"[HALL X] Post-homing sensor test:")
+        for i in range(5):
             sensor_state = GPIO.input(HALL_X)
             print(f"  Test {i+1}: {'LOW' if sensor_state == GPIO.LOW else 'HIGH'}")
             time.sleep(0.1)
         
         if sensor_triggered:
-            print(f"[HALL X] Sensor triggered (LOW) after {steps_count} steps")
-            logger.info(f"X homed in {steps_count} steps.")
-            messagebox.showinfo("Homing", f"X axis homed in {steps_count} steps!")
+            print(f"[HALL X] Homing completed successfully!")
+            logger.info(f"X homed successfully in {total_steps} total steps")
+            messagebox.showinfo("Homing Complete", f"X axis homed successfully!\nFast: {steps_count} steps\nBackoff: {BACKOFF_STEPS} steps\nSlow: {final_steps} steps\nTotal: {total_steps} steps")
         else:
-            print(f"[HALL X] Homing failed - sensor never triggered")
-            logger.warning("X homing failed - sensor never triggered")
-            messagebox.showwarning("Homing Failed", "X axis homing failed - sensor never triggered")
+            print(f"[HALL X] Homing failed - sensor not found in slow approach")
+            logger.warning("X homing failed - sensor not found in slow approach")
+            messagebox.showwarning("Homing Failed", "X axis homing failed - sensor not found in slow approach")
 
     def _home_y_axis(self):
         """Home the Y axis using hall effect sensors on pins 21 (Y1) and 16 (Y2)."""
@@ -448,28 +482,31 @@ class MotorTestUI:
         GPIO.setup(HALL_Y2, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.output(MOTOR1['EN'], GPIO.LOW)
         GPIO.output(MOTOR2['EN'], GPIO.LOW)
-        GPIO.output(MOTOR1['DIR'], GPIO.LOW)  # Negative direction
-        GPIO.output(MOTOR2['DIR'], GPIO.HIGH) # Negative direction for Y2
         
-        # Faster homing parameters
+        # Homing parameters
         FAST_DELAY = 0.0002  # 0.2ms for fast movement
-        SLOW_DELAY = 0.0005  # 0.5ms for final approach
+        SLOW_DELAY = 0.001   # 1ms for precise homing
+        BACKOFF_STEPS = 500  # Steps to back off from sensor
         
         print(f"[HALL Y] Initial state - Y1: {'LOW' if GPIO.input(HALL_Y1) == GPIO.LOW else 'HIGH'}, Y2: {'LOW' if GPIO.input(HALL_Y2) == GPIO.LOW else 'HIGH'}")
         
         # Test sensors before starting
         print(f"[HALL Y] Pre-movement sensor test:")
-        for i in range(10):
+        for i in range(5):
             y1_state = GPIO.input(HALL_Y1)
             y2_state = GPIO.input(HALL_Y2)
             print(f"  Test {i+1}: Y1:{'LOW' if y1_state == GPIO.LOW else 'HIGH'}, Y2:{'LOW' if y2_state == GPIO.LOW else 'HIGH'}")
             time.sleep(0.1)
         
+        # Step 1: Fast approach to find sensors
+        print(f"[HALL Y] Step 1: Fast approach to find sensors...")
+        GPIO.output(MOTOR1['DIR'], GPIO.LOW)   # Negative direction for Y1
+        GPIO.output(MOTOR2['DIR'], GPIO.HIGH)  # Negative direction for Y2
+        
         steps_count = 0
         y1_triggered = False
         y2_triggered = False
         
-        # Fast approach until either sensor gets close
         while not (y1_triggered or y2_triggered) and steps_count < 10000:
             GPIO.output(MOTOR1['STEP'], GPIO.HIGH)
             GPIO.output(MOTOR2['STEP'], GPIO.HIGH)
@@ -485,75 +522,175 @@ class MotorTestUI:
             
             if y1_state == GPIO.LOW and not y1_triggered:
                 y1_triggered = True
-                print(f"[HALL Y] Y1 SENSOR TRIGGERED at step {steps_count}!")
+                print(f"[HALL Y] Y1 sensor found at step {steps_count}!")
             
             if y2_state == GPIO.LOW and not y2_triggered:
                 y2_triggered = True
-                print(f"[HALL Y] Y2 SENSOR TRIGGERED at step {steps_count}!")
+                print(f"[HALL Y] Y2 sensor found at step {steps_count}!")
             
             # Print progress every 1000 steps
             if steps_count % 1000 == 0:
                 print(f"[HALL Y] Fast approach: {steps_count} steps - Y1:{'LOW' if y1_state == GPIO.LOW else 'HIGH'}, Y2:{'LOW' if y2_state == GPIO.LOW else 'HIGH'}")
         
-        # If not triggered in fast approach, continue with slow approach
         if not (y1_triggered or y2_triggered):
-            print(f"[HALL Y] Fast approach completed at {steps_count} steps, starting slow approach...")
-            while not (y1_triggered or y2_triggered) and steps_count < 15000:
-                GPIO.output(MOTOR1['STEP'], GPIO.HIGH)
-                GPIO.output(MOTOR2['STEP'], GPIO.HIGH)
-                time.sleep(SLOW_DELAY/2)
-                GPIO.output(MOTOR1['STEP'], GPIO.LOW)
-                GPIO.output(MOTOR2['STEP'], GPIO.LOW)
-                time.sleep(SLOW_DELAY/2)
-                steps_count += 1
-                
-                # Check sensor states
-                y1_state = GPIO.input(HALL_Y1)
-                y2_state = GPIO.input(HALL_Y2)
-                
-                if y1_state == GPIO.LOW and not y1_triggered:
-                    y1_triggered = True
-                    print(f"[HALL Y] Y1 SENSOR TRIGGERED at step {steps_count}!")
-                
-                if y2_state == GPIO.LOW and not y2_triggered:
-                    y2_triggered = True
-                    print(f"[HALL Y] Y2 SENSOR TRIGGERED at step {steps_count}!")
-                
-                if steps_count % 100 == 0:
-                    print(f"[HALL Y] Slow approach: {steps_count} steps - Y1:{'LOW' if y1_state == GPIO.LOW else 'HIGH'}, Y2:{'LOW' if y2_state == GPIO.LOW else 'HIGH'}")
+            print(f"[HALL Y] Homing failed - sensors not found in fast approach")
+            logger.warning("Y homing failed - sensors not found")
+            messagebox.showwarning("Homing Failed", "Y axis homing failed - sensors not found")
+            return
         
-        # Post-trigger analysis
+        # Step 2: Back off from sensors
+        print(f"[HALL Y] Step 2: Backing off {BACKOFF_STEPS} steps from sensors...")
+        GPIO.output(MOTOR1['DIR'], GPIO.HIGH)  # Positive direction for Y1
+        GPIO.output(MOTOR2['DIR'], GPIO.LOW)   # Positive direction for Y2
+        
+        for i in range(BACKOFF_STEPS):
+            GPIO.output(MOTOR1['STEP'], GPIO.HIGH)
+            GPIO.output(MOTOR2['STEP'], GPIO.HIGH)
+            time.sleep(FAST_DELAY/2)
+            GPIO.output(MOTOR1['STEP'], GPIO.LOW)
+            GPIO.output(MOTOR2['STEP'], GPIO.LOW)
+            time.sleep(FAST_DELAY/2)
+            
+            if i % 100 == 0:
+                print(f"[HALL Y] Backoff progress: {i}/{BACKOFF_STEPS} steps")
+        
+        # Verify sensors are no longer triggered
+        y1_state = GPIO.input(HALL_Y1)
+        y2_state = GPIO.input(HALL_Y2)
+        print(f"[HALL Y] After backoff - Y1: {'LOW' if y1_state == GPIO.LOW else 'HIGH'}, Y2: {'LOW' if y2_state == GPIO.LOW else 'HIGH'}")
+        
+        # Step 3: Slow re-home for precise positioning
+        print(f"[HALL Y] Step 3: Slow re-home for precise positioning...")
+        GPIO.output(MOTOR1['DIR'], GPIO.LOW)   # Negative direction for Y1
+        GPIO.output(MOTOR2['DIR'], GPIO.HIGH)  # Negative direction for Y2
+        
+        final_steps = 0
+        y1_triggered = False
+        y2_triggered = False
+        
+        while not (y1_triggered or y2_triggered) and final_steps < 2000:  # Limit for slow approach
+            GPIO.output(MOTOR1['STEP'], GPIO.HIGH)
+            GPIO.output(MOTOR2['STEP'], GPIO.HIGH)
+            time.sleep(SLOW_DELAY/2)
+            GPIO.output(MOTOR1['STEP'], GPIO.LOW)
+            GPIO.output(MOTOR2['STEP'], GPIO.LOW)
+            time.sleep(SLOW_DELAY/2)
+            final_steps += 1
+            
+            # Check sensor states
+            y1_state = GPIO.input(HALL_Y1)
+            y2_state = GPIO.input(HALL_Y2)
+            
+            if y1_state == GPIO.LOW and not y1_triggered:
+                y1_triggered = True
+                print(f"[HALL Y] Y1 precise home position found at {final_steps} slow steps!")
+            
+            if y2_state == GPIO.LOW and not y2_triggered:
+                y2_triggered = True
+                print(f"[HALL Y] Y2 precise home position found at {final_steps} slow steps!")
+            
+            if final_steps % 100 == 0:
+                print(f"[HALL Y] Slow approach: {final_steps} steps - Y1:{'LOW' if y1_state == GPIO.LOW else 'HIGH'}, Y2:{'LOW' if y2_state == GPIO.LOW else 'HIGH'}")
+        
+        # Final analysis
+        total_steps = steps_count + BACKOFF_STEPS + final_steps
         print(f"[HALL Y] Final analysis:")
-        print(f"  Total steps: {steps_count}")
+        print(f"  Fast approach: {steps_count} steps")
+        print(f"  Backoff: {BACKOFF_STEPS} steps")
+        print(f"  Slow re-home: {final_steps} steps")
+        print(f"  Total steps: {total_steps}")
         print(f"  Y1 triggered: {y1_triggered}")
         print(f"  Y2 triggered: {y2_triggered}")
         print(f"  Final Y1 state: {'LOW' if GPIO.input(HALL_Y1) == GPIO.LOW else 'HIGH'}")
         print(f"  Final Y2 state: {'LOW' if GPIO.input(HALL_Y2) == GPIO.LOW else 'HIGH'}")
         
-        # Test sensor stability after movement
-        print(f"[HALL Y] Post-movement sensor test:")
-        for i in range(10):
+        # Test sensor stability after homing
+        print(f"[HALL Y] Post-homing sensor test:")
+        for i in range(5):
             y1_state = GPIO.input(HALL_Y1)
             y2_state = GPIO.input(HALL_Y2)
             print(f"  Test {i+1}: Y1:{'LOW' if y1_state == GPIO.LOW else 'HIGH'}, Y2:{'LOW' if y2_state == GPIO.LOW else 'HIGH'}")
             time.sleep(0.1)
         
-        # Final check and report
-        y1_triggered = GPIO.input(HALL_Y1) == GPIO.LOW
-        y2_triggered = GPIO.input(HALL_Y2) == GPIO.LOW
-        
-        print(f"[HALL Y] Final state - Y1: {'LOW (triggered)' if y1_triggered else 'HIGH'}, Y2: {'LOW (triggered)' if y2_triggered else 'HIGH'}")
-        print(f"[HALL Y] Homing completed after {steps_count} steps")
-        
         GPIO.output(MOTOR1['EN'], GPIO.HIGH)
         GPIO.output(MOTOR2['EN'], GPIO.HIGH)
         
         if y1_triggered or y2_triggered:
-            logger.info(f"Y homed in {steps_count} steps.")
-            messagebox.showinfo("Homing", f"Y axis homed in {steps_count} steps!")
+            print(f"[HALL Y] Homing completed successfully!")
+            logger.info(f"Y homed successfully in {total_steps} total steps")
+            messagebox.showinfo("Homing Complete", f"Y axis homed successfully!\nFast: {steps_count} steps\nBackoff: {BACKOFF_STEPS} steps\nSlow: {final_steps} steps\nTotal: {total_steps} steps")
         else:
-            logger.warning("Y homing failed - sensors never triggered")
-            messagebox.showwarning("Homing Failed", "Y axis homing failed - sensors never triggered")
+            print(f"[HALL Y] Homing failed - sensors not found in slow approach")
+            logger.warning("Y homing failed - sensors not found in slow approach")
+            messagebox.showwarning("Homing Failed", "Y axis homing failed - sensors not found in slow approach")
+
+    def _move_away_x(self):
+        """Move X axis away from home position for testing."""
+        MOTOR = self.motors['X']
+        logger.info("Moving X axis away from home...")
+        
+        # Enable motor
+        GPIO.output(MOTOR['EN'], GPIO.LOW)
+        
+        # Move in positive direction (away from home)
+        GPIO.output(MOTOR['DIR'], GPIO.LOW)  # Positive direction
+        
+        # Move 2000 steps (about 25mm)
+        steps = 2000
+        delay = 0.0005  # 0.5ms delay
+        
+        print(f"[MOVE X] Moving {steps} steps away from home...")
+        for i in range(steps):
+            GPIO.output(MOTOR['STEP'], GPIO.HIGH)
+            time.sleep(delay/2)
+            GPIO.output(MOTOR['STEP'], GPIO.LOW)
+            time.sleep(delay/2)
+            
+            if i % 500 == 0:
+                print(f"[MOVE X] Progress: {i}/{steps} steps")
+        
+        # Disable motor
+        GPIO.output(MOTOR['EN'], GPIO.HIGH)
+        print(f"[MOVE X] Moved {steps} steps away from home")
+        logger.info(f"X axis moved {steps} steps away from home")
+        messagebox.showinfo("Move Complete", f"X axis moved {steps} steps away from home")
+
+    def _move_away_y(self):
+        """Move Y axis away from home position for testing."""
+        MOTOR1 = self.motors['Y1']
+        MOTOR2 = self.motors['Y2']
+        logger.info("Moving Y axis away from home...")
+        
+        # Enable motors
+        GPIO.output(MOTOR1['EN'], GPIO.LOW)
+        GPIO.output(MOTOR2['EN'], GPIO.LOW)
+        
+        # Move in positive direction (away from home)
+        GPIO.output(MOTOR1['DIR'], GPIO.HIGH)  # Positive direction for Y1
+        GPIO.output(MOTOR2['DIR'], GPIO.LOW)   # Positive direction for Y2
+        
+        # Move 2000 steps (about 25mm)
+        steps = 2000
+        delay = 0.0005  # 0.5ms delay
+        
+        print(f"[MOVE Y] Moving {steps} steps away from home...")
+        for i in range(steps):
+            GPIO.output(MOTOR1['STEP'], GPIO.HIGH)
+            GPIO.output(MOTOR2['STEP'], GPIO.HIGH)
+            time.sleep(delay/2)
+            GPIO.output(MOTOR1['STEP'], GPIO.LOW)
+            GPIO.output(MOTOR2['STEP'], GPIO.LOW)
+            time.sleep(delay/2)
+            
+            if i % 500 == 0:
+                print(f"[MOVE Y] Progress: {i}/{steps} steps")
+        
+        # Disable motors
+        GPIO.output(MOTOR1['EN'], GPIO.HIGH)
+        GPIO.output(MOTOR2['EN'], GPIO.HIGH)
+        print(f"[MOVE Y] Moved {steps} steps away from home")
+        logger.info(f"Y axis moved {steps} steps away from home")
+        messagebox.showinfo("Move Complete", f"Y axis moved {steps} steps away from home")
 
 def main():
     """Main entry point."""
