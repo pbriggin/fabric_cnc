@@ -363,7 +363,7 @@ class MotorTestUI:
         GPIO.output(MOTOR['EN'], GPIO.LOW)
         
         # Homing parameters
-        FAST_DELAY = 0.0002  # 0.2ms for fast movement
+        FAST_DELAY = 0.0005  # 0.5ms for fast movement (was 0.2ms)
         SLOW_DELAY = 0.001   # 1ms for precise homing
         BACKOFF_STEPS = 500  # Steps to back off from sensor
         
@@ -484,7 +484,7 @@ class MotorTestUI:
         GPIO.output(MOTOR2['EN'], GPIO.LOW)
         
         # Homing parameters
-        FAST_DELAY = 0.0002  # 0.2ms for fast movement
+        FAST_DELAY = 0.0005  # 0.5ms for fast movement (was 0.2ms)
         SLOW_DELAY = 0.001   # 1ms for precise homing
         BACKOFF_STEPS = 500  # Steps to back off from sensor
         
