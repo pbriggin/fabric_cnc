@@ -396,7 +396,6 @@ class FabricCNCApp:
         # Draw DXF entities, converting mm to inches for plotting
         if not (self.dxf_doc and self.dxf_entities):
             return
-        
         scale = getattr(self, 'dxf_unit_scale', 1.0)
         min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
         if min_x is not None and max_y is not None:
@@ -404,7 +403,27 @@ class FabricCNCApp:
             dy = max_y + PLOT_BUFFER_IN
         else:
             dx, dy = 0, 0
-        
+
+        # If toolpaths exist, use their shapes for color grouping
+        color_cycle = [
+            '#d00', '#0077cc', '#00aa88', '#cc7700', '#aa00cc', '#cc2222', '#0a0', '#f0a', '#0af', '#fa0',
+            '#a0f', '#0fa', '#af0', '#f00', '#00f', '#0ff', '#ff0', '#f0f', '#888', '#444'
+        ]
+        if hasattr(self, 'toolpaths') and self.toolpaths:
+            for i, path in enumerate(self.toolpaths):
+                color = color_cycle[i % len(color_cycle)]
+                # Draw as a polyline of all (x, y) points in the shape
+                points = [(x, y) for x, y, angle, z in path if z == 0]
+                if len(points) < 2:
+                    continue
+                flat = []
+                for x, y in points:
+                    x_c, y_c = self._inches_to_canvas(x, y)
+                    flat.extend([x_c, y_c])
+                self.canvas.create_line(flat, fill=color, width=2)
+            return  # Don't double-plot entities if toolpaths are present
+
+        # Fallback: plot all entities in gray if toolpaths not yet generated
         for e in self.dxf_entities:
             t = e.dxftype()
             if t == 'LINE':
@@ -412,24 +431,21 @@ class FabricCNCApp:
                 x2, y2 = e.dxf.end.x, e.dxf.end.y
                 x1c, y1c = self._inches_to_canvas(x1 * scale - dx, dy - y1 * scale)
                 x2c, y2c = self._inches_to_canvas(x2 * scale - dx, dy - y2 * scale)
-                print(f"[DEBUG] Drawing LINE: ({x1:.2f}, {y1:.2f}) -> ({x2:.2f}, {y2:.2f}) | canvas: ({x1c:.2f}, {y1c:.2f}) -> ({x2c:.2f}, {y2c:.2f})")
-                self.canvas.create_line(x1c, y1c, x2c, y2c, fill="#222", width=2)
+                self.canvas.create_line(x1c, y1c, x2c, y2c, fill="#888", width=2)
             elif t == 'LWPOLYLINE':
                 points = [(p[0], p[1]) for p in e.get_points()]
                 flat = []
                 for x, y in points:
                     x_c, y_c = self._inches_to_canvas(x * scale - dx, dy - y * scale)
-                    print(f"[DEBUG] Drawing LWPOLYLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
-                self.canvas.create_line(flat, fill="#0077cc", width=2)
+                self.canvas.create_line(flat, fill="#888", width=2)
             elif t == 'POLYLINE':
                 points = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
                 flat = []
                 for x, y in points:
                     x_c, y_c = self._inches_to_canvas(x * scale - dx, dy - y * scale)
-                    print(f"[DEBUG] Drawing POLYLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
-                self.canvas.create_line(flat, fill="#cc7700", width=2)
+                self.canvas.create_line(flat, fill="#888", width=2)
             elif t == 'SPLINE':
                 points = list(e.flattening(0.1))
                 flat = []
@@ -437,9 +453,8 @@ class FabricCNCApp:
                     x_transformed = x * scale - dx
                     y_transformed = dy - y * scale
                     x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
-                    print(f"[DEBUG] Drawing SPLINE pt: ({x:.2f}, {y:.2f}) | transformed: ({x_transformed:.2f}, {y_transformed:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
-                self.canvas.create_line(flat, fill="#00aa88", width=2)
+                self.canvas.create_line(flat, fill="#888", width=2)
             elif t == 'ARC':
                 center = e.dxf.center
                 r = e.dxf.radius
@@ -456,9 +471,8 @@ class FabricCNCApp:
                     x_transformed = x * scale - dx
                     y_transformed = dy - y * scale
                     x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
-                    print(f"[DEBUG] Drawing ARC pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     points.append((x_c, y_c))
-                self.canvas.create_line(*[coord for pt in points for coord in pt], fill="#aa00cc", width=2)
+                self.canvas.create_line(*[coord for pt in points for coord in pt], fill="#888", width=2)
             elif t == 'CIRCLE':
                 center = e.dxf.center
                 r = e.dxf.radius
@@ -471,9 +485,8 @@ class FabricCNCApp:
                     x_transformed = x * scale - dx
                     y_transformed = dy - y * scale
                     x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
-                    print(f"[DEBUG] Drawing CIRCLE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     points.append((x_c, y_c))
-                self.canvas.create_line(*[coord for pt in points for coord in pt], fill="#cc2222", width=2)
+                self.canvas.create_line(*[coord for pt in points for coord in pt], fill="#888", width=2)
 
     def _draw_toolpath_inches(self):
         # Draw toolpath in inches
