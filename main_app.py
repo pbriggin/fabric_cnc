@@ -438,11 +438,21 @@ class FabricCNCApp:
             if not entities:
                 messagebox.showerror("DXF Import Error", "No supported entities (LINE, LWPOLYLINE) found in DXF file.")
                 return
+            # Detect units
+            insunits = doc.header.get('$INSUNITS', 0)
+            # 1 = inches, 4 = mm
+            if insunits == 4:
+                self.dxf_unit_scale = 1.0 / 25.4  # mm to in
+            elif insunits == 1:
+                self.dxf_unit_scale = 1.0  # inches
+            else:
+                # Unknown or unitless, default to mm->in
+                self.dxf_unit_scale = 1.0 / 25.4
             self.dxf_doc = doc
             self.dxf_entities = entities
             self.toolpath = []
             self.gen_toolpath_btn.config(state=tk.NORMAL)
-            logger.info(f"Loaded DXF: {file_path} ({len(entities)} entities)")
+            logger.info(f"Loaded DXF: {file_path} ({len(entities)} entities), units: {insunits}, scale: {self.dxf_unit_scale}")
             # Auto-orient to top-left, no scaling
             self._auto_orient_dxf_top_left()
             self._draw_canvas()
@@ -458,17 +468,18 @@ class FabricCNCApp:
         dx = min_x
         dy = min_y
         y_top = 45
+        scale = getattr(self, 'dxf_unit_scale', 1.0)
         for e in self.dxf_entities:
             if e.dxftype() == 'LINE':
                 new_start = Vec3(
-                    (e.dxf.start.x / INCH_TO_MM - dx) * INCH_TO_MM,
-                    (y_top - (e.dxf.start.y / INCH_TO_MM - dy)) * INCH_TO_MM,
-                    e.dxf.start.z
+                    (e.dxf.start.x * scale - dx),
+                    (y_top - (e.dxf.start.y * scale - dy)),
+                    e.dxf.start.z * scale if hasattr(e.dxf.start, 'z') else 0.0
                 )
                 new_end = Vec3(
-                    (e.dxf.end.x / INCH_TO_MM - dx) * INCH_TO_MM,
-                    (y_top - (e.dxf.end.y / INCH_TO_MM - dy)) * INCH_TO_MM,
-                    e.dxf.end.z
+                    (e.dxf.end.x * scale - dx),
+                    (y_top - (e.dxf.end.y * scale - dy)),
+                    e.dxf.end.z * scale if hasattr(e.dxf.end, 'z') else 0.0
                 )
                 e.dxf.start = new_start
                 e.dxf.end = new_end
@@ -476,25 +487,26 @@ class FabricCNCApp:
                 pts = list(e.get_points())
                 new_pts = []
                 for p in pts:
-                    x = (p[0] / INCH_TO_MM - dx) * INCH_TO_MM
-                    y = (y_top - (p[1] / INCH_TO_MM - dy)) * INCH_TO_MM
+                    x = (p[0] * scale - dx)
+                    y = (y_top - (p[1] * scale - dy))
                     new_pts.append((x, y) + p[2:])
                 e.points = new_pts
 
     def _get_dxf_extents_inches(self):
+        scale = getattr(self, 'dxf_unit_scale', 1.0)
         min_x, min_y = float('inf'), float('inf')
         max_x, max_y = float('-inf'), float('-inf')
         found = False
         for e in self.dxf_entities:
             if e.dxftype() == 'LINE':
-                xs = [e.dxf.start.x / INCH_TO_MM, e.dxf.end.x / INCH_TO_MM]
-                ys = [e.dxf.start.y / INCH_TO_MM, e.dxf.end.y / INCH_TO_MM]
+                xs = [e.dxf.start.x * scale, e.dxf.end.x * scale]
+                ys = [e.dxf.start.y * scale, e.dxf.end.y * scale]
             elif e.dxftype() == 'LWPOLYLINE':
                 pts = [p[:2] for p in e.get_points()]
                 if not pts:
                     continue
-                xs = [p[0] / INCH_TO_MM for p in pts]
-                ys = [p[1] / INCH_TO_MM for p in pts]
+                xs = [p[0] * scale for p in pts]
+                ys = [p[1] * scale for p in pts]
             else:
                 continue
             if not xs or not ys:
