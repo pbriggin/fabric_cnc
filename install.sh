@@ -150,6 +150,8 @@ setup_launcher() {
     
     # Convert to Unix line endings (robustness)
     if command -v dos2unix >/dev/null 2>&1; then
+        dos2unix fabric-cnc-motor-test.desktop
+        dos2unix ~/fabric_cnc/fabric-cnc-motor-test.desktop
         dos2unix ~/Desktop/fabric-cnc-motor-test.desktop
     fi
     
