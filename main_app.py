@@ -99,6 +99,18 @@ class SimulatedMotorController:
         """Clean up resources (simulated)."""
         logger.info("Simulated motor controller cleanup")
 
+    def move_to(self, x=None, y=None, z=None, rot=None):
+        with self.lock:
+            if x is not None:
+                self.position['X'] = self._clamp('X', x)
+            if y is not None:
+                self.position['Y'] = self._clamp('Y', y)
+            if z is not None:
+                self.position['Z'] = self._clamp('Z', z)
+            if rot is not None:
+                self.position['ROT'] = rot
+            logger.info(f"Simulated move_to: X={self.position['X']:.2f}, Y={self.position['Y']:.2f}, Z={self.position['Z']:.2f}, ROT={self.position['ROT']:.2f}")
+
 # --- Real Motor Controller Wrapper ---
 class RealMotorController:
     def __init__(self):
@@ -188,6 +200,26 @@ class RealMotorController:
                 GPIO.cleanup()
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
+
+    def move_to(self, x=None, y=None, z=None, rot=None):
+        with self.lock:
+            # Move X and Y axes if needed
+            if x is not None:
+                delta_x = x - self.position['X']
+                if abs(delta_x) > 1e-6:
+                    self.motor_controller.move_distance(delta_x, 'X')
+                    self.position['X'] = x
+            if y is not None:
+                delta_y = y - self.position['Y']
+                if abs(delta_y) > 1e-6:
+                    self.motor_controller.move_distance(delta_y, 'Y')
+                    self.position['Y'] = y
+            # Z and ROT are not implemented in hardware, just update the value
+            if z is not None:
+                self.position['Z'] = z
+            if rot is not None:
+                self.position['ROT'] = rot
+            logger.info(f"Real move_to: X={self.position['X']:.2f}, Y={self.position['Y']:.2f}, Z={self.position['Z']:.2f}, ROT={self.position['ROT']:.2f}")
 
 # --- Main App ---
 class FabricCNCApp:
@@ -307,6 +339,8 @@ class FabricCNCApp:
         self.gen_toolpath_btn.pack(pady=4, padx=10, fill=tk.X)
         self.preview_btn = ttk.Button(self.left_toolbar, text="Preview Toolpath", command=self._preview_toolpath, state=tk.DISABLED)
         self.preview_btn.pack(pady=4, padx=10, fill=tk.X)
+        self.run_btn = ttk.Button(self.left_toolbar, text="Run Toolpath", command=self._run_toolpath, state=tk.DISABLED)
+        self.run_btn.pack(pady=4, padx=10, fill=tk.X)
         ttk.Separator(self.left_toolbar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=20)
         
         # System status
@@ -339,7 +373,7 @@ class FabricCNCApp:
         self.canvas_height = event.height
         self._draw_canvas()
 
-    def _draw_canvas(self):
+    def _draw_canvas(self, live_toolpath=False):
         self.canvas.delete("all")
         # Draw axes in inches
         self._draw_axes_in_inches()
@@ -350,12 +384,15 @@ class FabricCNCApp:
         if self.toolpath:
             self._draw_toolpath_inches()
         # Draw current tool head position
-        pos = self.motor_ctrl.get_position()
-        # Clamp the position to the plot area
-        x = max(0.0, min(pos['X'], X_MAX_MM))
-        y = max(0.0, min(pos['Y'], Y_MAX_MM))
-        clamped_pos = {'X': x, 'Y': y}
-        self._draw_tool_head_inches(clamped_pos)
+        if live_toolpath and hasattr(self, '_current_toolpath_pos'):
+            pos = self._current_toolpath_pos
+            self._draw_live_tool_head_inches(pos)
+        else:
+            pos = self.motor_ctrl.get_position()
+            x = max(0.0, min(pos['X'], X_MAX_MM))
+            y = max(0.0, min(pos['Y'], Y_MAX_MM))
+            clamped_pos = {'X': x, 'Y': y}
+            self._draw_tool_head_inches(clamped_pos)
 
     def _draw_axes_in_inches(self):
         # Draw X and Y axes with inch ticks and labels, with buffer
@@ -837,6 +874,7 @@ class FabricCNCApp:
         logger.info(f"Generated toolpaths for {len(toolpaths)} shapes.")
         self._draw_canvas()
         self.preview_btn.config(state=tk.NORMAL)
+        self.run_btn.config(state=tk.NORMAL)
 
     def _preview_toolpath(self):
         """Animate the toolpath preview, showing the end effector moving with orientation and Z state, one shape at a time, with debug output and shape highlighting."""
@@ -885,6 +923,77 @@ class FabricCNCApp:
                 self.root.after(5, animate_step, idx + steps_per_tick)  # Much faster animation
             animate_step()
         animate_shape()
+
+    def _run_toolpath(self):
+        """Command the motors to follow the toolpath, updating the green dot and orientation line in real time."""
+        if not hasattr(self, 'toolpaths') or not self.toolpaths:
+            messagebox.showwarning("No Toolpath", "Generate a toolpath first.")
+            return
+        self.import_btn.config(state=tk.DISABLED)
+        self.gen_toolpath_btn.config(state=tk.DISABLED)
+        self.preview_btn.config(state=tk.DISABLED)
+        self.run_btn.config(state=tk.DISABLED)
+        self._running_toolpath = True
+        self._current_toolpath_pos = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
+        self._current_toolpath_idx = [0, 0]  # [shape_idx, step_idx]
+        self._toolpath_total_steps = sum(len(path) for path in self.toolpaths)
+        self._toolpath_step_count = 0
+        self._run_toolpath_step()
+
+    def _run_toolpath_step(self):
+        if not self._running_toolpath:
+            return
+        shape_idx, step_idx = self._current_toolpath_idx
+        if shape_idx >= len(self.toolpaths):
+            self._running_toolpath = False
+            self.import_btn.config(state=tk.NORMAL)
+            self.gen_toolpath_btn.config(state=tk.NORMAL)
+            self.preview_btn.config(state=tk.NORMAL)
+            self.run_btn.config(state=tk.NORMAL)
+            return
+        path = self.toolpaths[shape_idx]
+        if step_idx >= len(path):
+            # Move to next shape
+            self._current_toolpath_idx = [shape_idx + 1, 0]
+            self.root.after(20, self._run_toolpath_step)
+            return
+        x, y, angle, z = path[step_idx]
+        # Command the motors (simulate or real)
+        # For simplicity, just set the position instantly (replace with real motion logic as needed)
+        self._current_toolpath_pos['X'] = x * INCH_TO_MM
+        self._current_toolpath_pos['Y'] = y * INCH_TO_MM
+        self._current_toolpath_pos['Z'] = 0.0 if z == 0 else Z_MAX_MM
+        self._current_toolpath_pos['ROT'] = math.degrees(angle)
+        if MOTOR_IMPORTS_AVAILABLE:
+            self.motor_ctrl.move_to(
+                x=self._current_toolpath_pos['X'],
+                y=self._current_toolpath_pos['Y'],
+                z=self._current_toolpath_pos['Z'],
+                rot=self._current_toolpath_pos['ROT']
+            )
+        # Redraw canvas with live end effector
+        self._draw_canvas(live_toolpath=True)
+        # Next step
+        self._current_toolpath_idx[1] += 1
+        self._toolpath_step_count += 1
+        self.root.after(5, self._run_toolpath_step)
+
+    def _draw_live_tool_head_inches(self, pos):
+        # Draw a green dot and orientation line at the current tool head position (in inches)
+        x_in = pos['X'] / INCH_TO_MM
+        y_in = pos['Y'] / INCH_TO_MM
+        rot_rad = math.radians(pos.get('ROT', 0.0))
+        x_c, y_c = self._inches_to_canvas(x_in, y_in)
+        r = 7
+        y_c = self.canvas_height - y_c
+        self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill="#0a0", outline="#000", width=2)
+        # Draw orientation line
+        r_dir = 0.5  # 0.5 inch
+        x2 = x_in + r_dir * math.cos(rot_rad)
+        y2 = y_in + r_dir * math.sin(rot_rad)
+        x2_c, y2_c = self._inches_to_canvas(x2, y2)
+        y2_c = self.canvas_height - y2_c
+        self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill="#f0a", width=3)
 
     # --- Right Toolbar: Motor controls ---
     def _setup_right_toolbar(self):
