@@ -393,7 +393,8 @@ class FabricCNCApp:
         if not (self.dxf_doc and self.dxf_entities):
             return
         for e in self.dxf_entities:
-            if e.dxftype() == 'LINE':
+            t = e.dxftype()
+            if t == 'LINE':
                 x1, y1 = e.dxf.start.x, e.dxf.start.y
                 x2, y2 = e.dxf.end.x, e.dxf.end.y
                 x1c, y1c = self._inches_to_canvas(x1, y1)
@@ -402,7 +403,7 @@ class FabricCNCApp:
                 y2c = self.canvas_height - y2c
                 print(f"[DEBUG] Drawing LINE: ({x1:.2f}, {y1:.2f}) -> ({x2:.2f}, {y2:.2f}) | canvas: ({x1c:.2f}, {y1c:.2f}) -> ({x2c:.2f}, {y2c:.2f})")
                 self.canvas.create_line(x1c, y1c, x2c, y2c, fill="#222", width=2)
-            elif e.dxftype() == 'LWPOLYLINE':
+            elif t == 'LWPOLYLINE':
                 points = [(p[0], p[1]) for p in e.get_points()]
                 flat = []
                 for x, y in points:
@@ -411,6 +412,67 @@ class FabricCNCApp:
                     print(f"[DEBUG] Drawing LWPOLYLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#0077cc", width=2)
+            elif t == 'POLYLINE':
+                points = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
+                flat = []
+                for x, y in points:
+                    x_c, y_c = self._inches_to_canvas(x, y)
+                    y_c = self.canvas_height - y_c
+                    print(f"[DEBUG] Drawing POLYLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
+                    flat.extend([x_c, y_c])
+                self.canvas.create_line(flat, fill="#cc7700", width=2)
+            elif t == 'SPLINE':
+                # Approximate with polyline (32 segments)
+                points = [e.point(t) for t in [i/31 for i in range(32)]]
+                flat = []
+                for x, y, *_ in points:
+                    x_c, y_c = self._inches_to_canvas(x, y)
+                    y_c = self.canvas_height - y_c
+                    print(f"[DEBUG] Drawing SPLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
+                    flat.extend([x_c, y_c])
+                self.canvas.create_line(flat, fill="#00aa88", width=2)
+            elif t == 'ARC':
+                # Approximate with polyline (32 segments)
+                import math
+                center = e.dxf.center
+                r = e.dxf.radius
+                start = math.radians(e.dxf.start_angle)
+                end = math.radians(e.dxf.end_angle)
+                if end < start:
+                    end += 2 * math.pi
+                n = 32
+                points = []
+                for i in range(n+1):
+                    angle = start + (end - start) * i / n
+                    x = center.x + r * math.cos(angle)
+                    y = center.y + r * math.sin(angle)
+                    points.append((x, y))
+                flat = []
+                for x, y in points:
+                    x_c, y_c = self._inches_to_canvas(x, y)
+                    y_c = self.canvas_height - y_c
+                    print(f"[DEBUG] Drawing ARC pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
+                    flat.extend([x_c, y_c])
+                self.canvas.create_line(flat, fill="#aa00cc", width=2)
+            elif t == 'CIRCLE':
+                # Approximate with polyline (32 segments)
+                import math
+                center = e.dxf.center
+                r = e.dxf.radius
+                n = 32
+                points = []
+                for i in range(n+1):
+                    angle = 2 * math.pi * i / n
+                    x = center.x + r * math.cos(angle)
+                    y = center.y + r * math.sin(angle)
+                    points.append((x, y))
+                flat = []
+                for x, y in points:
+                    x_c, y_c = self._inches_to_canvas(x, y)
+                    y_c = self.canvas_height - y_c
+                    print(f"[DEBUG] Drawing CIRCLE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
+                    flat.extend([x_c, y_c])
+                self.canvas.create_line(flat, fill="#cc2222", width=2)
 
     def _draw_toolpath_inches(self):
         # Draw toolpath in inches
@@ -436,9 +498,14 @@ class FabricCNCApp:
         try:
             doc = ezdxf.readfile(file_path)
             msp = doc.modelspace()
-            entities = [e for e in msp if e.dxftype() in ('LINE', 'LWPOLYLINE')]
+            # Support LINE, LWPOLYLINE, POLYLINE, SPLINE, ARC, CIRCLE
+            entities = []
+            for e in msp:
+                t = e.dxftype()
+                if t in ('LINE', 'LWPOLYLINE', 'POLYLINE', 'SPLINE', 'ARC', 'CIRCLE'):
+                    entities.append(e)
             if not entities:
-                messagebox.showerror("DXF Import Error", "No supported entities (LINE, LWPOLYLINE) found in DXF file.")
+                messagebox.showerror("DXF Import Error", "No supported entities (LINE, LWPOLYLINE, POLYLINE, SPLINE, ARC, CIRCLE) found in DXF file.")
                 return
             # Detect units
             insunits = doc.header.get('$INSUNITS', 0)
