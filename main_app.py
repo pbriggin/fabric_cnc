@@ -40,6 +40,12 @@ except ImportError:
 ON_RPI = platform.system() == 'Linux' and os.uname().machine.startswith('arm')
 SIMULATION_MODE = not ON_RPI or not MOTOR_IMPORTS_AVAILABLE
 
+# Add these constants near the top of the file, after imports
+INCH_TO_MM = 25.4
+X_MAX_MM = 68 * INCH_TO_MM
+Y_MAX_MM = 45 * INCH_TO_MM
+Z_MAX_MM = 2 * INCH_TO_MM
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fabric_cnc.main_app")
 
@@ -50,9 +56,20 @@ class SimulatedMotorController:
         self.lock = threading.Lock()
         self.is_homing = False
 
+    def _clamp(self, axis, value):
+        if axis == 'X':
+            return max(0.0, min(value, X_MAX_MM))
+        elif axis == 'Y':
+            return max(0.0, min(value, Y_MAX_MM))
+        elif axis == 'Z':
+            return max(0.0, min(value, Z_MAX_MM))
+        else:
+            return value
+
     def jog(self, axis, delta):
         with self.lock:
-            self.position[axis] += delta
+            new_val = self.position[axis] + delta
+            self.position[axis] = self._clamp(axis, new_val)
             logger.info(f"Jogged {axis} by {delta}mm. New pos: {self.position[axis]:.2f}")
 
     def home(self, axis):
@@ -86,22 +103,33 @@ class RealMotorController:
         self.is_homing = False
         self.position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}  # Track position manually
 
+    def _clamp(self, axis, value):
+        if axis == 'X':
+            return max(0.0, min(value, X_MAX_MM))
+        elif axis == 'Y':
+            return max(0.0, min(value, Y_MAX_MM))
+        elif axis == 'Z':
+            return max(0.0, min(value, Z_MAX_MM))
+        else:
+            return value
+
     def jog(self, axis, delta):
         with self.lock:
             try:
-                if axis == 'X':
-                    self.motor_controller.move_distance(delta, 'X')
-                    self.position['X'] += delta
-                elif axis == 'Y':
-                    self.motor_controller.move_distance(delta, 'Y')
-                    self.position['Y'] += delta
-                elif axis == 'Z':
-                    # Z not implemented yet
-                    logger.warning("Z axis not implemented")
-                elif axis == 'ROT':
-                    # Rotation not implemented yet
-                    logger.warning("Rotation axis not implemented")
-                logger.info(f"Jogged {axis} by {delta}mm")
+                new_val = self.position[axis] + delta
+                clamped_val = self._clamp(axis, new_val)
+                move_delta = clamped_val - self.position[axis]
+                if abs(move_delta) > 1e-6:
+                    if axis == 'X':
+                        self.motor_controller.move_distance(move_delta, 'X')
+                    elif axis == 'Y':
+                        self.motor_controller.move_distance(move_delta, 'Y')
+                    elif axis == 'Z':
+                        logger.warning("Z axis not implemented")
+                    elif axis == 'ROT':
+                        logger.warning("Rotation axis not implemented")
+                    self.position[axis] = clamped_val
+                    logger.info(f"Jogged {axis} by {move_delta}mm")
             except Exception as e:
                 logger.error(f"Jog error on {axis}: {e}")
 
