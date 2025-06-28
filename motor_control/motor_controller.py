@@ -9,7 +9,7 @@ import math
 import time
 import logging
 import RPi.GPIO as GPIO
-from fabric_cnc.config import MOTOR_CONFIG, MACHINE_CONFIG
+from config import MOTOR_CONFIG, MACHINE_CONFIG
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
