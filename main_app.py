@@ -227,7 +227,7 @@ class FabricCNCApp:
         self.dxf_doc = None
         self.dxf_entities = []
         self.toolpath = []
-        self.jog_speed = 10  # mm per jog, adjustable
+        self.jog_speed = 0.25 * INCH_TO_MM  # 0.25 inch per jog, in mm internally
         self._arrow_key_state = {'Left': False, 'Right': False, 'Up': False, 'Down': False}
         self._arrow_key_repeat_delay = 60  # ms between jogs when holding key
         self._setup_ui()
@@ -492,9 +492,9 @@ class FabricCNCApp:
         # Speed adjustment
         speed_frame = ttk.Frame(self.right_toolbar)
         speed_frame.pack(fill=tk.X, padx=10, pady=(0, 8))
-        ttk.Label(speed_frame, text="Jog Speed (mm)").pack(side=tk.LEFT)
-        self.jog_speed_var = tk.IntVar(value=self.jog_speed)
-        speed_spin = ttk.Spinbox(speed_frame, from_=1, to=100, textvariable=self.jog_speed_var, width=5, command=self._update_jog_speed)
+        ttk.Label(speed_frame, text="Jog Step (in)").pack(side=tk.LEFT)
+        self.jog_speed_var = tk.DoubleVar(value=self.jog_speed / INCH_TO_MM)
+        speed_spin = ttk.Spinbox(speed_frame, from_=0.01, to=2.0, increment=0.01, textvariable=self.jog_speed_var, width=5, command=self._update_jog_speed)
         speed_spin.pack(side=tk.LEFT, padx=5)
         self.jog_speed_var.trace_add('write', lambda *a: self._update_jog_speed())
         
@@ -562,7 +562,7 @@ class FabricCNCApp:
 
     def _update_jog_speed(self):
         try:
-            self.jog_speed = self.jog_speed_var.get()
+            self.jog_speed = self.jog_speed_var.get() * INCH_TO_MM
         except tk.TclError:
             pass
 
