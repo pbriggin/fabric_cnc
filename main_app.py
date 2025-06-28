@@ -395,19 +395,21 @@ class FabricCNCApp:
             return
         for e in self.dxf_entities:
             if e.dxftype() == 'LINE':
-                x1, y1 = e.dxf.start.x / INCH_TO_MM, e.dxf.start.y / INCH_TO_MM
-                x2, y2 = e.dxf.end.x / INCH_TO_MM, e.dxf.end.y / INCH_TO_MM
+                x1, y1 = e.dxf.start.x, e.dxf.start.y
+                x2, y2 = e.dxf.end.x, e.dxf.end.y
                 x1c, y1c = self._inches_to_canvas(x1, y1)
                 x2c, y2c = self._inches_to_canvas(x2, y2)
                 y1c = self.canvas_height - y1c
                 y2c = self.canvas_height - y2c
+                print(f"[DEBUG] Drawing LINE: ({x1:.2f}, {y1:.2f}) -> ({x2:.2f}, {y2:.2f}) | canvas: ({x1c:.2f}, {y1c:.2f}) -> ({x2c:.2f}, {y2c:.2f})")
                 self.canvas.create_line(x1c, y1c, x2c, y2c, fill="#222", width=2)
             elif e.dxftype() == 'LWPOLYLINE':
-                points = [(p[0] / INCH_TO_MM, p[1] / INCH_TO_MM) for p in e.get_points()]
+                points = [(p[0], p[1]) for p in e.get_points()]
                 flat = []
                 for x, y in points:
                     x_c, y_c = self._inches_to_canvas(x, y)
                     y_c = self.canvas_height - y_c
+                    print(f"[DEBUG] Drawing LWPOLYLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#0077cc", width=2)
 
