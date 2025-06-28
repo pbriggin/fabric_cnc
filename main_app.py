@@ -45,6 +45,7 @@ INCH_TO_MM = 25.4
 X_MAX_MM = 68 * INCH_TO_MM
 Y_MAX_MM = 45 * INCH_TO_MM
 Z_MAX_MM = 2 * INCH_TO_MM
+PLOT_BUFFER_IN = 0.5  # 0.5 inch buffer on all sides
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fabric_cnc.main_app")
@@ -351,7 +352,7 @@ class FabricCNCApp:
         self._draw_tool_head_inches(clamped_pos)
 
     def _draw_axes_in_inches(self):
-        # Draw X and Y axes with inch ticks and labels
+        # Draw X and Y axes with inch ticks and labels, with buffer
         inch_tick = 5
         for x_in in range(0, 69, inch_tick):
             x_px, _ = self._inches_to_canvas(x_in, 0)
@@ -366,9 +367,13 @@ class FabricCNCApp:
         self.canvas.create_rectangle(0, 0, self.canvas_width, self.canvas_height, outline="#333", width=2)
 
     def _inches_to_canvas(self, x_in, y_in):
-        sx = self.canvas_width / 68
-        sy = self.canvas_height / 45
-        ox, oy = 0, 0
+        # Add buffer to all sides
+        plot_width_in = 68 + 2 * PLOT_BUFFER_IN
+        plot_height_in = 45 + 2 * PLOT_BUFFER_IN
+        sx = self.canvas_width / plot_width_in
+        sy = self.canvas_height / plot_height_in
+        ox = PLOT_BUFFER_IN * sx
+        oy = PLOT_BUFFER_IN * sy
         return x_in * sx + ox, y_in * sy + oy
 
     def _draw_tool_head_inches(self, pos):
