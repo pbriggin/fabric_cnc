@@ -409,6 +409,8 @@ class FabricCNCApp:
                 x2, y2 = e.dxf.end.x, e.dxf.end.y
                 x1c, y1c = self._inches_to_canvas(x1, y1)
                 x2c, y2c = self._inches_to_canvas(x2, y2)
+                y1c = self.canvas_height - y1c
+                y2c = self.canvas_height - y2c
                 print(f"[DEBUG] Drawing LINE: ({x1:.2f}, {y1:.2f}) -> ({x2:.2f}, {y2:.2f}) | canvas: ({x1c:.2f}, {y1c:.2f}) -> ({x2c:.2f}, {y2c:.2f})")
                 self.canvas.create_line(x1c, y1c, x2c, y2c, fill="#222", width=2)
             elif t == 'LWPOLYLINE':
@@ -416,6 +418,7 @@ class FabricCNCApp:
                 flat = []
                 for x, y in points:
                     x_c, y_c = self._inches_to_canvas(x, y)
+                    y_c = self.canvas_height - y_c
                     print(f"[DEBUG] Drawing LWPOLYLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#0077cc", width=2)
@@ -424,6 +427,7 @@ class FabricCNCApp:
                 flat = []
                 for x, y in points:
                     x_c, y_c = self._inches_to_canvas(x, y)
+                    y_c = self.canvas_height - y_c
                     print(f"[DEBUG] Drawing POLYLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#cc7700", width=2)
@@ -437,6 +441,7 @@ class FabricCNCApp:
                     x_transformed = (x * scale - dx)
                     y_transformed = (y * scale - dy)
                     x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
+                    y_c = self.canvas_height - y_c
                     print(f"[DEBUG] Drawing SPLINE pt: ({x:.2f}, {y:.2f}) | transformed: ({x_transformed:.2f}, {y_transformed:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#00aa88", width=2)
@@ -459,6 +464,7 @@ class FabricCNCApp:
                 flat = []
                 for x, y in points:
                     x_c, y_c = self._inches_to_canvas(x, y)
+                    y_c = self.canvas_height - y_c
                     print(f"[DEBUG] Drawing ARC pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#aa00cc", width=2)
@@ -477,6 +483,7 @@ class FabricCNCApp:
                 flat = []
                 for x, y in points:
                     x_c, y_c = self._inches_to_canvas(x, y)
+                    y_c = self.canvas_height - y_c
                     print(f"[DEBUG] Drawing CIRCLE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#cc2222", width=2)
