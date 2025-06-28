@@ -796,17 +796,41 @@ class FabricCNCApp:
             # Transform all points
             pts_t = [(x * scale - dx, dy - y * scale) for x, y in pts_ccw]
             path = []
+            # Angle threshold for corners (in radians)
+            angle_thresh = math.radians(30)
+            n = len(pts_t)
+            # Start: move to first point, Z up, then Z down
+            if n < 2:
+                continue
             angle0 = math.atan2(pts_t[1][1] - pts_t[0][1], pts_t[1][0] - pts_t[0][0])
             path.append((pts_t[0][0], pts_t[0][1], angle0, 1))  # Z up
             path.append((pts_t[0][0], pts_t[0][1], angle0, 0))  # Z down
-            for i in range(1, len(pts_t)):
+            for i in range(1, n):
                 x0, y0 = pts_t[i-1]
                 x1, y1 = pts_t[i]
                 angle = math.atan2(y1 - y0, x1 - x0)
-                if i > 1:
-                    path.append((x0, y0, angle, 1))  # Z up
-                    path.append((x0, y0, angle, 0))  # Z down
+                # Detect corners for polylines (not for smooth curves)
+                is_corner = False
+                if 1 <= i < n-1:
+                    # Compute angle between previous, current, next
+                    x_prev, y_prev = pts_t[i-2] if i-2 >= 0 else pts_t[i-1]
+                    x_next, y_next = pts_t[i+1] if i+1 < n else pts_t[i]
+                    v1 = (x0 - x_prev, y0 - y_prev)
+                    v2 = (x1 - x0, y1 - y0)
+                    len1 = math.hypot(*v1)
+                    len2 = math.hypot(*v2)
+                    if len1 > 1e-8 and len2 > 1e-8:
+                        dot = v1[0]*v2[0] + v1[1]*v2[1]
+                        cos_theta = dot / (len1 * len2)
+                        cos_theta = max(-1.0, min(1.0, cos_theta))
+                        theta = math.acos(cos_theta)
+                        if theta > angle_thresh:
+                            is_corner = True
+                if is_corner:
+                    path.append((x0, y0, angle, 1))  # Z up at corner
+                    path.append((x0, y0, angle, 0))  # Z down at corner
                 path.append((x1, y1, angle, 0))  # Move/cut
+            # End: Z up at last point
             path.append((pts_t[-1][0], pts_t[-1][1], angle, 1))  # Z up at end
             toolpaths.append(path)
         self.toolpaths = toolpaths
