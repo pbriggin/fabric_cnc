@@ -6,16 +6,4 @@ Comment=Launches the Fabric CNC
 Exec=/home/fabric/Code/fabric_cnc/launch_motor_test.sh
 Icon=applications-engineering
 Terminal=false
-Categories=Utility;
-
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=Fabric CNC Main App
-Comment=Launch Fabric CNC Main Application on Raspberry Pi
-Exec=/home/fabric/fabric_cnc/launch_motor_test.sh
-Path=/home/fabric/fabric_cnc
-Icon=applications-engineering
-Terminal=true
-Categories=Development;Engineering;Hardware;
-Keywords=CNC;Motor;Fabric;Raspberry;Pi;GPIO; 
+Categories=Utility; 
