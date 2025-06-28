@@ -161,8 +161,8 @@ enable_interfaces() {
     # Enable SPI (if needed)
     sudo raspi-config nonint do_spi 0
     
-    # Enable GPIO
-    sudo raspi-config nonint do_gpio 0
+    # GPIO is enabled by default on Raspberry Pi
+    print_status "GPIO is enabled by default"
     
     print_success "Interfaces enabled"
 }

@@ -105,7 +105,7 @@ pip install -e .
 ```bash
 sudo raspi-config nonint do_i2c 0
 sudo raspi-config nonint do_spi 0
-sudo raspi-config nonint do_gpio 0
+# GPIO is enabled by default on Raspberry Pi
 ```
 
 ## Usage
