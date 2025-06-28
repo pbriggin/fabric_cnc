@@ -318,7 +318,11 @@ class FabricCNCApp:
             self._draw_toolpath()
         # Draw current tool head position
         pos = self.motor_ctrl.get_position()
-        self._draw_tool_head(pos)
+        # Clamp the position to the plot area
+        x = max(0.0, min(pos['X'], X_MAX_MM))
+        y = max(0.0, min(pos['Y'], Y_MAX_MM))
+        clamped_pos = {'X': x, 'Y': y}
+        self._draw_tool_head(clamped_pos)
 
     def _draw_dxf_entities(self):
         # Fit DXF extents to canvas
@@ -355,12 +359,16 @@ class FabricCNCApp:
         x, y = pos['X'], pos['Y']
         x_c, y_c = self._dxf_to_canvas(x, y)
         r = 7
-        self.canvas.create_oval(x_c - r, self.canvas_height - y_c - r, x_c + r, self.canvas_height - y_c + r, fill="#0a0", outline="#080", width=2)
-        self.canvas.create_text(x_c, self.canvas_height - y_c - 18, text=f"({x:.1f}, {y:.1f}) mm", fill="#080", font=("Arial", 10, "bold"))
+        # Invert Y so that Y=0 is at the bottom, Y=Y_MAX_MM is at the top
+        y_c = self.canvas_height - y_c
+        self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill="#0a0", outline="#080", width=2)
+        self.canvas.create_text(x_c, y_c - 18, text=f"({x/INCH_TO_MM:.1f}\", {y/INCH_TO_MM:.1f}\")", fill="#080", font=("Arial", 10, "bold"))
 
     def _dxf_to_canvas(self, x, y):
-        sx, sy = self.canvas_scale, self.canvas_scale
-        ox, oy = self.canvas_offset
+        # Always scale so that X_MAX_MM maps to canvas_width, Y_MAX_MM maps to canvas_height
+        sx = self.canvas_width / X_MAX_MM
+        sy = self.canvas_height / Y_MAX_MM
+        ox, oy = 0, 0
         return x * sx + ox, y * sy + oy
 
     def _get_dxf_extents(self):
