@@ -422,8 +422,8 @@ class FabricCNCApp:
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#cc7700", width=2)
             elif t == 'SPLINE':
-                # Approximate with polyline (32 segments)
-                points = list(e.approximate(32))
+                # Approximate with polyline using flattening (0.1 units tolerance)
+                points = list(e.flattening(0.1))
                 flat = []
                 for x, y, *_ in points:
                     x_c, y_c = self._inches_to_canvas(x, y)
