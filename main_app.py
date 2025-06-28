@@ -303,6 +303,7 @@ class FabricCNCApp:
         ttk.Button(self.left_toolbar, text="Import DXF File", command=self._import_dxf).pack(fill=tk.X, padx=10, pady=8)
         self.gen_toolpath_btn = ttk.Button(self.left_toolbar, text="Generate Toolpath", command=self._generate_toolpath, state=tk.DISABLED)
         self.gen_toolpath_btn.pack(fill=tk.X, padx=10, pady=8)
+        ttk.Button(self.left_toolbar, text="Plot Test Triangle", command=self._plot_test_triangle).pack(fill=tk.X, padx=10, pady=8)
         ttk.Separator(self.left_toolbar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=20)
         
         # System status
@@ -458,7 +459,7 @@ class FabricCNCApp:
             messagebox.showerror("DXF Import Error", str(e))
 
     def _auto_orient_dxf_top_left(self, debug=False):
-        # Find extents in inches
+        # Only translate so min_x, min_y is at (0, 0), no scaling, no y-flip
         scale = getattr(self, 'dxf_unit_scale', 1.0)
         min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
         if min_x is None or min_y is None or Vec3 is None:
@@ -467,22 +468,19 @@ class FabricCNCApp:
             return  # Nothing to orient or ezdxf not available
         dx = min_x
         dy = min_y
-        y_top = 45
         if debug:
             print(f"[DEBUG] DXF extents (inches): min_x={min_x}, min_y={min_y}, max_x={max_x}, max_y={max_y}, scale={scale}")
         for i, e in enumerate(self.dxf_entities):
             if e.dxftype() == 'LINE':
-                # Convert to inches, translate to (0, y_top), flip Y
+                # Convert to inches, translate to (0,0), no y-flip
                 x1 = (e.dxf.start.x * scale - dx)
                 y1 = (e.dxf.start.y * scale - dy)
                 x2 = (e.dxf.end.x * scale - dx)
                 y2 = (e.dxf.end.y * scale - dy)
-                y1_flipped = y_top - y1
-                y2_flipped = y_top - y2
-                new_start = Vec3(x1, y1_flipped, e.dxf.start.z * scale if hasattr(e.dxf.start, 'z') else 0.0)
-                new_end = Vec3(x2, y2_flipped, e.dxf.end.z * scale if hasattr(e.dxf.end, 'z') else 0.0)
+                new_start = Vec3(x1, y1, e.dxf.start.z * scale if hasattr(e.dxf.start, 'z') else 0.0)
+                new_end = Vec3(x2, y2, e.dxf.end.z * scale if hasattr(e.dxf.end, 'z') else 0.0)
                 if debug and i < 5:
-                    print(f"[DEBUG] LINE {i}: ({x1:.2f}, {y1_flipped:.2f}) -> ({x2:.2f}, {y2_flipped:.2f})")
+                    print(f"[DEBUG] LINE {i}: ({x1:.2f}, {y1:.2f}) -> ({x2:.2f}, {y2:.2f})")
                 e.dxf.start = new_start
                 e.dxf.end = new_end
             elif e.dxftype() == 'LWPOLYLINE':
@@ -491,10 +489,9 @@ class FabricCNCApp:
                 for j, p in enumerate(pts):
                     x = (p[0] * scale - dx)
                     y = (p[1] * scale - dy)
-                    y_flipped = y_top - y
                     if debug and i < 2 and j < 5:
-                        print(f"[DEBUG] LWPOLYLINE {i} pt{j}: ({x:.2f}, {y_flipped:.2f})")
-                    new_pts.append((x, y_flipped) + p[2:])
+                        print(f"[DEBUG] LWPOLYLINE {i} pt{j}: ({x:.2f}, {y:.2f})")
+                    new_pts.append((x, y) + p[2:])
                 e.points = new_pts
 
     def _get_dxf_extents_inches(self):
@@ -545,6 +542,32 @@ class FabricCNCApp:
                 last = pts[-1]
         self.toolpath = toolpath
         logger.info(f"Generated toolpath with {len(toolpath)} segments.")
+        self._draw_canvas()
+
+    def _plot_test_triangle(self):
+        # Plot a hardcoded triangle: (0,0), (5.77,0), (2.885,5) inches
+        from types import SimpleNamespace
+        class DummyLine:
+            def __init__(self, x1, y1, x2, y2):
+                self._start = SimpleNamespace(x=x1, y=y1, z=0)
+                self._end = SimpleNamespace(x=x2, y=y2, z=0)
+            def dxftype(self):
+                return 'LINE'
+            @property
+            def dxf(self):
+                return SimpleNamespace(start=self._start, end=self._end)
+            @dxf.setter
+            def dxf(self, val):
+                self._start = val.start
+                self._end = val.end
+        # Vertices in inches
+        pts = [(0,0), (5.77,0), (2.885,5)]
+        lines = [DummyLine(*pts[i], *pts[(i+1)%3]) for i in range(3)]
+        self.dxf_doc = None
+        self.dxf_entities = lines
+        self.toolpath = []
+        self.gen_toolpath_btn.config(state=tk.DISABLED)
+        self.dxf_unit_scale = 1.0  # inches
         self._draw_canvas()
 
     # --- Right Toolbar: Motor controls ---
