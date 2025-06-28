@@ -45,7 +45,7 @@ INCH_TO_MM = 25.4
 X_MAX_MM = 68 * INCH_TO_MM
 Y_MAX_MM = 45 * INCH_TO_MM
 Z_MAX_MM = 2 * INCH_TO_MM
-PLOT_BUFFER_IN = 0.5  # 0.5 inch buffer on all sides
+PLOT_BUFFER_IN = 1.0  # 1.0 inch buffer on all sides (was 0.5)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fabric_cnc.main_app")
@@ -599,6 +599,11 @@ def main():
     print("[DEBUG] FabricCNCApp instance created. Entering mainloop...")
     root.mainloop()
     print("[DEBUG] mainloop exited.")
+
+    # In main(), print debug info for simulation mode
+    print(f"[DEBUG] ON_RPI={ON_RPI}")
+    print(f"[DEBUG] MOTOR_IMPORTS_AVAILABLE={MOTOR_IMPORTS_AVAILABLE}")
+    print(f"[DEBUG] SIMULATION_MODE={SIMULATION_MODE}")
 
 if __name__ == "__main__":
     main() 
