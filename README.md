@@ -82,6 +82,8 @@ sudo apt install -y python3 python3-pip python3-venv python3-tk git build-essent
 sudo apt install -y python3-gpiozero i2c-tools python3-smbus
 ```
 
+**Note**: `python3-tk` is required for the GUI interface and must be installed via apt, not pip.
+
 ### 2. Setup GPIO Permissions
 ```bash
 sudo usermod -a -G gpio,i2c,spi $USER

@@ -84,6 +84,7 @@ install_packages() {
         python3-smbus
     
     print_success "Required packages installed"
+    print_status "Note: python3-tk is required for the GUI interface"
 }
 
 # Setup GPIO permissions
