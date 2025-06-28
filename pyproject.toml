@@ -1,27 +1,52 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "fabric_cnc"
-version = "0.1.0"
-description = "CNC fabric cutter control software"
-authors = [
-    {name = "Peter Briggs", email = "pacbriggs@gmail.com"},
-]
-dependencies = [
-    "RPi.GPIO>=0.7.0",
-    "tkinter",
-]
-requires-python = ">=3.8"
+name = "fabric-cnc"
+version = "1.0.0"
+description = "Fabric CNC machine control system for Raspberry Pi"
 readme = "README.md"
 license = {text = "MIT"}
+authors = [
+    {name = "Peter Briggs", email = "peter@example.com"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Manufacturing",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Manufacturing",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "RPi.GPIO>=2.0.0",
+    "tkinter",  # Usually included with Python
+    "ezdxf>=1.0.0",  # Optional: for DXF file processing
+]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "flake8>=5.0.0",
+]
 
-[tool.hatch.metadata]
-allow-direct-references = true
+[project.scripts]
+fabric-cnc = "fabric_cnc.main_app:main"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/fabric_cnc"]
+[project.urls]
+Homepage = "https://github.com/pbriggin/fabric_cnc"
+Repository = "https://github.com/pbriggin/fabric_cnc.git"
+Issues = "https://github.com/pbriggin/fabric_cnc/issues"
 
-[tool.poetry.dependencies]
-ezdxf = "^1.1.1" 
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+fabric_cnc = ["*.txt", "*.md"] 

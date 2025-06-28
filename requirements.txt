@@ -1,0 +1,8 @@
+# Core dependencies for Fabric CNC
+RPi.GPIO>=2.0.0
+ezdxf>=1.0.0
+
+# Development dependencies (optional)
+# pytest>=7.0.0
+# black>=22.0.0
+# flake8>=5.0.0 
