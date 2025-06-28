@@ -1,6 +1,6 @@
-# Fabric CNC Motor Test Launcher (Raspberry Pi)
+# Fabric CNC Main App Launcher (Raspberry Pi)
 
-This directory contains launcher scripts to easily start the Fabric CNC Motor Test UI on Raspberry Pi systems.
+This directory contains launcher scripts to easily start the Fabric CNC Main Application on Raspberry Pi systems.
 
 ## Prerequisites
 
@@ -30,7 +30,7 @@ pip install -e .
 
 ## Files
 
-- `launch_motor_test.sh` - Main launcher script for Raspberry Pi
+- `launch_motor_test.sh` - Main launcher script for Raspberry Pi (runs main_app.py)
 - `fabric-cnc-motor-test.desktop` - Desktop entry file for Raspberry Pi OS
 - `LAUNCHER_README.md` - This file
 
@@ -53,7 +53,7 @@ pip install -e .
    chmod +x ~/.local/share/applications/fabric-cnc-motor-test.desktop
    ```
 
-3. **Search for "Fabric CNC Motor Test" in the Raspberry Pi menu**
+3. **Search for "Fabric CNC Main App" in the Raspberry Pi menu**
 
 ### Option 3: Add to Desktop
 ```bash
@@ -73,8 +73,8 @@ chmod +x ~/Desktop/fabric-cnc-motor-test.desktop
    - Activates the Python virtual environment
    - Installs package in development mode
 
-3. **Launches the UI:**
-   - Runs the motor test interface
+3. **Launches the main app:**
+   - Runs the main Fabric CNC application (main_app.py)
    - Provides GPIO access warnings if needed
 
 ## Hardware Requirements
@@ -110,12 +110,12 @@ chmod +x launch_motor_test.sh
 - Check hardware connections
 - Verify motor driver connections
 
-### "Motor test UI not found"
+### "Main app not found"
 Make sure you're running the script from the fabric_cnc project root directory.
 
 ## GPIO Pin Configuration
 
-The motor test UI uses these GPIO pins:
+The main app uses these GPIO pins:
 
 - **X Motor**: STEP=5, DIR=6, EN=13, HALL=20
 - **Y1 Motor**: STEP=10, DIR=9, EN=11, HALL=21
@@ -151,7 +151,7 @@ sudo cp fabric-cnc-motor-test.desktop /usr/share/applications/
 
 ## Performance Tips
 
-- **Close other applications** when running motor tests
+- **Close other applications** when running the main app
 - **Use wired network** instead of WiFi for better performance
 - **Monitor CPU temperature** during extended operation
 - **Consider using a heatsink** on the Raspberry Pi 

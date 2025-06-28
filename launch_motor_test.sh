@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# Fabric CNC Motor Test Launcher for Raspberry Pi
-# This script activates the virtual environment and launches the motor test UI
+# Fabric CNC Main App Launcher for Raspberry Pi
+# This script activates the virtual environment and launches the main Fabric CNC application
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "=== Fabric CNC Motor Test Launcher (Raspberry Pi) ==="
+echo "=== Fabric CNC Main App Launcher (Raspberry Pi) ==="
 echo "Script directory: $SCRIPT_DIR"
 echo ""
 
@@ -27,10 +27,10 @@ if [ ! -d "venv" ]; then
     exit 1
 fi
 
-# Check if the motor test UI file exists
-if [ ! -f "src/fabric_cnc/motor_control/motor_test_ui.py" ]; then
-    echo "Error: Motor test UI not found!"
-    echo "Expected: src/fabric_cnc/motor_control/motor_test_ui.py"
+# Check if the main app file exists
+if [ ! -f "src/fabric_cnc/main_app.py" ]; then
+    echo "Error: Main app not found!"
+    echo "Expected: src/fabric_cnc/main_app.py"
     read -p "Press Enter to exit..."
     exit 1
 fi
@@ -48,17 +48,17 @@ source venv/bin/activate
 echo "Installing package in development mode..."
 pip install -e . > /dev/null 2>&1
 
-echo "Launching Motor Test UI..."
+echo "Launching Fabric CNC Main App..."
 echo "Note: This requires GPIO access for motor control"
 echo ""
 
-# Run the motor test UI
-python3 src/fabric_cnc/motor_control/motor_test_ui.py
+# Run the main app
+python3 src/fabric_cnc/main_app.py
 
 # Keep terminal open if there's an error
 if [ $? -ne 0 ]; then
     echo ""
-    echo "Motor Test UI exited with an error."
+    echo "Fabric CNC Main App exited with an error."
     echo "Check GPIO permissions and hardware connections."
     read -p "Press Enter to exit..."
 fi 

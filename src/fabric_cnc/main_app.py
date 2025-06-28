@@ -12,16 +12,33 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import threading
 import platform
+import time
 
 # Try to import ezdxf for DXF parsing
 try:
     import ezdxf
+    EZDXF_AVAILABLE = True
 except ImportError:
     ezdxf = None
+    EZDXF_AVAILABLE = False
 
-# Simulation mode if not on Raspberry Pi
+# Import motor control modules
+try:
+    from .motor_control.motor_controller import MotorController
+    MOTOR_IMPORTS_AVAILABLE = True
+except ImportError:
+    MOTOR_IMPORTS_AVAILABLE = False
+
+# Import GPIO only if on Raspberry Pi
+try:
+    import RPi.GPIO as GPIO
+    GPIO_AVAILABLE = True
+except ImportError:
+    GPIO_AVAILABLE = False
+
+# Simulation mode if not on Raspberry Pi or motor imports failed
 ON_RPI = platform.system() == 'Linux' and os.uname().machine.startswith('arm')
-SIMULATION_MODE = not ON_RPI
+SIMULATION_MODE = not ON_RPI or not MOTOR_IMPORTS_AVAILABLE
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fabric_cnc.main_app")
@@ -31,6 +48,7 @@ class SimulatedMotorController:
     def __init__(self):
         self.position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
         self.lock = threading.Lock()
+        self.is_homing = False
 
     def jog(self, axis, delta):
         with self.lock:
@@ -39,8 +57,15 @@ class SimulatedMotorController:
 
     def home(self, axis):
         with self.lock:
+            if self.is_homing:
+                return False
+            self.is_homing = True
+            # Simulate homing delay
+            time.sleep(2)
             self.position[axis] = 0.0
+            self.is_homing = False
             logger.info(f"Homed {axis} axis.")
+            return True
 
     def get_position(self):
         with self.lock:
@@ -49,13 +74,104 @@ class SimulatedMotorController:
     def estop(self):
         logger.warning("EMERGENCY STOP triggered (simulated)")
 
+    def cleanup(self):
+        """Clean up resources (simulated)."""
+        logger.info("Simulated motor controller cleanup")
+
+# --- Real Motor Controller Wrapper ---
+class RealMotorController:
+    def __init__(self):
+        self.motor_controller = MotorController()
+        self.lock = threading.Lock()
+        self.is_homing = False
+        self.position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}  # Track position manually
+
+    def jog(self, axis, delta):
+        with self.lock:
+            try:
+                if axis == 'X':
+                    self.motor_controller.move_distance(delta, 'X')
+                    self.position['X'] += delta
+                elif axis == 'Y':
+                    self.motor_controller.move_distance(delta, 'Y')
+                    self.position['Y'] += delta
+                elif axis == 'Z':
+                    # Z not implemented yet
+                    logger.warning("Z axis not implemented")
+                elif axis == 'ROT':
+                    # Rotation not implemented yet
+                    logger.warning("Rotation axis not implemented")
+                logger.info(f"Jogged {axis} by {delta}mm")
+            except Exception as e:
+                logger.error(f"Jog error on {axis}: {e}")
+
+    def home(self, axis):
+        with self.lock:
+            if self.is_homing:
+                return False
+            self.is_homing = True
+            try:
+                if axis == 'X':
+                    self.motor_controller.home_axis('X')
+                    self.position['X'] = 0.0
+                    success = True
+                elif axis == 'Y':
+                    self.motor_controller.home_axis('Y')
+                    self.position['Y'] = 0.0
+                    success = True
+                elif axis == 'Z':
+                    logger.warning("Z axis homing not implemented")
+                    success = False
+                elif axis == 'ROT':
+                    logger.warning("Rotation axis homing not implemented")
+                    success = False
+                else:
+                    success = False
+                self.is_homing = False
+                return success
+            except Exception as e:
+                logger.error(f"Home error on {axis}: {e}")
+                self.is_homing = False
+                return False
+
+    def get_position(self):
+        with self.lock:
+            return dict(self.position)
+
+    def estop(self):
+        try:
+            if GPIO_AVAILABLE:
+                # Emergency stop - disable all motors
+                for motor, config in self.motor_controller.motors.items():
+                    GPIO.output(config['EN'], GPIO.HIGH)
+                    GPIO.output(config['STEP'], GPIO.LOW)
+                    GPIO.output(config['DIR'], GPIO.LOW)
+            logger.warning("EMERGENCY STOP triggered")
+        except Exception as e:
+            logger.error(f"E-stop error: {e}")
+
+    def cleanup(self):
+        try:
+            if GPIO_AVAILABLE:
+                GPIO.cleanup()
+        except Exception as e:
+            logger.error(f"Cleanup error: {e}")
+
 # --- Main App ---
 class FabricCNCApp:
     def __init__(self, root):
         print("[DEBUG] FabricCNCApp.__init__ called")
         self.root = root
         self.root.title("Fabric CNC Main App")
-        self.motor_ctrl = SimulatedMotorController()
+        
+        # Initialize motor controller based on system
+        if SIMULATION_MODE:
+            print("Running in SIMULATION MODE")
+            self.motor_ctrl = SimulatedMotorController()
+        else:
+            print("Running with REAL MOTOR CONTROL")
+            self.motor_ctrl = RealMotorController()
+        
         self.dxf_doc = None
         self.dxf_entities = []
         self.toolpath = []
@@ -133,7 +249,20 @@ class FabricCNCApp:
         self.gen_toolpath_btn = ttk.Button(self.left_toolbar, text="Generate Toolpath", command=self._generate_toolpath, state=tk.DISABLED)
         self.gen_toolpath_btn.pack(fill=tk.X, padx=10, pady=8)
         ttk.Separator(self.left_toolbar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=20)
-        # Add more DXF/toolpath tools here as needed
+        
+        # System status
+        status_frame = ttk.LabelFrame(self.left_toolbar, text="System Status")
+        status_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        mode_text = "SIMULATION" if SIMULATION_MODE else "REAL MOTORS"
+        mode_color = "red" if SIMULATION_MODE else "green"
+        self.status_label = ttk.Label(status_frame, text=f"Mode: {mode_text}", foreground=mode_color)
+        self.status_label.pack(pady=5)
+        
+        if not MOTOR_IMPORTS_AVAILABLE:
+            ttk.Label(status_frame, text="Motor modules not found", foreground="orange").pack(pady=2)
+        if not ON_RPI:
+            ttk.Label(status_frame, text="Not on Raspberry Pi", foreground="orange").pack(pady=2)
 
     # --- Center Canvas: DXF/toolpath/position ---
     def _setup_center_canvas(self):
@@ -270,6 +399,7 @@ class FabricCNCApp:
     # --- Right Toolbar: Motor controls ---
     def _setup_right_toolbar(self):
         ttk.Label(self.right_toolbar, text="Motor Controls", font=("Arial", 14, "bold")).pack(pady=(20, 10))
+        
         # Jog controls (arrow key layout)
         jog_frame = ttk.LabelFrame(self.right_toolbar, text="Jog")
         jog_frame.pack(fill=tk.X, padx=10, pady=8)
@@ -287,6 +417,7 @@ class FabricCNCApp:
         self._add_jog_button(jog_frame, "→", lambda: self._jog('X', +self.jog_speed)).grid(row=1, column=2, padx=2, pady=2)
         # Bottom: Down arrow
         self._add_jog_button(jog_frame, "↓", lambda: self._jog('Y', -self.jog_speed)).grid(row=2, column=1, padx=2, pady=2)
+        
         # Z and ROT jogs below
         zrot_frame = ttk.Frame(self.right_toolbar)
         zrot_frame.pack(fill=tk.X, padx=10, pady=(0, 8))
@@ -294,6 +425,7 @@ class FabricCNCApp:
         self._add_jog_button(zrot_frame, "Z-", lambda: self._jog('Z', -1)).grid(row=0, column=1, padx=2, pady=2)
         self._add_jog_button(zrot_frame, "ROT+", lambda: self._jog('ROT', +5)).grid(row=0, column=2, padx=2, pady=2)
         self._add_jog_button(zrot_frame, "ROT-", lambda: self._jog('ROT', -5)).grid(row=0, column=3, padx=2, pady=2)
+        
         # Speed adjustment
         speed_frame = ttk.Frame(self.right_toolbar)
         speed_frame.pack(fill=tk.X, padx=10, pady=(0, 8))
@@ -302,6 +434,7 @@ class FabricCNCApp:
         speed_spin = ttk.Spinbox(speed_frame, from_=1, to=100, textvariable=self.jog_speed_var, width=5, command=self._update_jog_speed)
         speed_spin.pack(side=tk.LEFT, padx=5)
         self.jog_speed_var.trace_add('write', lambda *a: self._update_jog_speed())
+        
         # Home controls
         home_frame = ttk.LabelFrame(self.right_toolbar, text="Home")
         home_frame.pack(fill=tk.X, padx=10, pady=8)
@@ -309,9 +442,13 @@ class FabricCNCApp:
         ttk.Button(home_frame, text="Home Y", command=lambda: self._home('Y')).pack(fill=tk.X, pady=2)
         ttk.Button(home_frame, text="Home Z", command=lambda: self._home('Z')).pack(fill=tk.X, pady=2)
         ttk.Button(home_frame, text="Home ROT", command=lambda: self._home('ROT')).pack(fill=tk.X, pady=2)
+        ttk.Button(home_frame, text="Home All", command=self._home_all).pack(fill=tk.X, pady=2)
+        
         # E-stop
         ttk.Separator(self.right_toolbar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-        ttk.Button(self.right_toolbar, text="EMERGENCY STOP", command=self._estop, style="Danger.TButton").pack(fill=tk.X, padx=10, pady=10)
+        estop_btn = ttk.Button(self.right_toolbar, text="EMERGENCY STOP", command=self._estop)
+        estop_btn.pack(fill=tk.X, padx=10, pady=10)
+        
         # Coordinates display
         ttk.Separator(self.right_toolbar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
         self.coord_label = ttk.Label(self.right_toolbar, text="", font=("Consolas", 13, "bold"), foreground="#333")
@@ -327,13 +464,32 @@ class FabricCNCApp:
         self._update_position_display()
 
     def _home(self, axis):
-        self.motor_ctrl.home(axis)
+        success = self.motor_ctrl.home(axis)
+        if success:
+            messagebox.showinfo("Homing Complete", f"{axis} axis homed successfully")
+        else:
+            messagebox.showerror("Homing Failed", f"Failed to home {axis} axis")
+        self._draw_canvas()
+        self._update_position_display()
+
+    def _home_all(self):
+        """Home all axes in sequence"""
+        axes = ['X', 'Y', 'Z', 'ROT']
+        for axis in axes:
+            if axis in ['Z', 'ROT']:
+                # Skip unimplemented axes
+                continue
+            success = self.motor_ctrl.home(axis)
+            if not success:
+                messagebox.showerror("Homing Failed", f"Failed to home {axis} axis")
+                return
+        messagebox.showinfo("Homing Complete", "All axes homed successfully")
         self._draw_canvas()
         self._update_position_display()
 
     def _estop(self):
         self.motor_ctrl.estop()
-        messagebox.showwarning("EMERGENCY STOP", "All motors stopped (simulated)")
+        messagebox.showwarning("EMERGENCY STOP", "All motors stopped")
 
     def _update_position_display(self):
         pos = self.motor_ctrl.get_position()
@@ -343,13 +499,18 @@ class FabricCNCApp:
 
     def _update_jog_speed(self):
         try:
-            self.jog_speed = int(self.jog_speed_var.get())
-        except Exception:
-            self.jog_speed = 10
+            self.jog_speed = self.jog_speed_var.get()
+        except tk.TclError:
+            pass
 
     def _on_close(self):
-        if messagebox.askokcancel("Quit", "Do you want to quit the Fabric CNC app?"):
-            self.root.destroy()
+        """Clean up resources before closing."""
+        try:
+            if hasattr(self.motor_ctrl, 'cleanup'):
+                self.motor_ctrl.cleanup()
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+        self.root.destroy()
 
 # --- Main entry point ---
 def main():

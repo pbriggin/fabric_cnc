@@ -3,7 +3,7 @@ name = "fabric_cnc"
 version = "0.1.0"
 description = "CNC fabric cutter control software"
 authors = [
-    {name = "Peter Briggs", email = "pbriggs@tandem.com"},
+    {name = "Peter Briggs", email = "pacbriggs@gmail.com"},
 ]
 dependencies = [
     "RPi.GPIO>=0.7.0",
