@@ -721,11 +721,11 @@ class FabricCNCApp:
         self.preview_btn.config(state=tk.NORMAL)
 
     def _preview_toolpath(self):
-        """Animate the toolpath preview, showing the end effector moving with orientation and Z state, one shape at a time."""
+        """Animate the toolpath preview, showing the end effector moving with orientation and Z state, one shape at a time, without clearing between shapes."""
         if not hasattr(self, 'toolpaths') or not self.toolpaths:
             messagebox.showwarning("No Toolpath", "Generate a toolpath first.")
             return
-        self._draw_canvas()  # Clear previous preview
+        self._draw_canvas()  # Clear previous preview only once
         
         def animate_shape(shape_idx=0):
             if shape_idx >= len(self.toolpaths):
