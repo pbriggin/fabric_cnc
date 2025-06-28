@@ -538,6 +538,7 @@ class FabricCNCApp:
             scale = getattr(self, 'dxf_unit_scale', 1.0)
             for i, e in enumerate(entities):
                 t = e.dxftype()
+                xs, ys = [], []
                 if t == 'LINE':
                     xs = [e.dxf.start.x * scale, e.dxf.end.x * scale]
                     ys = [e.dxf.start.y * scale, e.dxf.end.y * scale]
