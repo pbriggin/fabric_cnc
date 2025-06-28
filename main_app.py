@@ -721,33 +721,34 @@ class FabricCNCApp:
         self.preview_btn.config(state=tk.NORMAL)
 
     def _preview_toolpath(self):
-        """Animate the toolpath preview, showing the end effector moving with orientation and Z state."""
+        """Animate the toolpath preview, showing the end effector moving with orientation and Z state, one shape at a time."""
         if not hasattr(self, 'toolpaths') or not self.toolpaths:
             messagebox.showwarning("No Toolpath", "Generate a toolpath first.")
             return
         self._draw_canvas()  # Clear previous preview
-        # Flatten all toolpaths into a single list of (x, y, angle, z)
-        steps = []
-        for path in self.toolpaths:
-            steps.extend(path)
-        # Animate
-        def animate(idx=0):
-            if idx >= len(steps):
+        
+        def animate_shape(shape_idx=0):
+            if shape_idx >= len(self.toolpaths):
                 return
-            x, y, angle, z = steps[idx]
-            # Draw tool head
-            r = 0.5  # radius in inches
-            x_c, y_c = self._inches_to_canvas(x, y)
-            color = "#0a0" if z == 0 else "#aaa"
-            self.canvas.create_oval(x_c-6, y_c-6, x_c+6, y_c+6, fill=color, outline="#000")
-            # Draw orientation line (wheel direction)
-            x2 = x + r * math.cos(angle)
-            y2 = y + r * math.sin(angle)
-            x2_c, y2_c = self._inches_to_canvas(x2, y2)
-            self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill="#f0a", width=3)
-            # Schedule next step
-            self.root.after(60, animate, idx+1)
-        animate()
+            path = self.toolpaths[shape_idx]
+            def animate_step(idx=0):
+                if idx >= len(path):
+                    # After this shape, wait then animate next shape
+                    self.root.after(400, animate_shape, shape_idx+1)
+                    return
+                x, y, angle, z = path[idx]
+                r = 0.5  # radius in inches
+                x_c, y_c = self._inches_to_canvas(x, y)
+                color = "#0a0" if z == 0 else "#aaa"
+                self.canvas.create_oval(x_c-6, y_c-6, x_c+6, y_c+6, fill=color, outline="#000")
+                # Draw orientation line (wheel direction)
+                x2 = x + r * math.cos(angle)
+                y2 = y + r * math.sin(angle)
+                x2_c, y2_c = self._inches_to_canvas(x2, y2)
+                self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill="#f0a", width=3)
+                self.root.after(60, animate_step, idx+1)
+            animate_step()
+        animate_shape()
 
     # --- Right Toolbar: Motor controls ---
     def _setup_right_toolbar(self):
