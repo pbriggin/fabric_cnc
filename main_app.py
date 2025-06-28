@@ -440,12 +440,11 @@ class FabricCNCApp:
                 return
             # Detect units
             insunits = doc.header.get('$INSUNITS', 0)
+            # 1 = inches, 4 = mm, 0 = unitless (assume inches)
             if insunits == 4:
                 self.dxf_unit_scale = 1.0 / 25.4  # mm to in
-            elif insunits == 1:
-                self.dxf_unit_scale = 1.0  # inches
             else:
-                self.dxf_unit_scale = 1.0 / 25.4
+                self.dxf_unit_scale = 1.0  # inches or unitless
             self.dxf_doc = doc
             self.dxf_entities = entities
             self.toolpath = []
