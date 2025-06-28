@@ -191,8 +191,30 @@ class FabricCNCApp:
         print("[DEBUG] FabricCNCApp.__init__ called")
         self.root = root
         self.root.title("Fabric CNC Main App")
-        # Maximize window by default
-        self.root.state('zoomed')
+        # Maximize window by default (cross-platform)
+        maximized = False
+        try:
+            self.root.state('zoomed')  # Windows, some Linux
+            maximized = True
+        except Exception:
+            pass
+        if not maximized:
+            try:
+                self.root.attributes('-zoomed', True)  # Some Linux
+                maximized = True
+            except Exception:
+                pass
+        if not maximized:
+            try:
+                self.root.attributes('-fullscreen', True)  # Fallback: true fullscreen
+                maximized = True
+            except Exception:
+                pass
+        if not maximized:
+            # Fallback: set to screen size
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            self.root.geometry(f"{screen_width}x{screen_height}+0+0")
         
         # Initialize motor controller based on system
         if SIMULATION_MODE:
