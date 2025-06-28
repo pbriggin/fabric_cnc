@@ -451,10 +451,12 @@ class FabricCNCApp:
                     end += 2 * math.pi
                 n = 32
                 points = []
+                # Use already-transformed center
+                cx, cy = center.x, center.y
                 for i in range(n+1):
                     angle = start + (end - start) * i / n
-                    x = center.x + r * math.cos(angle)
-                    y = center.y + r * math.sin(angle)
+                    x = cx + r * math.cos(angle)
+                    y = cy + r * math.sin(angle)
                     points.append((x, y))
                 flat = []
                 for x, y in points:
@@ -468,11 +470,13 @@ class FabricCNCApp:
                 center = e.dxf.center
                 r = e.dxf.radius
                 n = 32
+                # Use already-transformed center
+                cx, cy = center.x, center.y
                 points = []
                 for i in range(n+1):
                     angle = 2 * math.pi * i / n
-                    x = center.x + r * math.cos(angle)
-                    y = center.y + r * math.sin(angle)
+                    x = cx + r * math.cos(angle)
+                    y = cy + r * math.sin(angle)
                     points.append((x, y))
                 flat = []
                 for x, y in points:
