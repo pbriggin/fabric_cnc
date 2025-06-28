@@ -504,6 +504,7 @@ class FabricCNCApp:
                 t = e.dxftype()
                 if t in ('LINE', 'LWPOLYLINE', 'POLYLINE', 'SPLINE', 'ARC', 'CIRCLE'):
                     entities.append(e)
+            print(f"[DEBUG] Found {len(entities)} supported entities: {[e.dxftype() for e in entities]}")
             if not entities:
                 messagebox.showerror("DXF Import Error", "No supported entities (LINE, LWPOLYLINE, POLYLINE, SPLINE, ARC, CIRCLE) found in DXF file.")
                 return
@@ -519,6 +520,50 @@ class FabricCNCApp:
             self.toolpath = []
             self.gen_toolpath_btn.config(state=tk.NORMAL)
             logger.info(f"Loaded DXF: {file_path} ({len(entities)} entities), units: {insunits}, scale: {self.dxf_unit_scale}")
+            # Print overall extents
+            min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
+            print(f"[DEBUG] Overall DXF extents: min_x={min_x}, min_y={min_y}, max_x={max_x}, max_y={max_y}")
+            # Print extents for each entity
+            scale = getattr(self, 'dxf_unit_scale', 1.0)
+            for i, e in enumerate(entities):
+                t = e.dxftype()
+                if t == 'LINE':
+                    xs = [e.dxf.start.x * scale, e.dxf.end.x * scale]
+                    ys = [e.dxf.start.y * scale, e.dxf.end.y * scale]
+                elif t == 'LWPOLYLINE':
+                    pts = [p[:2] for p in e.get_points()]
+                    xs = [p[0] * scale for p in pts]
+                    ys = [p[1] * scale for p in pts]
+                elif t == 'POLYLINE':
+                    pts = [(v.dxf.x * scale, v.dxf.y * scale) for v in e.vertices()]
+                    xs = [p[0] for p in pts]
+                    ys = [p[1] for p in pts]
+                elif t == 'SPLINE':
+                    pts = list(e.flattening(0.1))
+                    xs = [p[0] * scale for p in pts]
+                    ys = [p[1] * scale for p in pts]
+                elif t == 'ARC' or t == 'CIRCLE':
+                    import math
+                    center = e.dxf.center
+                    r = e.dxf.radius
+                    if t == 'ARC':
+                        start = math.radians(e.dxf.start_angle)
+                        end = math.radians(e.dxf.end_angle)
+                        if end < start:
+                            end += 2 * math.pi
+                        n = 32
+                        pts = [(center.x + r * math.cos(start + (end - start) * i / n),
+                                center.y + r * math.sin(start + (end - start) * i / n)) for i in range(n+1)]
+                    else:
+                        n = 32
+                        pts = [(center.x + r * math.cos(2 * math.pi * i / n),
+                                center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
+                    xs = [p[0] * scale for p in pts]
+                    ys = [p[1] * scale for p in pts]
+                else:
+                    xs, ys = [], []
+                if xs and ys:
+                    print(f"[DEBUG] Entity {i} ({t}): min_x={min(xs):.2f}, min_y={min(ys):.2f}, max_x={max(xs):.2f}, max_y={max(ys):.2f}")
             # Auto-orient to top-left, no scaling
             self._auto_orient_dxf_top_left(debug=True)
             self._draw_canvas()
