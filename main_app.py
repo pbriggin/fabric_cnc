@@ -310,83 +310,86 @@ class FabricCNCApp:
 
     def _draw_canvas(self):
         self.canvas.delete("all")
+        # Draw axes in inches
+        self._draw_axes_in_inches()
         # Draw DXF entities if loaded
         if self.dxf_doc and self.dxf_entities:
-            self._draw_dxf_entities()
+            self._draw_dxf_entities_inches()
         # Draw toolpath if generated
         if self.toolpath:
-            self._draw_toolpath()
+            self._draw_toolpath_inches()
         # Draw current tool head position
         pos = self.motor_ctrl.get_position()
         # Clamp the position to the plot area
         x = max(0.0, min(pos['X'], X_MAX_MM))
         y = max(0.0, min(pos['Y'], Y_MAX_MM))
         clamped_pos = {'X': x, 'Y': y}
-        self._draw_tool_head(clamped_pos)
+        self._draw_tool_head_inches(clamped_pos)
 
-    def _draw_dxf_entities(self):
-        # Fit DXF extents to canvas
-        min_x, min_y, max_x, max_y = self._get_dxf_extents()
-        if max_x - min_x < 1e-3 or max_y - min_y < 1e-3:
-            return
-        scale_x = (self.canvas_width - 40) / (max_x - min_x)
-        scale_y = (self.canvas_height - 40) / (max_y - min_y)
-        self.canvas_scale = min(scale_x, scale_y)
-        self.canvas_offset = (20 - min_x * self.canvas_scale, 20 - min_y * self.canvas_scale)
-        for e in self.dxf_entities:
-            if e.dxftype() == 'LINE':
-                x1, y1 = self._dxf_to_canvas(e.dxf.start.x, e.dxf.start.y)
-                x2, y2 = self._dxf_to_canvas(e.dxf.end.x, e.dxf.end.y)
-                self.canvas.create_line(x1, self.canvas_height - y1, x2, self.canvas_height - y2, fill="#222", width=2)
-            elif e.dxftype() == 'LWPOLYLINE':
-                points = [self._dxf_to_canvas(p[0], p[1]) for p in e.get_points()]
-                flat = []
-                for x, y in points:
-                    flat.extend([x, self.canvas_height - y])
-                self.canvas.create_line(flat, fill="#0077cc", width=2)
-            # Add more entity types as needed
+    def _draw_axes_in_inches(self):
+        # Draw X and Y axes with inch ticks and labels
+        inch_tick = 5
+        for x_in in range(0, 69, inch_tick):
+            x_px, _ = self._inches_to_canvas(x_in, 0)
+            self.canvas.create_line(x_px, self.canvas_height, x_px, self.canvas_height-10, fill="#888")
+            self.canvas.create_text(x_px, self.canvas_height-20, text=f"{x_in}", fill="#444", font=("Arial", 9))
+        for y_in in range(0, 46, inch_tick):
+            _, y_px = self._inches_to_canvas(0, y_in)
+            y_px = self.canvas_height - y_px
+            self.canvas.create_line(0, y_px, 10, y_px, fill="#888")
+            self.canvas.create_text(25, y_px, text=f"{y_in}", fill="#444", font=("Arial", 9), anchor="w")
+        # Draw border
+        self.canvas.create_rectangle(0, 0, self.canvas_width, self.canvas_height, outline="#333", width=2)
 
-    def _draw_toolpath(self):
-        # For now, just draw as red lines
-        for seg in self.toolpath:
-            (x1, y1), (x2, y2) = seg
-            x1c, y1c = self._dxf_to_canvas(x1, y1)
-            x2c, y2c = self._dxf_to_canvas(x2, y2)
-            self.canvas.create_line(x1c, self.canvas_height - y1c, x2c, self.canvas_height - y2c, fill="#d00", width=2, dash=(4, 2))
+    def _inches_to_canvas(self, x_in, y_in):
+        sx = self.canvas_width / 68
+        sy = self.canvas_height / 45
+        ox, oy = 0, 0
+        return x_in * sx + ox, y_in * sy + oy
 
-    def _draw_tool_head(self, pos):
-        # Draw a small circle at the current tool head position
-        x, y = pos['X'], pos['Y']
-        x_c, y_c = self._dxf_to_canvas(x, y)
+    def _draw_tool_head_inches(self, pos):
+        # Draw a small circle at the current tool head position (in inches)
+        x_in = pos['X'] / INCH_TO_MM
+        y_in = pos['Y'] / INCH_TO_MM
+        x_c, y_c = self._inches_to_canvas(x_in, y_in)
         r = 7
-        # Invert Y so that Y=0 is at the bottom, Y=Y_MAX_MM is at the top
         y_c = self.canvas_height - y_c
         self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill="#0a0", outline="#080", width=2)
-        self.canvas.create_text(x_c, y_c - 18, text=f"({x/INCH_TO_MM:.1f}\", {y/INCH_TO_MM:.1f}\")", fill="#080", font=("Arial", 10, "bold"))
+        self.canvas.create_text(x_c, y_c - 18, text=f"({x_in:.2f}, {y_in:.2f})", fill="#080", font=("Arial", 10, "bold"))
 
-    def _dxf_to_canvas(self, x, y):
-        # Always scale so that X_MAX_MM maps to canvas_width, Y_MAX_MM maps to canvas_height
-        sx = self.canvas_width / X_MAX_MM
-        sy = self.canvas_height / Y_MAX_MM
-        ox, oy = 0, 0
-        return x * sx + ox, y * sy + oy
+    def _draw_dxf_entities_inches(self):
+        # Draw DXF entities, converting mm to inches for plotting
+        if not (self.dxf_doc and self.dxf_entities):
+            return
+        for e in self.dxf_entities:
+            if e.dxftype() == 'LINE':
+                x1, y1 = e.dxf.start.x / INCH_TO_MM, e.dxf.start.y / INCH_TO_MM
+                x2, y2 = e.dxf.end.x / INCH_TO_MM, e.dxf.end.y / INCH_TO_MM
+                x1c, y1c = self._inches_to_canvas(x1, y1)
+                x2c, y2c = self._inches_to_canvas(x2, y2)
+                y1c = self.canvas_height - y1c
+                y2c = self.canvas_height - y2c
+                self.canvas.create_line(x1c, y1c, x2c, y2c, fill="#222", width=2)
+            elif e.dxftype() == 'LWPOLYLINE':
+                points = [(p[0] / INCH_TO_MM, p[1] / INCH_TO_MM) for p in e.get_points()]
+                flat = []
+                for x, y in points:
+                    x_c, y_c = self._inches_to_canvas(x, y)
+                    y_c = self.canvas_height - y_c
+                    flat.extend([x_c, y_c])
+                self.canvas.create_line(flat, fill="#0077cc", width=2)
 
-    def _get_dxf_extents(self):
-        min_x, min_y, max_x, max_y = 0, 0, 100, 100
-        if self.dxf_entities:
-            xs, ys = [], []
-            for e in self.dxf_entities:
-                if e.dxftype() == 'LINE':
-                    xs.extend([e.dxf.start.x, e.dxf.end.x])
-                    ys.extend([e.dxf.start.y, e.dxf.end.y])
-                elif e.dxftype() == 'LWPOLYLINE':
-                    for p in e.get_points():
-                        xs.append(p[0])
-                        ys.append(p[1])
-            if xs and ys:
-                min_x, max_x = min(xs), max(xs)
-                min_y, max_y = min(ys), max(ys)
-        return min_x, min_y, max_x, max_y
+    def _draw_toolpath_inches(self):
+        # Draw toolpath in inches
+        for seg in self.toolpath:
+            (x1, y1), (x2, y2) = seg
+            x1_in, y1_in = x1 / INCH_TO_MM, y1 / INCH_TO_MM
+            x2_in, y2_in = x2 / INCH_TO_MM, y2 / INCH_TO_MM
+            x1c, y1c = self._inches_to_canvas(x1_in, y1_in)
+            x2c, y2c = self._inches_to_canvas(x2_in, y2_in)
+            y1c = self.canvas_height - y1c
+            y2c = self.canvas_height - y2c
+            self.canvas.create_line(x1c, y1c, x2c, y2c, fill="#d00", width=2, dash=(4, 2))
 
     # --- DXF Import/Toolpath ---
     def _import_dxf(self):
