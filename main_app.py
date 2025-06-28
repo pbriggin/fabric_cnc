@@ -432,15 +432,73 @@ class FabricCNCApp:
             doc = ezdxf.readfile(file_path)
             msp = doc.modelspace()
             entities = [e for e in msp if e.dxftype() in ('LINE', 'LWPOLYLINE')]
+            if not entities:
+                messagebox.showerror("DXF Import Error", "No supported entities (LINE, LWPOLYLINE) found in DXF file.")
+                return
             self.dxf_doc = doc
             self.dxf_entities = entities
             self.toolpath = []
             self.gen_toolpath_btn.config(state=tk.NORMAL)
             logger.info(f"Loaded DXF: {file_path} ({len(entities)} entities)")
+            # Auto-orient to top-left
+            self._auto_orient_dxf_top_left()
             self._draw_canvas()
         except Exception as e:
             logger.error(f"Failed to load DXF: {e}")
             messagebox.showerror("DXF Import Error", str(e))
+
+    def _auto_orient_dxf_top_left(self):
+        # Find extents in inches
+        min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
+        if min_x is None or min_y is None:
+            return  # Nothing to orient
+        dx = min_x
+        dy = min_y
+        y_top = 45
+        for e in self.dxf_entities:
+            if e.dxftype() == 'LINE':
+                e.dxf.start.x -= dx * INCH_TO_MM
+                e.dxf.start.y -= dy * INCH_TO_MM
+                e.dxf.end.x -= dx * INCH_TO_MM
+                e.dxf.end.y -= dy * INCH_TO_MM
+                # Flip Y so top is at 45
+                e.dxf.start.y = (y_top - (e.dxf.start.y / INCH_TO_MM)) * INCH_TO_MM
+                e.dxf.end.y = (y_top - (e.dxf.end.y / INCH_TO_MM)) * INCH_TO_MM
+            elif e.dxftype() == 'LWPOLYLINE':
+                pts = list(e.get_points())
+                new_pts = []
+                for p in pts:
+                    x = (p[0] - dx * INCH_TO_MM)
+                    y = (y_top - ((p[1] - dy * INCH_TO_MM) / INCH_TO_MM)) * INCH_TO_MM
+                    new_pts.append((x, y) + p[2:])
+                e.points = new_pts
+
+    def _get_dxf_extents_inches(self):
+        min_x, min_y = float('inf'), float('inf')
+        max_x, max_y = float('-inf'), float('-inf')
+        found = False
+        for e in self.dxf_entities:
+            if e.dxftype() == 'LINE':
+                xs = [e.dxf.start.x / INCH_TO_MM, e.dxf.end.x / INCH_TO_MM]
+                ys = [e.dxf.start.y / INCH_TO_MM, e.dxf.end.y / INCH_TO_MM]
+            elif e.dxftype() == 'LWPOLYLINE':
+                pts = [p[:2] for p in e.get_points()]
+                if not pts:
+                    continue
+                xs = [p[0] / INCH_TO_MM for p in pts]
+                ys = [p[1] / INCH_TO_MM for p in pts]
+            else:
+                continue
+            if not xs or not ys:
+                continue
+            min_x = min(min_x, min(xs))
+            max_x = max(max_x, max(xs))
+            min_y = min(min_y, min(ys))
+            max_y = max(max_y, max(ys))
+            found = True
+        if not found:
+            return None, None, None, None
+        return min_x, min_y, max_x, max_y
 
     def _generate_toolpath(self):
         # Stub: just connect all lines in order for now
