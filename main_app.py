@@ -838,7 +838,7 @@ class FabricCNCApp:
             def animate_step(idx=0):
                 if idx >= len(path):
                     print(f"[DEBUG] Finished animation for shape {shape_idx+1}")
-                    self.root.after(400, animate_shape, shape_idx+1)
+                    self.root.after(100, animate_shape, shape_idx+1)  # Reduced pause between shapes
                     return
                 x, y, angle, z = path[idx]
                 print(f"[DEBUG] Shape {shape_idx+1} Step {idx+1}/{len(path)}: (x={x:.2f}, y={y:.2f}, angle={angle:.2f}, z={z})")
@@ -851,7 +851,7 @@ class FabricCNCApp:
                 y2 = y + r * math.sin(angle)
                 x2_c, y2_c = self._inches_to_canvas(x2, y2)
                 self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill="#f0a", width=3)
-                self.root.after(60, animate_step, idx+1)
+                self.root.after(20, animate_step, idx+1)  # Faster, more continuous animation
             animate_step()
         animate_shape()
 
