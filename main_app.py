@@ -18,9 +18,11 @@ import time
 try:
     import ezdxf
     EZDXF_AVAILABLE = True
+    from ezdxf.math import Vec3
 except ImportError:
     ezdxf = None
     EZDXF_AVAILABLE = False
+    Vec3 = None
 
 # Import motor control modules
 try:
@@ -450,20 +452,26 @@ class FabricCNCApp:
     def _auto_orient_dxf_top_left(self):
         # Find extents in inches
         min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
-        if min_x is None or min_y is None:
-            return  # Nothing to orient
+        if min_x is None or min_y is None or Vec3 is None:
+            return  # Nothing to orient or ezdxf not available
         dx = min_x
         dy = min_y
         y_top = 45
         for e in self.dxf_entities:
             if e.dxftype() == 'LINE':
-                e.dxf.start.x -= dx * INCH_TO_MM
-                e.dxf.start.y -= dy * INCH_TO_MM
-                e.dxf.end.x -= dx * INCH_TO_MM
-                e.dxf.end.y -= dy * INCH_TO_MM
-                # Flip Y so top is at 45
-                e.dxf.start.y = (y_top - (e.dxf.start.y / INCH_TO_MM)) * INCH_TO_MM
-                e.dxf.end.y = (y_top - (e.dxf.end.y / INCH_TO_MM)) * INCH_TO_MM
+                # Create new Vec3 for start and end
+                new_start = Vec3(
+                    e.dxf.start.x - dx * INCH_TO_MM,
+                    (y_top - ((e.dxf.start.y / INCH_TO_MM) - dy)) * INCH_TO_MM,
+                    e.dxf.start.z
+                )
+                new_end = Vec3(
+                    e.dxf.end.x - dx * INCH_TO_MM,
+                    (y_top - ((e.dxf.end.y / INCH_TO_MM) - dy)) * INCH_TO_MM,
+                    e.dxf.end.z
+                )
+                e.dxf.start = new_start
+                e.dxf.end = new_end
             elif e.dxftype() == 'LWPOLYLINE':
                 pts = list(e.get_points())
                 new_pts = []
