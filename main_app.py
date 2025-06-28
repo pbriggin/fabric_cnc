@@ -441,7 +441,6 @@ class FabricCNCApp:
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#00aa88", width=2)
             elif t == 'ARC':
-                import math
                 center = e.dxf.center
                 r = e.dxf.radius
                 start = math.radians(e.dxf.start_angle)
@@ -461,7 +460,6 @@ class FabricCNCApp:
                     points.append((x_c, y_c))
                 self.canvas.create_line(*[coord for pt in points for coord in pt], fill="#aa00cc", width=2)
             elif t == 'CIRCLE':
-                import math
                 center = e.dxf.center
                 r = e.dxf.radius
                 n = 32
@@ -547,7 +545,6 @@ class FabricCNCApp:
                     xs = [p[0] * scale for p in pts]
                     ys = [p[1] * scale for p in pts]
                 elif t == 'ARC' or t == 'CIRCLE':
-                    import math
                     center = e.dxf.center
                     r = e.dxf.radius
                     if t == 'ARC':
@@ -605,7 +602,6 @@ class FabricCNCApp:
                     xs = [p[0] * scale for p in pts]
                     ys = [p[1] * scale for p in pts]
             elif t == 'ARC' or t == 'CIRCLE':
-                import math
                 center = e.dxf.center
                 r = e.dxf.radius
                 if t == 'ARC':
@@ -690,7 +686,6 @@ class FabricCNCApp:
                 # End: Z up
                 path.append((pts[-1][0], pts[-1][1], angle, 1))
             elif t in ('ARC', 'CIRCLE'):
-                import math
                 center = e.dxf.center
                 r = e.dxf.radius
                 if t == 'ARC':
