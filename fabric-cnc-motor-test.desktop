@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Fabric CNC Motor Test
+Comment=Launch Fabric CNC Motor Test UI
+Exec=/Users/peterbriggs/Code/fabric_cnc/launch_motor_test.sh
+Icon=applications-engineering
+Terminal=true
+Categories=Development;Engineering;
+Keywords=CNC;Motor;Test;Fabric; 
