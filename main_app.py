@@ -427,7 +427,8 @@ class FabricCNCApp:
         if ezdxf is None:
             messagebox.showerror("Missing Dependency", "ezdxf is not installed. Please install it to import DXF files.")
             return
-        file_path = filedialog.askopenfilename(filetypes=[("DXF Files", "*.dxf")])
+        initial_dir = os.path.expanduser("~/Desktop/DXF")
+        file_path = filedialog.askopenfilename(initialdir=initial_dir, filetypes=[("DXF Files", "*.dxf")])
         if not file_path:
             return
         try:
@@ -442,32 +443,45 @@ class FabricCNCApp:
             self.toolpath = []
             self.gen_toolpath_btn.config(state=tk.NORMAL)
             logger.info(f"Loaded DXF: {file_path} ({len(entities)} entities)")
-            # Auto-orient to top-left
-            self._auto_orient_dxf_top_left()
+            # Auto-orient and scale to fit
+            self._auto_orient_and_scale_dxf_to_plot()
             self._draw_canvas()
         except Exception as e:
             logger.error(f"Failed to load DXF: {e}")
             messagebox.showerror("DXF Import Error", str(e))
 
-    def _auto_orient_dxf_top_left(self):
+    def _auto_orient_and_scale_dxf_to_plot(self):
         # Find extents in inches
         min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
-        if min_x is None or min_y is None or Vec3 is None:
+        if min_x is None or min_y is None or max_x is None or max_y is None or Vec3 is None:
             return  # Nothing to orient or ezdxf not available
         dx = min_x
         dy = min_y
         y_top = 45
+        # Compute scaling factor to fit within plot area (with buffer)
+        plot_width = 68
+        plot_height = 45
+        plot_buf = PLOT_BUFFER_IN
+        avail_w = plot_width
+        avail_h = plot_height
+        shape_w = max_x - min_x
+        shape_h = max_y - min_y
+        if shape_w == 0 or shape_h == 0:
+            scale = 1.0
+        else:
+            scale = min(avail_w / shape_w, avail_h / shape_h)
+        # Offset and scale all entities
         for e in self.dxf_entities:
             if e.dxftype() == 'LINE':
                 # Create new Vec3 for start and end
                 new_start = Vec3(
-                    e.dxf.start.x - dx * INCH_TO_MM,
-                    (y_top - ((e.dxf.start.y / INCH_TO_MM) - dy)) * INCH_TO_MM,
+                    (e.dxf.start.x / INCH_TO_MM - dx) * scale * INCH_TO_MM,
+                    (y_top - ((e.dxf.start.y / INCH_TO_MM - dy) * scale)) * INCH_TO_MM,
                     e.dxf.start.z
                 )
                 new_end = Vec3(
-                    e.dxf.end.x - dx * INCH_TO_MM,
-                    (y_top - ((e.dxf.end.y / INCH_TO_MM) - dy)) * INCH_TO_MM,
+                    (e.dxf.end.x / INCH_TO_MM - dx) * scale * INCH_TO_MM,
+                    (y_top - ((e.dxf.end.y / INCH_TO_MM - dy) * scale)) * INCH_TO_MM,
                     e.dxf.end.z
                 )
                 e.dxf.start = new_start
@@ -476,8 +490,8 @@ class FabricCNCApp:
                 pts = list(e.get_points())
                 new_pts = []
                 for p in pts:
-                    x = (p[0] - dx * INCH_TO_MM)
-                    y = (y_top - ((p[1] - dy * INCH_TO_MM) / INCH_TO_MM)) * INCH_TO_MM
+                    x = ((p[0] / INCH_TO_MM - dx) * scale) * INCH_TO_MM
+                    y = (y_top - ((p[1] / INCH_TO_MM - dy) * scale)) * INCH_TO_MM
                     new_pts.append((x, y) + p[2:])
                 e.points = new_pts
 
