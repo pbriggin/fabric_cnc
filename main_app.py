@@ -191,6 +191,8 @@ class FabricCNCApp:
         print("[DEBUG] FabricCNCApp.__init__ called")
         self.root = root
         self.root.title("Fabric CNC Main App")
+        # Maximize window by default
+        self.root.state('zoomed')
         
         # Initialize motor controller based on system
         if SIMULATION_MODE:
