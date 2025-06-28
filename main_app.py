@@ -13,6 +13,7 @@ from tkinter import ttk, filedialog, messagebox
 import threading
 import platform
 import time
+import math
 
 # Try to import ezdxf for DXF parsing
 try:
@@ -300,9 +301,12 @@ class FabricCNCApp:
     # --- Left Toolbar: DXF tools ---
     def _setup_left_toolbar(self):
         ttk.Label(self.left_toolbar, text="DXF Tools", font=("Arial", 14, "bold")).pack(pady=(20, 10))
-        ttk.Button(self.left_toolbar, text="Import DXF File", command=self._import_dxf).pack(fill=tk.X, padx=10, pady=8)
+        self.import_btn = ttk.Button(self.left_toolbar, text="Import DXF File", command=self._import_dxf)
+        self.import_btn.pack(pady=(10, 4), padx=10, fill=tk.X)
         self.gen_toolpath_btn = ttk.Button(self.left_toolbar, text="Generate Toolpath", command=self._generate_toolpath, state=tk.DISABLED)
-        self.gen_toolpath_btn.pack(fill=tk.X, padx=10, pady=8)
+        self.gen_toolpath_btn.pack(pady=4, padx=10, fill=tk.X)
+        self.preview_btn = ttk.Button(self.left_toolbar, text="Preview Toolpath", command=self._preview_toolpath, state=tk.DISABLED)
+        self.preview_btn.pack(pady=4, padx=10, fill=tk.X)
         ttk.Separator(self.left_toolbar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=20)
         
         # System status
@@ -635,26 +639,120 @@ class FabricCNCApp:
         pass
 
     def _generate_toolpath(self):
-        # Stub: just connect all lines in order for now
+        """Generate toolpaths for each shape, with tangent angle and Z (lift at corners)."""
         if not self.dxf_entities:
             messagebox.showwarning("No DXF", "Import a DXF file first.")
             return
-        toolpath = []
-        last = None
+        toolpaths = []  # List of lists: one per shape
+        scale = getattr(self, 'dxf_unit_scale', 1.0)
+        min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
+        dx = min_x - PLOT_BUFFER_IN if min_x is not None else 0
+        dy = max_y + PLOT_BUFFER_IN if max_y is not None else 0
+        
         for e in self.dxf_entities:
-            if e.dxftype() == 'LINE':
-                start = (e.dxf.start.x, e.dxf.start.y)
-                end = (e.dxf.end.x, e.dxf.end.y)
-                toolpath.append((start, end))
-                last = end
-            elif e.dxftype() == 'LWPOLYLINE':
-                pts = [p[:2] for p in e.get_points()]
-                for i in range(len(pts) - 1):
-                    toolpath.append((pts[i], pts[i+1]))
-                last = pts[-1]
-        self.toolpath = toolpath
-        logger.info(f"Generated toolpath with {len(toolpath)} segments.")
+            t = e.dxftype()
+            path = []
+            if t == 'LINE':
+                # Treat as a single segment
+                x1, y1 = e.dxf.start.x, e.dxf.start.y
+                x2, y2 = e.dxf.end.x, e.dxf.end.y
+                x1p, y1p = x1 * scale - dx, dy - y1 * scale
+                x2p, y2p = x2 * scale - dx, dy - y2 * scale
+                angle = math.atan2(y2p - y1p, x2p - x1p)
+                path.append((x1p, y1p, angle, 1))  # Z up at start
+                path.append((x1p, y1p, angle, 0))  # Z down
+                path.append((x2p, y2p, angle, 0))  # Move/cut
+                path.append((x2p, y2p, angle, 1))  # Z up at end
+            elif t in ('LWPOLYLINE', 'POLYLINE', 'SPLINE'):
+                if t == 'LWPOLYLINE':
+                    pts = [(p[0], p[1]) for p in e.get_points()]
+                elif t == 'POLYLINE':
+                    pts = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
+                else:  # SPLINE
+                    pts = [(p[0], p[1]) for p in e.flattening(0.1)]
+                # Transform all points
+                pts = [(x * scale - dx, dy - y * scale) for x, y in pts]
+                if len(pts) < 2:
+                    continue
+                # Start: move to first point, Z up
+                angle0 = math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0])
+                path.append((pts[0][0], pts[0][1], angle0, 1))  # Z up
+                path.append((pts[0][0], pts[0][1], angle0, 0))  # Z down
+                for i in range(1, len(pts)):
+                    x0, y0 = pts[i-1]
+                    x1, y1 = pts[i]
+                    angle = math.atan2(y1 - y0, x1 - x0)
+                    # At corners, lift, rotate, lower
+                    if i > 1:
+                        path.append((x0, y0, angle, 1))  # Z up
+                        path.append((x0, y0, angle, 0))  # Z down
+                    path.append((x1, y1, angle, 0))  # Move/cut
+                # End: Z up
+                path.append((pts[-1][0], pts[-1][1], angle, 1))
+            elif t in ('ARC', 'CIRCLE'):
+                import math
+                center = e.dxf.center
+                r = e.dxf.radius
+                if t == 'ARC':
+                    start = math.radians(e.dxf.start_angle)
+                    end = math.radians(e.dxf.end_angle)
+                    if end < start:
+                        end += 2 * math.pi
+                    n = 32
+                    pts = [(center.x + r * math.cos(start + (end - start) * i / n),
+                            center.y + r * math.sin(start + (end - start) * i / n)) for i in range(n+1)]
+                else:
+                    n = 32
+                    pts = [(center.x + r * math.cos(2 * math.pi * i / n),
+                            center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
+                pts = [(x * scale - dx, dy - y * scale) for x, y in pts]
+                angle0 = math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0])
+                path.append((pts[0][0], pts[0][1], angle0, 1))  # Z up
+                path.append((pts[0][0], pts[0][1], angle0, 0))  # Z down
+                for i in range(1, len(pts)):
+                    x0, y0 = pts[i-1]
+                    x1, y1 = pts[i]
+                    angle = math.atan2(y1 - y0, x1 - x0)
+                    if i > 1:
+                        path.append((x0, y0, angle, 1))
+                        path.append((x0, y0, angle, 0))
+                    path.append((x1, y1, angle, 0))
+                path.append((pts[-1][0], pts[-1][1], angle, 1))
+            if path:
+                toolpaths.append(path)
+        self.toolpaths = toolpaths
+        logger.info(f"Generated toolpaths for {len(toolpaths)} shapes.")
         self._draw_canvas()
+        self.preview_btn.config(state=tk.NORMAL)
+
+    def _preview_toolpath(self):
+        """Animate the toolpath preview, showing the end effector moving with orientation and Z state."""
+        if not hasattr(self, 'toolpaths') or not self.toolpaths:
+            messagebox.showwarning("No Toolpath", "Generate a toolpath first.")
+            return
+        self._draw_canvas()  # Clear previous preview
+        # Flatten all toolpaths into a single list of (x, y, angle, z)
+        steps = []
+        for path in self.toolpaths:
+            steps.extend(path)
+        # Animate
+        def animate(idx=0):
+            if idx >= len(steps):
+                return
+            x, y, angle, z = steps[idx]
+            # Draw tool head
+            r = 0.5  # radius in inches
+            x_c, y_c = self._inches_to_canvas(x, y)
+            color = "#0a0" if z == 0 else "#aaa"
+            self.canvas.create_oval(x_c-6, y_c-6, x_c+6, y_c+6, fill=color, outline="#000")
+            # Draw orientation line (wheel direction)
+            x2 = x + r * math.cos(angle)
+            y2 = y + r * math.sin(angle)
+            x2_c, y2_c = self._inches_to_canvas(x2, y2)
+            self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill="#f0a", width=3)
+            # Schedule next step
+            self.root.after(60, animate, idx+1)
+        animate()
 
     # --- Right Toolbar: Motor controls ---
     def _setup_right_toolbar(self):
