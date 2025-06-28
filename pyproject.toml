@@ -25,7 +25,7 @@ classifiers = [
 ]
 requires-python = ">=3.8"
 dependencies = [
-    "RPi.GPIO>=2.0.0",
+    "RPi.GPIO>=0.7.1",
     "tkinter",  # Usually included with Python
     "ezdxf>=1.0.0",  # Optional: for DXF file processing
 ]

@@ -1,5 +1,5 @@
 # Core dependencies for Fabric CNC
-RPi.GPIO>=2.0.0
+RPi.GPIO>=0.7.1
 ezdxf>=1.0.0
 
 # Development dependencies (optional)
