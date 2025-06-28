@@ -860,22 +860,26 @@ class FabricCNCApp:
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#ff0", width=2, dash=(4, 2))
             def animate_step(idx=0):
+                steps_per_tick = 10  # Animate 10 steps per timer tick
                 if idx >= len(path):
                     print(f"[DEBUG] Finished animation for shape {shape_idx+1}")
-                    self.root.after(100, animate_shape, shape_idx+1)  # Reduced pause between shapes
+                    self.root.after(50, animate_shape, shape_idx+1)  # Short pause between shapes
                     return
-                x, y, angle, z = path[idx]
-                print(f"[DEBUG] Shape {shape_idx+1} Step {idx+1}/{len(path)}: (x={x:.2f}, y={y:.2f}, angle={angle:.2f}, z={z})")
-                r = 0.5  # radius in inches
-                x_c, y_c = self._inches_to_canvas(x, y)
-                color = "#0a0" if z == 0 else "#aaa"
-                self.canvas.create_oval(x_c-6, y_c-6, x_c+6, y_c+6, fill=color, outline="#000")
-                # Draw orientation line (wheel direction)
-                x2 = x + r * math.cos(angle)
-                y2 = y + r * math.sin(angle)
-                x2_c, y2_c = self._inches_to_canvas(x2, y2)
-                self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill="#f0a", width=3)
-                self.root.after(20, animate_step, idx+1)  # Faster, more continuous animation
+                for j in range(steps_per_tick):
+                    if idx + j >= len(path):
+                        break
+                    x, y, angle, z = path[idx + j]
+                    print(f"[DEBUG] Shape {shape_idx+1} Step {idx + j + 1}/{len(path)}: (x={x:.2f}, y={y:.2f}, angle={angle:.2f}, z={z})")
+                    r = 0.5  # radius in inches
+                    x_c, y_c = self._inches_to_canvas(x, y)
+                    color = "#0a0" if z == 0 else "#aaa"
+                    self.canvas.create_oval(x_c-6, y_c-6, x_c+6, y_c+6, fill=color, outline="#000")
+                    # Draw orientation line (wheel direction)
+                    x2 = x + r * math.cos(angle)
+                    y2 = y + r * math.sin(angle)
+                    x2_c, y2_c = self._inches_to_canvas(x2, y2)
+                    self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill="#f0a", width=3)
+                self.root.after(5, animate_step, idx + steps_per_tick)  # Much faster animation
             animate_step()
         animate_shape()
 
