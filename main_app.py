@@ -392,6 +392,16 @@ class FabricCNCApp:
         # Draw DXF entities, converting mm to inches for plotting
         if not (self.dxf_doc and self.dxf_entities):
             return
+        
+        # Get translation values for SPLINE entities (they weren't transformed during import)
+        scale = getattr(self, 'dxf_unit_scale', 1.0)
+        min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
+        if min_x is not None and max_y is not None:
+            dx = min_x - PLOT_BUFFER_IN
+            dy = max_y + PLOT_BUFFER_IN
+        else:
+            dx, dy = 0, 0
+        
         for e in self.dxf_entities:
             t = e.dxftype()
             if t == 'LINE':
@@ -423,12 +433,16 @@ class FabricCNCApp:
                 self.canvas.create_line(flat, fill="#cc7700", width=2)
             elif t == 'SPLINE':
                 # Approximate with polyline using flattening (0.1 units tolerance)
+                # Apply transformation during plotting since SPLINE wasn't transformed during import
                 points = list(e.flattening(0.1))
                 flat = []
                 for x, y, *_ in points:
-                    x_c, y_c = self._inches_to_canvas(x, y)
+                    # Apply the same transformation that was used for other entities
+                    x_transformed = (x * scale - dx)
+                    y_transformed = (dy - y * scale)
+                    x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
                     y_c = self.canvas_height - y_c
-                    print(f"[DEBUG] Drawing SPLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
+                    print(f"[DEBUG] Drawing SPLINE pt: ({x:.2f}, {y:.2f}) | transformed: ({x_transformed:.2f}, {y_transformed:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#00aa88", width=2)
             elif t == 'ARC':
@@ -571,70 +585,135 @@ class FabricCNCApp:
             logger.error(f"Failed to load DXF: {e}")
             messagebox.showerror("DXF Import Error", str(e))
 
+    def _get_dxf_extents_inches(self):
+        """Get global extents across all DXF entities, supporting all entity types."""
+        scale = getattr(self, 'dxf_unit_scale', 1.0)
+        min_x, min_y = float('inf'), float('inf')
+        max_x, max_y = float('-inf'), float('-inf')
+        found = False
+        
+        for e in self.dxf_entities:
+            t = e.dxftype()
+            xs, ys = [], []
+            
+            if t == 'LINE':
+                xs = [e.dxf.start.x * scale, e.dxf.end.x * scale]
+                ys = [e.dxf.start.y * scale, e.dxf.end.y * scale]
+            elif t == 'LWPOLYLINE':
+                pts = [p[:2] for p in e.get_points()]
+                if pts:
+                    xs = [p[0] * scale for p in pts]
+                    ys = [p[1] * scale for p in pts]
+            elif t == 'POLYLINE':
+                pts = [(v.dxf.x * scale, v.dxf.y * scale) for v in e.vertices()]
+                if pts:
+                    xs = [p[0] for p in pts]
+                    ys = [p[1] for p in pts]
+            elif t == 'SPLINE':
+                pts = list(e.flattening(0.1))
+                if pts:
+                    xs = [p[0] * scale for p in pts]
+                    ys = [p[1] * scale for p in pts]
+            elif t == 'ARC' or t == 'CIRCLE':
+                import math
+                center = e.dxf.center
+                r = e.dxf.radius
+                if t == 'ARC':
+                    start = math.radians(e.dxf.start_angle)
+                    end = math.radians(e.dxf.end_angle)
+                    if end < start:
+                        end += 2 * math.pi
+                    n = 32
+                    pts = [(center.x + r * math.cos(start + (end - start) * i / n),
+                            center.y + r * math.sin(start + (end - start) * i / n)) for i in range(n+1)]
+                else:
+                    n = 32
+                    pts = [(center.x + r * math.cos(2 * math.pi * i / n),
+                            center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
+                xs = [p[0] * scale for p in pts]
+                ys = [p[1] * scale for p in pts]
+            
+            if xs and ys:
+                min_x = min(min_x, min(xs))
+                max_x = max(max_x, max(xs))
+                min_y = min(min_y, min(ys))
+                max_y = max(max_y, max(ys))
+                found = True
+        
+        if not found:
+            return None, None, None, None
+        return min_x, min_y, max_x, max_y
+
     def _auto_orient_dxf_top_left(self, debug=False):
-        # Justify to top-left: min_x=0, max_y=45
+        """Auto-orient DXF to top-left with proper margin, supporting all entity types."""
         scale = getattr(self, 'dxf_unit_scale', 1.0)
         min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
-        if min_x is None or min_y is None or max_y is None or Vec3 is None:
+        
+        if min_x is None or min_y is None or max_x is None or max_y is None or Vec3 is None:
             if debug:
-                print(f"[DEBUG] No extents found: min_x={min_x}, min_y={min_y}, max_y={max_y}, Vec3={Vec3}")
+                print(f"[DEBUG] No extents found: min_x={min_x}, min_y={min_y}, max_x={max_x}, max_y={max_y}, Vec3={Vec3}")
             return  # Nothing to orient or ezdxf not available
-        dx = min_x
-        dy = max_y  # For top alignment
-        y_top = 45
+        
+        # Calculate translation to move to top-left with margin
+        dx = min_x - PLOT_BUFFER_IN  # Shift left by buffer
+        dy = max_y + PLOT_BUFFER_IN  # For top alignment with buffer
+        
         if debug:
             print(f"[DEBUG] DXF extents (inches): min_x={min_x}, min_y={min_y}, max_x={max_x}, max_y={max_y}, scale={scale}")
+            print(f"[DEBUG] Translation: dx={dx}, dy={dy}")
+        
         for i, e in enumerate(self.dxf_entities):
-            if e.dxftype() == 'LINE':
-                # Translate so min_x=0, max_y=45 (top-left)
+            t = e.dxftype()
+            
+            if t == 'LINE':
+                # Translate LINE endpoints
                 x1 = (e.dxf.start.x * scale - dx)
-                y1 = (y_top - (dy - e.dxf.start.y * scale))
+                y1 = (dy - e.dxf.start.y * scale)
                 x2 = (e.dxf.end.x * scale - dx)
-                y2 = (y_top - (dy - e.dxf.end.y * scale))
+                y2 = (dy - e.dxf.end.y * scale)
                 new_start = Vec3(x1, y1, e.dxf.start.z * scale if hasattr(e.dxf.start, 'z') else 0.0)
                 new_end = Vec3(x2, y2, e.dxf.end.z * scale if hasattr(e.dxf.end, 'z') else 0.0)
                 if debug and i < 5:
                     print(f"[DEBUG] LINE {i}: ({x1:.2f}, {y1:.2f}) -> ({x2:.2f}, {y2:.2f})")
                 e.dxf.start = new_start
                 e.dxf.end = new_end
-            elif e.dxftype() == 'LWPOLYLINE':
+                
+            elif t == 'LWPOLYLINE':
+                # Translate LWPOLYLINE points
                 pts = list(e.get_points())
                 new_pts = []
                 for j, p in enumerate(pts):
                     x = (p[0] * scale - dx)
-                    y = (y_top - (dy - p[1] * scale))
+                    y = (dy - p[1] * scale)
                     if debug and i < 2 and j < 5:
                         print(f"[DEBUG] LWPOLYLINE {i} pt{j}: ({x:.2f}, {y:.2f})")
                     new_pts.append((x, y) + p[2:])
                 e.points = new_pts
-
-    def _get_dxf_extents_inches(self):
-        scale = getattr(self, 'dxf_unit_scale', 1.0)
-        min_x, min_y = float('inf'), float('inf')
-        max_x, max_y = float('-inf'), float('-inf')
-        found = False
-        for e in self.dxf_entities:
-            if e.dxftype() == 'LINE':
-                xs = [e.dxf.start.x * scale, e.dxf.end.x * scale]
-                ys = [e.dxf.start.y * scale, e.dxf.end.y * scale]
-            elif e.dxftype() == 'LWPOLYLINE':
-                pts = [p[:2] for p in e.get_points()]
-                if not pts:
-                    continue
-                xs = [p[0] * scale for p in pts]
-                ys = [p[1] * scale for p in pts]
-            else:
-                continue
-            if not xs or not ys:
-                continue
-            min_x = min(min_x, min(xs))
-            max_x = max(max_x, max(xs))
-            min_y = min(min_y, min(ys))
-            max_y = max(max_y, max(ys))
-            found = True
-        if not found:
-            return None, None, None, None
-        return min_x, min_y, max_x, max_y
+                
+            elif t == 'POLYLINE':
+                # Translate POLYLINE vertices
+                for v in e.vertices():
+                    x = (v.dxf.x * scale - dx)
+                    y = (dy - v.dxf.y * scale)
+                    if debug and i < 2:
+                        print(f"[DEBUG] POLYLINE {i} vertex: ({x:.2f}, {y:.2f})")
+                    v.dxf.x = x
+                    v.dxf.y = y
+                    
+            elif t == 'SPLINE':
+                # For SPLINE, we'll handle the transformation during plotting
+                # since flattening is done at plot time
+                if debug and i < 2:
+                    print(f"[DEBUG] SPLINE {i}: will transform during plotting")
+                    
+            elif t == 'ARC' or t == 'CIRCLE':
+                # Translate ARC/CIRCLE center
+                center = e.dxf.center
+                new_center_x = center.x * scale - dx
+                new_center_y = dy - center.y * scale
+                if debug and i < 2:
+                    print(f"[DEBUG] {t} {i} center: ({new_center_x:.2f}, {new_center_y:.2f})")
+                e.dxf.center = Vec3(new_center_x, new_center_y, center.z * scale if hasattr(center, 'z') else 0.0)
 
     def _generate_toolpath(self):
         # Stub: just connect all lines in order for now
