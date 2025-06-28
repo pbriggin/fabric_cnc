@@ -37,7 +37,7 @@ except ImportError:
     GPIO_AVAILABLE = False
 
 # Simulation mode if not on Raspberry Pi or motor imports failed
-ON_RPI = platform.system() == 'Linux' and os.uname().machine.startswith('arm')
+ON_RPI = platform.system() == 'Linux' and (os.uname().machine.startswith('arm') or os.uname().machine.startswith('aarch'))
 SIMULATION_MODE = not ON_RPI or not MOTOR_IMPORTS_AVAILABLE
 
 # Add these constants near the top of the file, after imports
