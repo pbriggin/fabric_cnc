@@ -393,7 +393,6 @@ class FabricCNCApp:
         if not (self.dxf_doc and self.dxf_entities):
             return
         
-        # Get translation values for SPLINE entities (they weren't transformed during import)
         scale = getattr(self, 'dxf_unit_scale', 1.0)
         min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
         if min_x is not None and max_y is not None:
@@ -407,15 +406,15 @@ class FabricCNCApp:
             if t == 'LINE':
                 x1, y1 = e.dxf.start.x, e.dxf.start.y
                 x2, y2 = e.dxf.end.x, e.dxf.end.y
-                x1c, y1c = self._inches_to_canvas(x1, y1)
-                x2c, y2c = self._inches_to_canvas(x2, y2)
+                x1c, y1c = self._inches_to_canvas(x1 * scale - dx, dy - y1 * scale)
+                x2c, y2c = self._inches_to_canvas(x2 * scale - dx, dy - y2 * scale)
                 print(f"[DEBUG] Drawing LINE: ({x1:.2f}, {y1:.2f}) -> ({x2:.2f}, {y2:.2f}) | canvas: ({x1c:.2f}, {y1c:.2f}) -> ({x2c:.2f}, {y2c:.2f})")
                 self.canvas.create_line(x1c, y1c, x2c, y2c, fill="#222", width=2)
             elif t == 'LWPOLYLINE':
                 points = [(p[0], p[1]) for p in e.get_points()]
                 flat = []
                 for x, y in points:
-                    x_c, y_c = self._inches_to_canvas(x, y)
+                    x_c, y_c = self._inches_to_canvas(x * scale - dx, dy - y * scale)
                     print(f"[DEBUG] Drawing LWPOLYLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#0077cc", width=2)
@@ -423,25 +422,21 @@ class FabricCNCApp:
                 points = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
                 flat = []
                 for x, y in points:
-                    x_c, y_c = self._inches_to_canvas(x, y)
+                    x_c, y_c = self._inches_to_canvas(x * scale - dx, dy - y * scale)
                     print(f"[DEBUG] Drawing POLYLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#cc7700", width=2)
             elif t == 'SPLINE':
-                # Approximate with polyline using flattening (0.1 units tolerance)
-                # Apply transformation during plotting since SPLINE wasn't transformed during import
                 points = list(e.flattening(0.1))
                 flat = []
                 for x, y, *_ in points:
-                    # Apply the same transformation that was used for other entities
-                    x_transformed = (x * scale - dx)
-                    y_transformed = (dy - y * scale)
+                    x_transformed = x * scale - dx
+                    y_transformed = dy - y * scale
                     x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
                     print(f"[DEBUG] Drawing SPLINE pt: ({x:.2f}, {y:.2f}) | transformed: ({x_transformed:.2f}, {y_transformed:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#00aa88", width=2)
             elif t == 'ARC':
-                # Approximate with polyline (32 segments)
                 import math
                 center = e.dxf.center
                 r = e.dxf.radius
@@ -451,39 +446,32 @@ class FabricCNCApp:
                     end += 2 * math.pi
                 n = 32
                 points = []
-                # Use already-transformed center
-                cx, cy = center.x, center.y
                 for i in range(n+1):
                     angle = start + (end - start) * i / n
-                    x = cx + r * math.cos(angle)
-                    y = cy + r * math.sin(angle)
-                    points.append((x, y))
-                flat = []
-                for x, y in points:
-                    x_c, y_c = self._inches_to_canvas(x, y)
+                    x = center.x + r * math.cos(angle)
+                    y = center.y + r * math.sin(angle)
+                    x_transformed = x * scale - dx
+                    y_transformed = dy - y * scale
+                    x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
                     print(f"[DEBUG] Drawing ARC pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
-                    flat.extend([x_c, y_c])
-                self.canvas.create_line(flat, fill="#aa00cc", width=2)
+                    points.append((x_c, y_c))
+                self.canvas.create_line(*[coord for pt in points for coord in pt], fill="#aa00cc", width=2)
             elif t == 'CIRCLE':
-                # Approximate with polyline (32 segments)
                 import math
                 center = e.dxf.center
                 r = e.dxf.radius
                 n = 32
-                # Use already-transformed center
-                cx, cy = center.x, center.y
                 points = []
                 for i in range(n+1):
                     angle = 2 * math.pi * i / n
-                    x = cx + r * math.cos(angle)
-                    y = cy + r * math.sin(angle)
-                    points.append((x, y))
-                flat = []
-                for x, y in points:
-                    x_c, y_c = self._inches_to_canvas(x, y)
+                    x = center.x + r * math.cos(angle)
+                    y = center.y + r * math.sin(angle)
+                    x_transformed = x * scale - dx
+                    y_transformed = dy - y * scale
+                    x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
                     print(f"[DEBUG] Drawing CIRCLE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
-                    flat.extend([x_c, y_c])
-                self.canvas.create_line(flat, fill="#cc2222", width=2)
+                    points.append((x_c, y_c))
+                self.canvas.create_line(*[coord for pt in points for coord in pt], fill="#cc2222", width=2)
 
     def _draw_toolpath_inches(self):
         # Draw toolpath in inches
@@ -643,74 +631,8 @@ class FabricCNCApp:
         return min_x, min_y, max_x, max_y
 
     def _auto_orient_dxf_top_left(self, debug=False):
-        """Auto-orient DXF to top-left with proper margin, supporting all entity types."""
-        scale = getattr(self, 'dxf_unit_scale', 1.0)
-        min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
-        
-        if min_x is None or min_y is None or max_x is None or max_y is None or Vec3 is None:
-            if debug:
-                print(f"[DEBUG] No extents found: min_x={min_x}, min_y={min_y}, max_x={max_x}, max_y={max_y}, Vec3={Vec3}")
-            return  # Nothing to orient or ezdxf not available
-        
-        # Calculate translation to move to top-left with margin
-        dx = min_x - PLOT_BUFFER_IN  # Shift left by buffer
-        dy = max_y + PLOT_BUFFER_IN  # Shift top by buffer (top-left: max_y at top)
-        
-        if debug:
-            print(f"[DEBUG] DXF extents (inches): min_x={min_x}, min_y={min_y}, max_x={max_x}, max_y={max_y}, scale={scale}")
-            print(f"[DEBUG] Translation: dx={dx}, dy={dy}")
-        
-        for i, e in enumerate(self.dxf_entities):
-            t = e.dxftype()
-            
-            if t == 'LINE':
-                # Translate LINE endpoints
-                x1 = (e.dxf.start.x * scale - dx)
-                y1 = (dy - e.dxf.start.y * scale)
-                x2 = (e.dxf.end.x * scale - dx)
-                y2 = (dy - e.dxf.end.y * scale)
-                new_start = Vec3(x1, y1, e.dxf.start.z * scale if hasattr(e.dxf.start, 'z') else 0.0)
-                new_end = Vec3(x2, y2, e.dxf.end.z * scale if hasattr(e.dxf.end, 'z') else 0.0)
-                if debug and i < 5:
-                    print(f"[DEBUG] LINE {i}: ({x1:.2f}, {y1:.2f}) -> ({x2:.2f}, {y2:.2f})")
-                e.dxf.start = new_start
-                e.dxf.end = new_end
-                
-            elif t == 'LWPOLYLINE':
-                # Translate LWPOLYLINE points
-                pts = list(e.get_points())
-                new_pts = []
-                for j, p in enumerate(pts):
-                    x = (p[0] * scale - dx)
-                    y = (dy - p[1] * scale)
-                    if debug and i < 2 and j < 5:
-                        print(f"[DEBUG] LWPOLYLINE {i} pt{j}: ({x:.2f}, {y:.2f})")
-                    new_pts.append((x, y) + p[2:])
-                e.points = new_pts
-                
-            elif t == 'POLYLINE':
-                # Translate POLYLINE vertices
-                for v in e.vertices():
-                    x = (v.dxf.x * scale - dx)
-                    y = (dy - v.dxf.y * scale)
-                    if debug and i < 2:
-                        print(f"[DEBUG] POLYLINE {i} vertex: ({x:.2f}, {y:.2f})")
-                    v.dxf.x = x
-                    v.dxf.y = y
-                    
-            elif t == 'SPLINE':
-                # For SPLINE, we'll handle the transformation during plotting
-                if debug and i < 2:
-                    print(f"[DEBUG] SPLINE {i}: will transform during plotting")
-                    
-            elif t == 'ARC' or t == 'CIRCLE':
-                # Translate ARC/CIRCLE center
-                center = e.dxf.center
-                new_center_x = center.x * scale - dx
-                new_center_y = dy - center.y * scale
-                if debug and i < 2:
-                    print(f"[DEBUG] {t} {i} center: ({new_center_x:.2f}, {new_center_y:.2f})")
-                e.dxf.center = Vec3(new_center_x, new_center_y, center.z * scale if hasattr(center, 'z') else 0.0)
+        # No-op: do not transform entities at import, only at plot time
+        pass
 
     def _generate_toolpath(self):
         # Stub: just connect all lines in order for now
