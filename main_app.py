@@ -556,7 +556,7 @@ class FabricCNCApp:
 
     def _update_position_display(self):
         pos = self.motor_ctrl.get_position()
-        text = f"X: {pos['X']:.1f} mm\nY: {pos['Y']:.1f} mm\nZ: {pos['Z']:.1f} mm\nROT: {pos['ROT']:.1f}°"
+        text = f"X: {pos['X']/INCH_TO_MM:.2f} in\nY: {pos['Y']/INCH_TO_MM:.2f} in\nZ: {pos['Z']/INCH_TO_MM:.2f} in\nROT: {pos['ROT']:.1f}°"
         self.coord_label.config(text=text)
         self.root.after(200, self._update_position_display)
 
