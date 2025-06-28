@@ -114,7 +114,7 @@ sudo raspi-config nonint do_gpio 0
 source venv/bin/activate
 
 # Run the main application
-python src/fabric_cnc/main_app.py
+python main_app.py
 ```
 
 ### Basic Operations
@@ -135,16 +135,18 @@ python src/fabric_cnc/main_app.py
 ### Project Structure
 ```
 fabric_cnc/
-├── src/fabric_cnc/
-│   ├── main_app.py          # Main GUI application
-│   ├── config.py            # Configuration settings
-│   └── motor_control/
-│       ├── driver.py        # Motor driver implementation
-│       └── motor_controller.py  # Main motor controller
+├── main_app.py          # Main GUI application
+├── config.py            # Configuration settings
+├── motor_control/
+│   ├── driver.py        # Motor driver implementation
+│   └── motor_controller.py  # Main motor controller
 ├── install.sh               # Raspberry Pi installation script
 ├── launch_motor_test.sh     # Application launcher
 ├── fabric-cnc-motor-test.desktop  # Desktop entry
-└── pyproject.toml          # Package configuration
+├── requirements.txt         # Dependencies
+├── pyproject.toml          # Package configuration
+├── README.md               # Complete documentation
+└── LAUNCHER_README.md      # Launcher documentation
 ```
 
 ### Development Mode
@@ -153,7 +155,7 @@ fabric_cnc/
 pip install -e .
 
 # Run with debugging
-python -m fabric_cnc.main_app
+python -m main_app
 ```
 
 ### Simulation Mode
@@ -162,7 +164,7 @@ The application automatically runs in simulation mode on non-Raspberry Pi system
 ## Configuration
 
 ### Motor Settings
-Edit `src/fabric_cnc/config.py` to adjust:
+Edit `config.py` to adjust:
 - Motor pin assignments
 - Steps per revolution
 - Movement speeds
@@ -202,7 +204,7 @@ Edit `src/fabric_cnc/config.py` to adjust:
 ### Debug Mode
 ```bash
 # Run with verbose logging
-python -m fabric_cnc.main_app --debug
+python -m main_app --debug
 ```
 
 ## Safety Notes

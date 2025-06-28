@@ -38,7 +38,7 @@ dev = [
 ]
 
 [project.scripts]
-fabric-cnc = "fabric_cnc.main_app:main"
+fabric-cnc = "main_app:main"
 
 [project.urls]
 Homepage = "https://github.com/pbriggin/fabric_cnc"
@@ -46,7 +46,7 @@ Repository = "https://github.com/pbriggin/fabric_cnc.git"
 Issues = "https://github.com/pbriggin/fabric_cnc/issues"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
 
 [tool.setuptools.package-data]
 fabric_cnc = ["*.txt", "*.md"] 

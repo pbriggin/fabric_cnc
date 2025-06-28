@@ -28,9 +28,9 @@ if [ ! -d "venv" ]; then
 fi
 
 # Check if the main app file exists
-if [ ! -f "src/fabric_cnc/main_app.py" ]; then
+if [ ! -f "main_app.py" ]; then
     echo "Error: Main app not found!"
-    echo "Expected: src/fabric_cnc/main_app.py"
+    echo "Expected: main_app.py"
     read -p "Press Enter to exit..."
     exit 1
 fi
@@ -53,7 +53,7 @@ echo "Note: This requires GPIO access for motor control"
 echo ""
 
 # Run the main app
-python3 src/fabric_cnc/main_app.py
+python3 main_app.py
 
 # Keep terminal open if there's an error
 if [ $? -ne 0 ]; then

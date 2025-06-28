@@ -233,6 +233,17 @@ main() {
     echo
     print_warning "Please reboot to apply GPIO permission changes!"
     echo
+
+    # Check if the main app file exists
+    if [ ! -f "main_app.py" ]; then
+        echo "Error: Main app not found!"
+        echo "Expected: main_app.py"
+        read -p "Press Enter to exit..."
+        exit 1
+    fi
+
+    # Run the main app
+    python3 main_app.py
 }
 
 # Run main function
