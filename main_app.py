@@ -24,7 +24,7 @@ except ImportError:
 
 # Import motor control modules
 try:
-    from .motor_control.motor_controller import MotorController
+    from motor_control.motor_controller import MotorController
     MOTOR_IMPORTS_AVAILABLE = True
 except ImportError:
     MOTOR_IMPORTS_AVAILABLE = False
