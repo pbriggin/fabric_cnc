@@ -396,9 +396,9 @@ class FabricCNCApp:
         # Get translation values for SPLINE entities (they weren't transformed during import)
         scale = getattr(self, 'dxf_unit_scale', 1.0)
         min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
-        if min_x is not None and min_y is not None:
+        if min_x is not None and max_y is not None:
             dx = min_x - PLOT_BUFFER_IN
-            dy = min_y - PLOT_BUFFER_IN
+            dy = max_y + PLOT_BUFFER_IN
         else:
             dx, dy = 0, 0
         
@@ -409,8 +409,6 @@ class FabricCNCApp:
                 x2, y2 = e.dxf.end.x, e.dxf.end.y
                 x1c, y1c = self._inches_to_canvas(x1, y1)
                 x2c, y2c = self._inches_to_canvas(x2, y2)
-                y1c = self.canvas_height - y1c
-                y2c = self.canvas_height - y2c
                 print(f"[DEBUG] Drawing LINE: ({x1:.2f}, {y1:.2f}) -> ({x2:.2f}, {y2:.2f}) | canvas: ({x1c:.2f}, {y1c:.2f}) -> ({x2c:.2f}, {y2c:.2f})")
                 self.canvas.create_line(x1c, y1c, x2c, y2c, fill="#222", width=2)
             elif t == 'LWPOLYLINE':
@@ -418,7 +416,6 @@ class FabricCNCApp:
                 flat = []
                 for x, y in points:
                     x_c, y_c = self._inches_to_canvas(x, y)
-                    y_c = self.canvas_height - y_c
                     print(f"[DEBUG] Drawing LWPOLYLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#0077cc", width=2)
@@ -427,7 +424,6 @@ class FabricCNCApp:
                 flat = []
                 for x, y in points:
                     x_c, y_c = self._inches_to_canvas(x, y)
-                    y_c = self.canvas_height - y_c
                     print(f"[DEBUG] Drawing POLYLINE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#cc7700", width=2)
@@ -439,9 +435,8 @@ class FabricCNCApp:
                 for x, y, *_ in points:
                     # Apply the same transformation that was used for other entities
                     x_transformed = (x * scale - dx)
-                    y_transformed = (y * scale - dy)
+                    y_transformed = (dy - y * scale)
                     x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
-                    y_c = self.canvas_height - y_c
                     print(f"[DEBUG] Drawing SPLINE pt: ({x:.2f}, {y:.2f}) | transformed: ({x_transformed:.2f}, {y_transformed:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#00aa88", width=2)
@@ -464,7 +459,6 @@ class FabricCNCApp:
                 flat = []
                 for x, y in points:
                     x_c, y_c = self._inches_to_canvas(x, y)
-                    y_c = self.canvas_height - y_c
                     print(f"[DEBUG] Drawing ARC pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#aa00cc", width=2)
@@ -483,7 +477,6 @@ class FabricCNCApp:
                 flat = []
                 for x, y in points:
                     x_c, y_c = self._inches_to_canvas(x, y)
-                    y_c = self.canvas_height - y_c
                     print(f"[DEBUG] Drawing CIRCLE pt: ({x:.2f}, {y:.2f}) | canvas: ({x_c:.2f}, {y_c:.2f})")
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#cc2222", width=2)
@@ -656,7 +649,7 @@ class FabricCNCApp:
         
         # Calculate translation to move to top-left with margin
         dx = min_x - PLOT_BUFFER_IN  # Shift left by buffer
-        dy = min_y - PLOT_BUFFER_IN  # Shift top by buffer (top-left: min_y at top)
+        dy = max_y + PLOT_BUFFER_IN  # Shift top by buffer (top-left: max_y at top)
         
         if debug:
             print(f"[DEBUG] DXF extents (inches): min_x={min_x}, min_y={min_y}, max_x={max_x}, max_y={max_y}, scale={scale}")
@@ -668,9 +661,9 @@ class FabricCNCApp:
             if t == 'LINE':
                 # Translate LINE endpoints
                 x1 = (e.dxf.start.x * scale - dx)
-                y1 = (e.dxf.start.y * scale - dy)
+                y1 = (dy - e.dxf.start.y * scale)
                 x2 = (e.dxf.end.x * scale - dx)
-                y2 = (e.dxf.end.y * scale - dy)
+                y2 = (dy - e.dxf.end.y * scale)
                 new_start = Vec3(x1, y1, e.dxf.start.z * scale if hasattr(e.dxf.start, 'z') else 0.0)
                 new_end = Vec3(x2, y2, e.dxf.end.z * scale if hasattr(e.dxf.end, 'z') else 0.0)
                 if debug and i < 5:
@@ -684,7 +677,7 @@ class FabricCNCApp:
                 new_pts = []
                 for j, p in enumerate(pts):
                     x = (p[0] * scale - dx)
-                    y = (p[1] * scale - dy)
+                    y = (dy - p[1] * scale)
                     if debug and i < 2 and j < 5:
                         print(f"[DEBUG] LWPOLYLINE {i} pt{j}: ({x:.2f}, {y:.2f})")
                     new_pts.append((x, y) + p[2:])
@@ -694,7 +687,7 @@ class FabricCNCApp:
                 # Translate POLYLINE vertices
                 for v in e.vertices():
                     x = (v.dxf.x * scale - dx)
-                    y = (v.dxf.y * scale - dy)
+                    y = (dy - v.dxf.y * scale)
                     if debug and i < 2:
                         print(f"[DEBUG] POLYLINE {i} vertex: ({x:.2f}, {y:.2f})")
                     v.dxf.x = x
@@ -709,7 +702,7 @@ class FabricCNCApp:
                 # Translate ARC/CIRCLE center
                 center = e.dxf.center
                 new_center_x = center.x * scale - dx
-                new_center_y = center.y * scale - dy
+                new_center_y = dy - center.y * scale
                 if debug and i < 2:
                     print(f"[DEBUG] {t} {i} center: ({new_center_x:.2f}, {new_center_y:.2f})")
                 e.dxf.center = Vec3(new_center_x, new_center_y, center.z * scale if hasattr(center, 'z') else 0.0)
