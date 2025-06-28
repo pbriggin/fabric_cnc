@@ -1,11 +1,37 @@
-# Fabric CNC Motor Test Launcher
+# Fabric CNC Motor Test Launcher (Raspberry Pi)
 
-This directory contains launcher scripts to easily start the Fabric CNC Motor Test UI.
+This directory contains launcher scripts to easily start the Fabric CNC Motor Test UI on Raspberry Pi systems.
+
+## Prerequisites
+
+### GPIO Setup
+```bash
+# Add user to gpio group
+sudo usermod -a -G gpio $USER
+
+# Add user to i2c group (if using I2C sensors)
+sudo usermod -a -G i2c $USER
+
+# Reboot to apply changes
+sudo reboot
+```
+
+### Python Environment
+```bash
+# Install required packages
+sudo apt update
+sudo apt install -y python3-pip python3-venv python3-tk
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+pip install -e .
+```
 
 ## Files
 
-- `launch_motor_test.sh` - Main launcher script
-- `fabric-cnc-motor-test.desktop` - Desktop entry file for Linux
+- `launch_motor_test.sh` - Main launcher script for Raspberry Pi
+- `fabric-cnc-motor-test.desktop` - Desktop entry file for Raspberry Pi OS
 - `LAUNCHER_README.md` - This file
 
 ## Quick Start
@@ -15,7 +41,7 @@ This directory contains launcher scripts to easily start the Fabric CNC Motor Te
 ./launch_motor_test.sh
 ```
 
-### Option 2: Create Desktop Icon (Linux)
+### Option 2: Create Desktop Icon (Raspberry Pi OS)
 
 1. **Copy the desktop file to applications:**
    ```bash
@@ -27,30 +53,21 @@ This directory contains launcher scripts to easily start the Fabric CNC Motor Te
    chmod +x ~/.local/share/applications/fabric-cnc-motor-test.desktop
    ```
 
-3. **Search for "Fabric CNC Motor Test" in your applications menu**
+3. **Search for "Fabric CNC Motor Test" in the Raspberry Pi menu**
 
-### Option 3: Create Desktop Icon (macOS)
-
-1. **Create an AppleScript:**
-   - Open "Script Editor" (Applications > Utilities)
-   - Create new script with:
-   ```applescript
-   tell application "Terminal"
-       do script "cd /Users/peterbriggs/Code/fabric_cnc && ./launch_motor_test.sh"
-   end tell
-   ```
-   - Save as "Fabric CNC Motor Test.scpt"
-
-2. **Create Application:**
-   - In Script Editor, go to File > Export
-   - Choose "Application" as file format
-   - Save to Desktop
+### Option 3: Add to Desktop
+```bash
+# Copy to desktop for easy access
+cp fabric-cnc-motor-test.desktop ~/Desktop/
+chmod +x ~/Desktop/fabric-cnc-motor-test.desktop
+```
 
 ## What the Launcher Does
 
-1. **Checks prerequisites:**
-   - Virtual environment exists
-   - Motor test UI file exists
+1. **Checks system:**
+   - Verifies running on Raspberry Pi
+   - Checks GPIO group membership
+   - Validates virtual environment and files
 
 2. **Activates environment:**
    - Activates the Python virtual environment
@@ -58,9 +75,23 @@ This directory contains launcher scripts to easily start the Fabric CNC Motor Te
 
 3. **Launches the UI:**
    - Runs the motor test interface
-   - Keeps terminal open if errors occur
+   - Provides GPIO access warnings if needed
+
+## Hardware Requirements
+
+- **Raspberry Pi 4** (recommended)
+- **GPIO connections** for stepper motors
+- **Hall effect sensors** for homing
+- **TB6600 motor drivers**
+- **5V power supply** for motors
 
 ## Troubleshooting
+
+### "User not in gpio group"
+```bash
+sudo usermod -a -G gpio $USER
+sudo reboot
+```
 
 ### "Virtual environment not found"
 ```bash
@@ -74,13 +105,36 @@ pip install -e .
 chmod +x launch_motor_test.sh
 ```
 
+### "GPIO access denied"
+- Ensure user is in gpio group
+- Check hardware connections
+- Verify motor driver connections
+
 ### "Motor test UI not found"
 Make sure you're running the script from the fabric_cnc project root directory.
 
+## GPIO Pin Configuration
+
+The motor test UI uses these GPIO pins:
+
+- **X Motor**: STEP=5, DIR=6, EN=13, HALL=20
+- **Y1 Motor**: STEP=10, DIR=9, EN=11, HALL=21
+- **Y2 Motor**: STEP=17, DIR=27, EN=22, HALL=16
+- **Z_LIFT**: STEP=12, DIR=11, EN=13, HALL=22
+- **Z_ROTATE**: STEP=15, DIR=14, EN=16, HALL=23
+
+## Safety Notes
+
+- **Always use emergency stop** when testing motors
+- **Check motor connections** before powering on
+- **Start with low speeds** and gradually increase
+- **Monitor motor temperature** during extended use
+- **Keep hands clear** of moving parts during operation
+
 ## Customization
 
-### Change Icon (Linux)
-Replace the `Icon=` line in the .desktop file with your preferred icon:
+### Change Icon
+Replace the `Icon=` line in the .desktop file:
 - `Icon=applications-engineering` (default)
 - `Icon=applications-development`
 - `Icon=applications-science`
@@ -90,7 +144,14 @@ Replace the `Icon=` line in the .desktop file with your preferred icon:
 - Remove `Terminal=true` to run without terminal window
 - Add `StartupNotify=true` for startup notification
 
-### Add to System Menu (Linux)
+### Add to System Menu
 ```bash
 sudo cp fabric-cnc-motor-test.desktop /usr/share/applications/
-``` 
+```
+
+## Performance Tips
+
+- **Close other applications** when running motor tests
+- **Use wired network** instead of WiFi for better performance
+- **Monitor CPU temperature** during extended operation
+- **Consider using a heatsink** on the Raspberry Pi 
