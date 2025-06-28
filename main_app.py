@@ -772,8 +772,29 @@ class FabricCNCApp:
         for pts in shapes:
             if len(pts) < 2:
                 continue
+            # Ensure CCW for closed shapes
+            def is_closed(pts):
+                x0, y0 = pts[0]
+                x1, y1 = pts[-1]
+                return abs(x0 - x1) < 1e-5 and abs(y0 - y1) < 1e-5
+            def signed_area(pts):
+                area = 0.0
+                n = len(pts)
+                for i in range(n-1):
+                    x0, y0 = pts[i]
+                    x1, y1 = pts[i+1]
+                    area += (x0 * y1 - x1 * y0)
+                return area / 2.0
+            closed = is_closed(pts)
+            pts_ccw = pts
+            if closed:
+                area = signed_area(pts)
+                if area < 0:
+                    pts_ccw = list(reversed(pts))
+            else:
+                pts_ccw = pts
             # Transform all points
-            pts_t = [(x * scale - dx, dy - y * scale) for x, y in pts]
+            pts_t = [(x * scale - dx, dy - y * scale) for x, y in pts_ccw]
             path = []
             angle0 = math.atan2(pts_t[1][1] - pts_t[0][1], pts_t[1][0] - pts_t[0][0])
             path.append((pts_t[0][0], pts_t[0][1], angle0, 1))  # Z up
