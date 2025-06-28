@@ -477,15 +477,26 @@ class FabricCNCApp:
 
     def _draw_toolpath_inches(self):
         # Draw toolpath in inches
-        for seg in self.toolpath:
-            (x1, y1), (x2, y2) = seg
-            x1_in, y1_in = x1 / INCH_TO_MM, y1 / INCH_TO_MM
-            x2_in, y2_in = x2 / INCH_TO_MM, y2 / INCH_TO_MM
-            x1c, y1c = self._inches_to_canvas(x1_in, y1_in)
-            x2c, y2c = self._inches_to_canvas(x2_in, y2_in)
-            y1c = self.canvas_height - y1c
-            y2c = self.canvas_height - y2c
-            self.canvas.create_line(x1c, y1c, x2c, y2c, fill="#d00", width=2, dash=(4, 2))
+        if not hasattr(self, 'toolpaths') or not self.toolpaths:
+            return
+        # Color cycle for up to 20 shapes
+        color_cycle = [
+            '#d00', '#0077cc', '#00aa88', '#cc7700', '#aa00cc', '#cc2222', '#0a0', '#f0a', '#0af', '#fa0',
+            '#a0f', '#0fa', '#af0', '#f00', '#00f', '#0ff', '#ff0', '#f0f', '#888', '#444'
+        ]
+        for i, path in enumerate(self.toolpaths):
+            color = color_cycle[i % len(color_cycle)]
+            # Draw as a polyline of all (x, y) points where z==0 (cutting)
+            points = [(x, y) for x, y, angle, z in path if z == 0]
+            if len(points) < 2:
+                continue
+            flat = []
+            for x, y in points:
+                x_in, y_in = x / INCH_TO_MM, y / INCH_TO_MM
+                x_c, y_c = self._inches_to_canvas(x_in, y_in)
+                y_c = self.canvas_height - y_c
+                flat.extend([x_c, y_c])
+            self.canvas.create_line(flat, fill=color, width=2, dash=(4, 2))
 
     # --- DXF Import/Toolpath ---
     def _import_dxf(self):
@@ -639,82 +650,131 @@ class FabricCNCApp:
         if not self.dxf_entities:
             messagebox.showwarning("No DXF", "Import a DXF file first.")
             return
-        toolpaths = []  # List of lists: one per shape
         scale = getattr(self, 'dxf_unit_scale', 1.0)
         min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
         dx = min_x - PLOT_BUFFER_IN if min_x is not None else 0
         dy = max_y + PLOT_BUFFER_IN if max_y is not None else 0
-        
+
+        # --- Flatten all entities into segments ---
+        segments = []  # Each segment is ((x1, y1), (x2, y2))
         for e in self.dxf_entities:
             t = e.dxftype()
-            path = []
             if t == 'LINE':
-                # Treat as a single segment
                 x1, y1 = e.dxf.start.x, e.dxf.start.y
                 x2, y2 = e.dxf.end.x, e.dxf.end.y
-                x1p, y1p = x1 * scale - dx, dy - y1 * scale
-                x2p, y2p = x2 * scale - dx, dy - y2 * scale
-                angle = math.atan2(y2p - y1p, x2p - x1p)
-                path.append((x1p, y1p, angle, 1))  # Z up at start
-                path.append((x1p, y1p, angle, 0))  # Z down
-                path.append((x2p, y2p, angle, 0))  # Move/cut
-                path.append((x2p, y2p, angle, 1))  # Z up at end
-            elif t in ('LWPOLYLINE', 'POLYLINE', 'SPLINE'):
-                if t == 'LWPOLYLINE':
-                    pts = [(p[0], p[1]) for p in e.get_points()]
-                elif t == 'POLYLINE':
-                    pts = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
-                else:  # SPLINE
-                    pts = [(p[0], p[1]) for p in e.flattening(0.1)]
-                # Transform all points
-                pts = [(x * scale - dx, dy - y * scale) for x, y in pts]
-                if len(pts) < 2:
-                    continue
-                # Start: move to first point, Z up
-                angle0 = math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0])
-                path.append((pts[0][0], pts[0][1], angle0, 1))  # Z up
-                path.append((pts[0][0], pts[0][1], angle0, 0))  # Z down
+                segments.append(((x1, y1), (x2, y2)))
+            elif t == 'LWPOLYLINE':
+                pts = [p[:2] for p in e.get_points()]
                 for i in range(1, len(pts)):
-                    x0, y0 = pts[i-1]
-                    x1, y1 = pts[i]
-                    angle = math.atan2(y1 - y0, x1 - x0)
-                    # At corners, lift, rotate, lower
-                    if i > 1:
-                        path.append((x0, y0, angle, 1))  # Z up
-                        path.append((x0, y0, angle, 0))  # Z down
-                    path.append((x1, y1, angle, 0))  # Move/cut
-                # End: Z up
-                path.append((pts[-1][0], pts[-1][1], angle, 1))
-            elif t in ('ARC', 'CIRCLE'):
+                    segments.append((pts[i-1], pts[i]))
+                if getattr(e, 'closed', False) or (len(pts) > 2 and pts[0] == pts[-1]):
+                    segments.append((pts[-1], pts[0]))
+            elif t == 'POLYLINE':
+                pts = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
+                for i in range(1, len(pts)):
+                    segments.append((pts[i-1], pts[i]))
+                if getattr(e, 'is_closed', False) or (len(pts) > 2 and pts[0] == pts[-1]):
+                    segments.append((pts[-1], pts[0]))
+            elif t == 'SPLINE':
+                pts = [(p[0], p[1]) for p in e.flattening(0.1)]
+                for i in range(1, len(pts)):
+                    segments.append((pts[i-1], pts[i]))
+            elif t == 'ARC':
                 center = e.dxf.center
                 r = e.dxf.radius
-                if t == 'ARC':
-                    start = math.radians(e.dxf.start_angle)
-                    end = math.radians(e.dxf.end_angle)
-                    if end < start:
-                        end += 2 * math.pi
-                    n = 32
-                    pts = [(center.x + r * math.cos(start + (end - start) * i / n),
-                            center.y + r * math.sin(start + (end - start) * i / n)) for i in range(n+1)]
-                else:
-                    n = 32
-                    pts = [(center.x + r * math.cos(2 * math.pi * i / n),
-                            center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
-                pts = [(x * scale - dx, dy - y * scale) for x, y in pts]
-                angle0 = math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0])
-                path.append((pts[0][0], pts[0][1], angle0, 1))  # Z up
-                path.append((pts[0][0], pts[0][1], angle0, 0))  # Z down
+                start = math.radians(e.dxf.start_angle)
+                end = math.radians(e.dxf.end_angle)
+                if end < start:
+                    end += 2 * math.pi
+                n = 32
+                pts = [(center.x + r * math.cos(start + (end - start) * i / n),
+                        center.y + r * math.sin(start + (end - start) * i / n)) for i in range(n+1)]
                 for i in range(1, len(pts)):
-                    x0, y0 = pts[i-1]
-                    x1, y1 = pts[i]
-                    angle = math.atan2(y1 - y0, x1 - x0)
-                    if i > 1:
-                        path.append((x0, y0, angle, 1))
-                        path.append((x0, y0, angle, 0))
-                    path.append((x1, y1, angle, 0))
-                path.append((pts[-1][0], pts[-1][1], angle, 1))
-            if path:
-                toolpaths.append(path)
+                    segments.append((pts[i-1], pts[i]))
+            elif t == 'CIRCLE':
+                center = e.dxf.center
+                r = e.dxf.radius
+                n = 32
+                pts = [(center.x + r * math.cos(2 * math.pi * i / n),
+                        center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
+                for i in range(1, len(pts)):
+                    segments.append((pts[i-1], pts[i]))
+
+        # --- Group segments into shapes by connectivity ---
+        from collections import defaultdict, deque
+        point_map = defaultdict(list)
+        seg_indices = list(range(len(segments)))
+        for idx, (p1, p2) in enumerate(segments):
+            p1r = (round(p1[0], 6), round(p1[1], 6))
+            p2r = (round(p2[0], 6), round(p2[1], 6))
+            point_map[p1r].append((idx, p2r))
+            point_map[p2r].append((idx, p1r))
+        visited = set()
+        shapes = []
+        for idx in seg_indices:
+            if idx in visited:
+                continue
+            # Start a new shape
+            seg = segments[idx]
+            p_start = (round(seg[0][0], 6), round(seg[0][1], 6))
+            p_end = (round(seg[1][0], 6), round(seg[1][1], 6))
+            shape = [p_start, p_end]
+            visited.add(idx)
+            # Extend forwards
+            cur = p_end
+            while True:
+                found = False
+                for next_idx, next_pt in point_map[cur]:
+                    if next_idx not in visited:
+                        shape.append(next_pt)
+                        visited.add(next_idx)
+                        cur = next_pt
+                        found = True
+                        break
+                if not found:
+                    break
+            # Extend backwards
+            cur = p_start
+            while True:
+                found = False
+                for next_idx, next_pt in point_map[cur]:
+                    if next_idx not in visited:
+                        shape = [next_pt] + shape
+                        visited.add(next_idx)
+                        cur = next_pt
+                        found = True
+                        break
+                if not found:
+                    break
+            # Remove duplicate consecutive points
+            deduped = [shape[0]]
+            for pt in shape[1:]:
+                if pt != deduped[-1]:
+                    deduped.append(pt)
+            shapes.append(deduped)
+        print(f"[DEBUG] Grouped {len(shapes)} logical shapes for toolpath generation.")
+
+        # --- Generate toolpaths from shapes ---
+        toolpaths = []
+        for pts in shapes:
+            if len(pts) < 2:
+                continue
+            # Transform all points
+            pts_t = [(x * scale - dx, dy - y * scale) for x, y in pts]
+            path = []
+            angle0 = math.atan2(pts_t[1][1] - pts_t[0][1], pts_t[1][0] - pts_t[0][0])
+            path.append((pts_t[0][0], pts_t[0][1], angle0, 1))  # Z up
+            path.append((pts_t[0][0], pts_t[0][1], angle0, 0))  # Z down
+            for i in range(1, len(pts_t)):
+                x0, y0 = pts_t[i-1]
+                x1, y1 = pts_t[i]
+                angle = math.atan2(y1 - y0, x1 - x0)
+                if i > 1:
+                    path.append((x0, y0, angle, 1))  # Z up
+                    path.append((x0, y0, angle, 0))  # Z down
+                path.append((x1, y1, angle, 0))  # Move/cut
+            path.append((pts_t[-1][0], pts_t[-1][1], angle, 1))  # Z up at end
+            toolpaths.append(path)
         self.toolpaths = toolpaths
         logger.info(f"Generated toolpaths for {len(toolpaths)} shapes.")
         self._draw_canvas()
