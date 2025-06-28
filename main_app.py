@@ -721,7 +721,7 @@ class FabricCNCApp:
         self.preview_btn.config(state=tk.NORMAL)
 
     def _preview_toolpath(self):
-        """Animate the toolpath preview, showing the end effector moving with orientation and Z state, one shape at a time, without clearing between shapes."""
+        """Animate the toolpath preview, showing the end effector moving with orientation and Z state, one shape at a time, with debug output and shape highlighting."""
         if not hasattr(self, 'toolpaths') or not self.toolpaths:
             messagebox.showwarning("No Toolpath", "Generate a toolpath first.")
             return
@@ -729,14 +729,25 @@ class FabricCNCApp:
         
         def animate_shape(shape_idx=0):
             if shape_idx >= len(self.toolpaths):
+                print(f"[DEBUG] All shapes animated.")
                 return
             path = self.toolpaths[shape_idx]
+            print(f"[DEBUG] Starting animation for shape {shape_idx+1}/{len(self.toolpaths)} (steps: {len(path)})")
+            # Highlight the current shape's path (as a polyline)
+            shape_points = [(x, y) for x, y, angle, z in path if z == 0]
+            if len(shape_points) > 1:
+                flat = []
+                for x, y in shape_points:
+                    x_c, y_c = self._inches_to_canvas(x, y)
+                    flat.extend([x_c, y_c])
+                self.canvas.create_line(flat, fill="#ff0", width=2, dash=(4, 2))
             def animate_step(idx=0):
                 if idx >= len(path):
-                    # After this shape, wait then animate next shape
+                    print(f"[DEBUG] Finished animation for shape {shape_idx+1}")
                     self.root.after(400, animate_shape, shape_idx+1)
                     return
                 x, y, angle, z = path[idx]
+                print(f"[DEBUG] Shape {shape_idx+1} Step {idx+1}/{len(path)}: (x={x:.2f}, y={y:.2f}, angle={angle:.2f}, z={z})")
                 r = 0.5  # radius in inches
                 x_c, y_c = self._inches_to_canvas(x, y)
                 color = "#0a0" if z == 0 else "#aaa"
