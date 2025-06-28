@@ -440,13 +440,11 @@ class FabricCNCApp:
                 return
             # Detect units
             insunits = doc.header.get('$INSUNITS', 0)
-            # 1 = inches, 4 = mm
             if insunits == 4:
                 self.dxf_unit_scale = 1.0 / 25.4  # mm to in
             elif insunits == 1:
                 self.dxf_unit_scale = 1.0  # inches
             else:
-                # Unknown or unitless, default to mm->in
                 self.dxf_unit_scale = 1.0 / 25.4
             self.dxf_doc = doc
             self.dxf_entities = entities
@@ -454,42 +452,50 @@ class FabricCNCApp:
             self.gen_toolpath_btn.config(state=tk.NORMAL)
             logger.info(f"Loaded DXF: {file_path} ({len(entities)} entities), units: {insunits}, scale: {self.dxf_unit_scale}")
             # Auto-orient to top-left, no scaling
-            self._auto_orient_dxf_top_left()
+            self._auto_orient_dxf_top_left(debug=True)
             self._draw_canvas()
         except Exception as e:
             logger.error(f"Failed to load DXF: {e}")
             messagebox.showerror("DXF Import Error", str(e))
 
-    def _auto_orient_dxf_top_left(self):
+    def _auto_orient_dxf_top_left(self, debug=False):
         # Find extents in inches
+        scale = getattr(self, 'dxf_unit_scale', 1.0)
         min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
         if min_x is None or min_y is None or Vec3 is None:
+            if debug:
+                print(f"[DEBUG] No extents found: min_x={min_x}, min_y={min_y}, Vec3={Vec3}")
             return  # Nothing to orient or ezdxf not available
         dx = min_x
         dy = min_y
         y_top = 45
-        scale = getattr(self, 'dxf_unit_scale', 1.0)
-        for e in self.dxf_entities:
+        if debug:
+            print(f"[DEBUG] DXF extents (inches): min_x={min_x}, min_y={min_y}, max_x={max_x}, max_y={max_y}, scale={scale}")
+        for i, e in enumerate(self.dxf_entities):
             if e.dxftype() == 'LINE':
-                new_start = Vec3(
-                    (e.dxf.start.x * scale - dx),
-                    (y_top - (e.dxf.start.y * scale - dy)),
-                    e.dxf.start.z * scale if hasattr(e.dxf.start, 'z') else 0.0
-                )
-                new_end = Vec3(
-                    (e.dxf.end.x * scale - dx),
-                    (y_top - (e.dxf.end.y * scale - dy)),
-                    e.dxf.end.z * scale if hasattr(e.dxf.end, 'z') else 0.0
-                )
+                # Convert to inches, translate to (0, y_top), flip Y
+                x1 = (e.dxf.start.x * scale - dx)
+                y1 = (e.dxf.start.y * scale - dy)
+                x2 = (e.dxf.end.x * scale - dx)
+                y2 = (e.dxf.end.y * scale - dy)
+                y1_flipped = y_top - y1
+                y2_flipped = y_top - y2
+                new_start = Vec3(x1, y1_flipped, e.dxf.start.z * scale if hasattr(e.dxf.start, 'z') else 0.0)
+                new_end = Vec3(x2, y2_flipped, e.dxf.end.z * scale if hasattr(e.dxf.end, 'z') else 0.0)
+                if debug and i < 5:
+                    print(f"[DEBUG] LINE {i}: ({x1:.2f}, {y1_flipped:.2f}) -> ({x2:.2f}, {y2_flipped:.2f})")
                 e.dxf.start = new_start
                 e.dxf.end = new_end
             elif e.dxftype() == 'LWPOLYLINE':
                 pts = list(e.get_points())
                 new_pts = []
-                for p in pts:
+                for j, p in enumerate(pts):
                     x = (p[0] * scale - dx)
-                    y = (y_top - (p[1] * scale - dy))
-                    new_pts.append((x, y) + p[2:])
+                    y = (p[1] * scale - dy)
+                    y_flipped = y_top - y
+                    if debug and i < 2 and j < 5:
+                        print(f"[DEBUG] LWPOLYLINE {i} pt{j}: ({x:.2f}, {y_flipped:.2f})")
+                    new_pts.append((x, y_flipped) + p[2:])
                 e.points = new_pts
 
     def _get_dxf_extents_inches(self):
