@@ -872,8 +872,11 @@ class FabricCNCApp:
                     print(f"[DEBUG] Shape {shape_idx+1} Step {idx + j + 1}/{len(path)}: (x={x:.2f}, y={y:.2f}, angle={angle:.2f}, z={z})")
                     r = 0.5  # radius in inches
                     x_c, y_c = self._inches_to_canvas(x, y)
-                    color = "#0a0" if z == 0 else "#aaa"
-                    self.canvas.create_oval(x_c-6, y_c-6, x_c+6, y_c+6, fill=color, outline="#000")
+                    # Draw green dot first if Z=0, then grey dot if Z=1 (slightly larger)
+                    if z == 0:
+                        self.canvas.create_oval(x_c-6, y_c-6, x_c+6, y_c+6, fill="#0a0", outline="#000")
+                    if z == 1:
+                        self.canvas.create_oval(x_c-8, y_c-8, x_c+8, y_c+8, fill="#aaa", outline="#000")
                     # Draw orientation line (wheel direction)
                     x2 = x + r * math.cos(angle)
                     y2 = y + r * math.sin(angle)
