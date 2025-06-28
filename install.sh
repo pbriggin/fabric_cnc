@@ -140,13 +140,18 @@ setup_launcher() {
     # Make launcher script executable
     chmod +x launch_motor_test.sh
     
-    # Copy desktop file to applications
+    # Copy minimal desktop file to applications
     cp fabric-cnc-motor-test.desktop ~/.local/share/applications/
     chmod +x ~/.local/share/applications/fabric-cnc-motor-test.desktop
     
     # Also copy to desktop for easy access
     cp fabric-cnc-motor-test.desktop ~/Desktop/
     chmod +x ~/Desktop/fabric-cnc-motor-test.desktop
+    
+    # Convert to Unix line endings (robustness)
+    if command -v dos2unix >/dev/null 2>&1; then
+        dos2unix ~/Desktop/fabric-cnc-motor-test.desktop
+    fi
     
     print_success "Desktop launcher configured"
 }
