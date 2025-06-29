@@ -83,7 +83,8 @@ class SimulatedMotorController:
             self.is_homing = True
             # Simulate homing delay
             time.sleep(2)
-            self.position[axis] = 0.0
+            if axis == 'X' or axis == 'Y':
+                self.position[axis] = 0.0
             self.is_homing = False
             logger.info(f"Homed {axis} axis.")
             return True
@@ -269,6 +270,8 @@ class FabricCNCApp:
         self._setup_ui()
         self._bind_arrow_keys()
         self._update_position_display()
+        self.motor_ctrl.position['X'] = 0.0
+        self.motor_ctrl.position['Y'] = 0.0
 
     def _bind_arrow_keys(self):
         self.root.bind('<KeyPress-Left>', lambda e: self._on_arrow_press('Left'))
@@ -408,6 +411,11 @@ class FabricCNCApp:
             self.canvas.create_text(25, y_px, text=f"{y_in}", fill="#444", font=("Arial", 9), anchor="w")
         # Draw border
         self.canvas.create_rectangle(0, 0, self.canvas_width, self.canvas_height, outline="#333", width=2)
+        # Draw home position indicator (red cross at 0,0)
+        home_x, home_y = self._inches_to_canvas(0, 0)
+        size = 10
+        self.canvas.create_line(home_x - size, home_y - size, home_x + size, home_y + size, fill="#d00", width=2)
+        self.canvas.create_line(home_x - size, home_y + size, home_x + size, home_y - size, fill="#d00", width=2)
 
     def _inches_to_canvas(self, x_in, y_in):
         # Add buffer to all sides
