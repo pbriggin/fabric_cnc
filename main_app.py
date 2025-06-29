@@ -843,7 +843,7 @@ class FabricCNCApp:
                 return
             path = self.toolpaths[shape_idx]
             def animate_step(idx=0):
-                steps_per_tick = 10  # Animate 10 steps per timer tick
+                steps_per_tick = 1  # Animate 1 step per timer tick for smoothness
                 if idx >= len(path):
                     self.root.after(50, animate_shape, shape_idx+1)  # Short pause between shapes
                     return
@@ -863,7 +863,7 @@ class FabricCNCApp:
                     y2 = y + r * math.sin(angle)
                     x2_c, y2_c = self._inches_to_canvas(x2, y2)
                     self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill="#f0a", width=3)
-                self.root.after(5, animate_step, idx + steps_per_tick)  # Much faster animation
+                self.root.after(2, animate_step, idx + steps_per_tick)  # Smoother animation
             animate_step()
         animate_shape()
 
