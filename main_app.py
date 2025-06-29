@@ -220,7 +220,7 @@ class RealMotorController:
                 self.position['Z'] = z
             if rot is not None:
                 self.position['ROT'] = rot
-            logger.info(f"Real move_to: X={self.position['X']:.2f}, Y={self.position['Y']:.2f}, Z={self.position['Z']:.2f}, ROT={self.position['ROT']:.2f}")
+            # logger.info(f"Real move_to: X={self.position['X']:.2f}, Y={self.position['Y']:.2f}, Z={self.position['Z']:.2f}, ROT={self.position['ROT']:.2f}")
 
 # --- Main App ---
 class FabricCNCApp:
