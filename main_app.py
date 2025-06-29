@@ -1060,12 +1060,14 @@ class FabricCNCApp:
 
     def _update_position_display(self):
         # Use toolpath position if running, otherwise use motor controller position
-        if hasattr(self, '_running_toolpath') and self._running_toolpath and hasattr(self, '_current_toolpath_pos'):
+        running_toolpath = hasattr(self, '_running_toolpath') and self._running_toolpath and hasattr(self, '_current_toolpath_pos')
+        if running_toolpath:
             pos = self._current_toolpath_pos
+            y_disp = 45.0 - (pos['Y']/INCH_TO_MM)  # Flip Y only during toolpath
         else:
             pos = self.motor_ctrl.get_position()
+            y_disp = pos['Y']/INCH_TO_MM  # No flip for jog/idle
         x_disp = pos['X']/INCH_TO_MM
-        y_disp = pos['Y']/INCH_TO_MM  # No flip
         z_disp = pos['Z']/INCH_TO_MM
         rot_disp = pos['ROT']
         text = f"X: {x_disp:.2f} in\nY: {y_disp:.2f} in\nZ: {z_disp:.2f} in\nROT: {rot_disp:.1f}°"
