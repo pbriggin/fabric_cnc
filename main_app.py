@@ -1056,7 +1056,11 @@ class FabricCNCApp:
         messagebox.showwarning("EMERGENCY STOP", "All motors stopped")
 
     def _update_position_display(self):
-        pos = self.motor_ctrl.get_position()
+        # Use toolpath position if running, otherwise use motor controller position
+        if hasattr(self, '_running_toolpath') and self._running_toolpath and hasattr(self, '_current_toolpath_pos'):
+            pos = self._current_toolpath_pos
+        else:
+            pos = self.motor_ctrl.get_position()
         text = f"X: {pos['X']/INCH_TO_MM:.2f} in\nY: {pos['Y']/INCH_TO_MM:.2f} in\nZ: {pos['Z']/INCH_TO_MM:.2f} in\nROT: {pos['ROT']:.1f}°"
         self.coord_label.config(text=text)
         self.root.after(200, self._update_position_display)
