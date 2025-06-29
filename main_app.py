@@ -425,7 +425,6 @@ class FabricCNCApp:
         y_in = pos['Y'] / INCH_TO_MM
         x_c, y_c = self._inches_to_canvas(x_in, y_in)
         r = 7
-        y_c = self.canvas_height - y_c
         self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill="#0a0", outline="#080", width=2)
         self.canvas.create_text(x_c, y_c - 18, text=f"({x_in:.2f}, {y_in:.2f})", fill="#080", font=("Arial", 10, "bold"))
 
@@ -985,14 +984,12 @@ class FabricCNCApp:
         rot_rad = math.radians(pos.get('ROT', 0.0))
         x_c, y_c = self._inches_to_canvas(x_in, y_in)
         r = 7
-        y_c = self.canvas_height - y_c
         self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill="#0a0", outline="#000", width=2)
         # Draw orientation line
         r_dir = 0.5  # 0.5 inch
         x2 = x_in + r_dir * math.cos(rot_rad)
         y2 = y_in + r_dir * math.sin(rot_rad)
         x2_c, y2_c = self._inches_to_canvas(x2, y2)
-        y2_c = self.canvas_height - y2_c
         self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill="#f0a", width=3)
 
     # --- Right Toolbar: Motor controls ---
