@@ -113,12 +113,6 @@ class MotorController:
         revolutions = distance_mm / config['MM_PER_REV']
         total_steps = int(revolutions * config['PULSES_PER_REV'])
         
-        logger.info(f"X movement calculations:")
-        logger.info(f"  Distance: {distance_mm}mm")
-        logger.info(f"  Revolutions needed: {revolutions:.2f}")
-        logger.info(f"  Steps per revolution: {config['PULSES_PER_REV']}")
-        logger.info(f"  Total steps: {total_steps}")
-        
         # Acceleration parameters
         accel_steps = min(total_steps // 4, 100)
         decel_steps = min(total_steps // 4, 100)
@@ -142,9 +136,8 @@ class MotorController:
             # Step motor
             self._step_motor('X', distance_mm > 0, delay)
             
-            # Log progress every 1000 steps
-            if i % 1000 == 0:
-                logger.info(f"X Step {i}/{total_steps}")
+            # Comment out or remove per-step logger.info statements
+            # logger.info(f"X Step {i}/{total_steps}")
 
     def _move_y(self, distance_mm):
         """Move Y axis the specified distance."""
@@ -153,12 +146,6 @@ class MotorController:
         # Convert mm to steps
         revolutions = distance_mm / config['MM_PER_REV']
         total_steps = int(revolutions * config['PULSES_PER_REV'])
-        
-        logger.info(f"Y movement calculations:")
-        logger.info(f"  Distance: {distance_mm}mm")
-        logger.info(f"  Revolutions needed: {revolutions:.2f}")
-        logger.info(f"  Steps per revolution: {config['PULSES_PER_REV']}")
-        logger.info(f"  Total steps: {total_steps}")
         
         # Acceleration parameters
         accel_steps = min(total_steps // 4, 100)
@@ -183,9 +170,8 @@ class MotorController:
             # Step both Y motors together
             self._step_y_axis(distance_mm > 0, delay)
             
-            # Log progress every 1000 steps
-            if i % 1000 == 0:
-                logger.info(f"Y Step {i}/{total_steps}")
+            # Comment out or remove per-step logger.info statements
+            # logger.info(f"Y Step {i}/{total_steps}")
 
     def home_axis(self, axis='X'):
         """Home the specified axis."""
@@ -210,13 +196,15 @@ class MotorController:
     def _home_x(self):
         """Home the X axis."""
         config = self.motors['X']
-        logger.info("Starting X axis homing sequence")
+        # Comment out or remove logger.info statements for homing routines
+        # logger.info("Starting X axis homing sequence")
         
         # Move towards home until sensor is triggered
         while not self._check_sensor('X'):
             self._step_motor('X', config['HOME_DIRECTION'] < 0, config['HOME_SPEED'])
         
-        logger.info("X home sensor triggered")
+        # Comment out or remove logger.info statements for homing routines
+        # logger.info("X home sensor triggered")
         
         # Move away from sensor
         for _ in range(int(MACHINE_CONFIG['HOMING_OFFSET'] * config['PULSES_PER_REV'] / config['MM_PER_REV'])):
@@ -226,18 +214,21 @@ class MotorController:
         while not self._check_sensor('X'):
             self._step_motor('X', config['HOME_DIRECTION'] < 0, config['VERIFY_SPEED'])
         
-        logger.info("X axis homing complete")
+        # Comment out or remove logger.info statements for homing routines
+        # logger.info("X axis homing complete")
 
     def _home_y(self):
         """Home the Y axis."""
         config = self.motors['Y1']  # Use Y1 config for calculations
-        logger.info("Starting Y axis homing sequence")
+        # Comment out or remove logger.info statements for homing routines
+        # logger.info("Starting Y axis homing sequence")
         
         # Move towards home until either sensor is triggered
         while not (self._check_sensor('Y1') or self._check_sensor('Y2')):
             self._step_y_axis(config['HOME_DIRECTION'] < 0, config['HOME_SPEED'])
         
-        logger.info("Y home sensor triggered")
+        # Comment out or remove logger.info statements for homing routines
+        # logger.info("Y home sensor triggered")
         
         # Move away from sensor
         for _ in range(int(MACHINE_CONFIG['HOMING_OFFSET'] * config['PULSES_PER_REV'] / config['MM_PER_REV'])):
@@ -247,7 +238,8 @@ class MotorController:
         while not (self._check_sensor('Y1') or self._check_sensor('Y2')):
             self._step_y_axis(config['HOME_DIRECTION'] < 0, config['VERIFY_SPEED'])
         
-        logger.info("Y axis homing complete")
+        # Comment out or remove logger.info statements for homing routines
+        # logger.info("Y axis homing complete")
 
 def main():
     """Main entry point."""
