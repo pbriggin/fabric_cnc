@@ -432,6 +432,7 @@ class FabricCNCApp:
         x_in = pos['X'] / INCH_TO_MM
         y_in = pos['Y'] / INCH_TO_MM
         x_c, y_c = self._inches_to_canvas(x_in, y_in)
+        y_c = self.canvas_height - y_c  # Mirror Y for the green dot only
         r = 7
         self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill="#0a0", outline="#080", width=2)
         self.canvas.create_text(x_c, y_c - 18, text=f"({x_in:.2f}, {y_in:.2f})", fill="#080", font=("Arial", 10, "bold"))
