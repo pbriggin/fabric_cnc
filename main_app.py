@@ -1065,7 +1065,7 @@ class FabricCNCApp:
         else:
             pos = self.motor_ctrl.get_position()
         x_disp = pos['X']/INCH_TO_MM
-        y_disp = 45.0 - (pos['Y']/INCH_TO_MM)  # Flip Y to match plot axis
+        y_disp = pos['Y']/INCH_TO_MM  # No flip
         z_disp = pos['Z']/INCH_TO_MM
         rot_disp = pos['ROT']
         text = f"X: {x_disp:.2f} in\nY: {y_disp:.2f} in\nZ: {z_disp:.2f} in\nROT: {rot_disp:.1f}°"
