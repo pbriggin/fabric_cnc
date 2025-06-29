@@ -980,7 +980,7 @@ class FabricCNCApp:
                 z=self._current_toolpath_pos['Z'],
                 rot=self._current_toolpath_pos['ROT']
             )
-        # Redraw canvas with live end effector
+        self._update_position_display()  # Force update after each move
         self._draw_canvas(live_toolpath=True)
         # Next step
         self._current_toolpath_idx[1] += 1
