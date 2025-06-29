@@ -414,14 +414,15 @@ class FabricCNCApp:
         self.canvas.create_line(home_x - size, home_y + size, home_x + size, home_y - size, fill="#d00", width=2)
 
     def _inches_to_canvas(self, x_in, y_in):
-        # Add buffer to all sides
+        # Flip Y for canvas (Tkinter Y is top-down)
         plot_width_in = 68 + 2 * PLOT_BUFFER_IN
         plot_height_in = 45 + 2 * PLOT_BUFFER_IN
         sx = self.canvas_width / plot_width_in
         sy = self.canvas_height / plot_height_in
         ox = PLOT_BUFFER_IN * sx
         oy = PLOT_BUFFER_IN * sy
-        return x_in * sx + ox, y_in * sy + oy
+        y_in_flipped = 45 - y_in  # Flip Y for canvas
+        return x_in * sx + ox, y_in_flipped * sy + oy
 
     def _draw_tool_head_inches(self, pos):
         # Draw a small circle at the current tool head position (in inches)
@@ -580,91 +581,110 @@ class FabricCNCApp:
                 self.dxf_unit_scale = 1.0 / 25.4  # mm to in
             else:
                 self.dxf_unit_scale = 1.0  # inches or unitless
+            # Normalize all points to inches and (0,0) bottom left
+            all_x, all_y = [], []
+            for e in entities:
+                t = e.dxftype()
+                if t == 'LINE':
+                    all_x += [e.dxf.start.x * self.dxf_unit_scale, e.dxf.end.x * self.dxf_unit_scale]
+                    all_y += [e.dxf.start.y * self.dxf_unit_scale, e.dxf.end.y * self.dxf_unit_scale]
+                elif t == 'LWPOLYLINE':
+                    pts = [p[:2] for p in e.get_points()]
+                    all_x += [p[0] * self.dxf_unit_scale for p in pts]
+                    all_y += [p[1] * self.dxf_unit_scale for p in pts]
+                elif t == 'POLYLINE':
+                    pts = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
+                    all_x += [p[0] * self.dxf_unit_scale for p in pts]
+                    all_y += [p[1] * self.dxf_unit_scale for p in pts]
+                elif t == 'SPLINE':
+                    pts = list(e.flattening(0.1))
+                    all_x += [p[0] * self.dxf_unit_scale for p in pts]
+                    all_y += [p[1] * self.dxf_unit_scale for p in pts]
+                elif t == 'ARC' or t == 'CIRCLE':
+                    center = e.dxf.center
+                    r = e.dxf.radius
+                    n = 32
+                    if t == 'ARC':
+                        start = math.radians(e.dxf.start_angle)
+                        end = math.radians(e.dxf.end_angle)
+                        if end < start:
+                            end += 2 * math.pi
+                        pts = [(center.x + r * math.cos(start + (end - start) * i / n),
+                                center.y + r * math.sin(start + (end - start) * i / n)) for i in range(n+1)]
+                    else:
+                        pts = [(center.x + r * math.cos(2 * math.pi * i / n),
+                                center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
+                    all_x += [p[0] * self.dxf_unit_scale for p in pts]
+                    all_y += [p[1] * self.dxf_unit_scale for p in pts]
+            min_x = min(all_x)
+            min_y = min(all_y)
+            # Store normalized entities and offset for plotting/toolpath
+            self.dxf_offset = (min_x, min_y)
             self.dxf_doc = doc
             self.dxf_entities = entities
             self.toolpath = []
             self.gen_toolpath_btn.config(state=tk.NORMAL)
-            # Auto-orient to top-left, no scaling
-            self._auto_orient_dxf_top_left(debug=True)
             self._draw_canvas()
         except Exception as e:
             logger.error(f"Failed to load DXF: {e}")
             messagebox.showerror("DXF Import Error", str(e))
 
     def _get_dxf_extents_inches(self):
-        """Get global extents across all DXF entities, supporting all entity types."""
+        # Use normalized points for extents
         scale = getattr(self, 'dxf_unit_scale', 1.0)
         min_x, min_y = float('inf'), float('inf')
         max_x, max_y = float('-inf'), float('-inf')
-        found = False
-        
         for e in self.dxf_entities:
             t = e.dxftype()
-            xs, ys = [], []
-            
             if t == 'LINE':
-                xs = [e.dxf.start.x * scale, e.dxf.end.x * scale]
-                ys = [e.dxf.start.y * scale, e.dxf.end.y * scale]
+                xs = [e.dxf.start.x, e.dxf.end.x]
+                ys = [e.dxf.start.y, e.dxf.end.y]
             elif t == 'LWPOLYLINE':
                 pts = [p[:2] for p in e.get_points()]
-                if pts:
-                    xs = [p[0] * scale for p in pts]
-                    ys = [p[1] * scale for p in pts]
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
             elif t == 'POLYLINE':
-                pts = [(v.dxf.x * scale, v.dxf.y * scale) for v in e.vertices()]
-                if pts:
-                    xs = [p[0] for p in pts]
-                    ys = [p[1] for p in pts]
+                pts = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
             elif t == 'SPLINE':
                 pts = list(e.flattening(0.1))
-                if pts:
-                    xs = [p[0] * scale for p in pts]
-                    ys = [p[1] * scale for p in pts]
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
             elif t == 'ARC' or t == 'CIRCLE':
                 center = e.dxf.center
                 r = e.dxf.radius
+                n = 32
                 if t == 'ARC':
                     start = math.radians(e.dxf.start_angle)
                     end = math.radians(e.dxf.end_angle)
                     if end < start:
                         end += 2 * math.pi
-                    n = 32
                     pts = [(center.x + r * math.cos(start + (end - start) * i / n),
                             center.y + r * math.sin(start + (end - start) * i / n)) for i in range(n+1)]
                 else:
-                    n = 32
                     pts = [(center.x + r * math.cos(2 * math.pi * i / n),
                             center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
-                xs = [p[0] * scale for p in pts]
-                ys = [p[1] * scale for p in pts]
-            
-            if xs and ys:
-                min_x = min(min_x, min(xs))
-                max_x = max(max_x, max(xs))
-                min_y = min(min_y, min(ys))
-                max_y = max(max_y, max(ys))
-                found = True
-        
-        if not found:
-            return None, None, None, None
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
+            xs = [(x * scale) - self.dxf_offset[0] for x in xs]
+            ys = [(y * scale) - self.dxf_offset[1] for y in ys]
+            min_x = min(min_x, min(xs))
+            max_x = max(max_x, max(xs))
+            min_y = min(min_y, min(ys))
+            max_y = max(max_y, max(ys))
         return min_x, min_y, max_x, max_y
 
-    def _auto_orient_dxf_top_left(self, debug=False):
-        # No-op: do not transform entities at import, only at plot time
-        pass
-
     def _generate_toolpath(self):
-        """Generate toolpaths for each shape, with tangent angle and Z (lift at corners)."""
         if not self.dxf_entities:
             messagebox.showwarning("No DXF", "Import a DXF file first.")
             return
         scale = getattr(self, 'dxf_unit_scale', 1.0)
         min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
-        dx = min_x - PLOT_BUFFER_IN if min_x is not None else 0
-        dy = max_y + PLOT_BUFFER_IN if max_y is not None else 0
-
+        # No Y flip, just offset
+        dx, dy = self.dxf_offset
         # --- Flatten all entities into segments ---
-        segments = []  # Each segment is ((x1, y1), (x2, y2))
+        segments = []
         for e in self.dxf_entities:
             t = e.dxftype()
             if t == 'LINE':
@@ -707,7 +727,6 @@ class FabricCNCApp:
                         center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
                 for i in range(1, len(pts)):
                     segments.append((pts[i-1], pts[i]))
-
         # --- Group segments into shapes by connectivity ---
         from collections import defaultdict, deque
         point_map = defaultdict(list)
@@ -722,13 +741,11 @@ class FabricCNCApp:
         for idx in seg_indices:
             if idx in visited:
                 continue
-            # Start a new shape
             seg = segments[idx]
             p_start = (round(seg[0][0], 6), round(seg[0][1], 6))
             p_end = (round(seg[1][0], 6), round(seg[1][1], 6))
             shape = [p_start, p_end]
             visited.add(idx)
-            # Extend forwards
             cur = p_end
             while True:
                 found = False
@@ -741,7 +758,6 @@ class FabricCNCApp:
                         break
                 if not found:
                     break
-            # Extend backwards
             cur = p_start
             while True:
                 found = False
@@ -754,18 +770,15 @@ class FabricCNCApp:
                         break
                 if not found:
                     break
-            # Remove duplicate consecutive points
             deduped = [shape[0]]
             for pt in shape[1:]:
                 if pt != deduped[-1]:
                     deduped.append(pt)
             shapes.append(deduped)
-        # --- Generate toolpaths from shapes ---
         toolpaths = []
         for pts in shapes:
             if len(pts) < 2:
                 continue
-            # Ensure CCW for closed shapes
             def is_closed(pts):
                 x0, y0 = pts[0]
                 x1, y1 = pts[-1]
@@ -786,13 +799,11 @@ class FabricCNCApp:
                     pts_ccw = list(reversed(pts))
             else:
                 pts_ccw = pts
-            # Transform all points
-            pts_t = [(x * scale - dx, dy - y * scale) for x, y in pts_ccw]
+            # Transform all points to inches and (0,0) bottom left
+            pts_t = [((x * scale) - dx, (y * scale) - dy) for x, y in pts_ccw]
             path = []
-            # Angle threshold for corners (in radians)
             angle_thresh = math.radians(30)
             n = len(pts_t)
-            # Start: move to first point, Z up, then Z down
             if n < 2:
                 continue
             angle0 = math.atan2(pts_t[1][1] - pts_t[0][1], pts_t[1][0] - pts_t[0][0])
@@ -802,10 +813,8 @@ class FabricCNCApp:
                 x0, y0 = pts_t[i-1]
                 x1, y1 = pts_t[i]
                 angle = math.atan2(y1 - y0, x1 - x0)
-                # Detect corners for polylines (not for smooth curves)
                 is_corner = False
                 if 1 <= i < n-1:
-                    # Compute angle between previous, current, next
                     x_prev, y_prev = pts_t[i-2] if i-2 >= 0 else pts_t[i-1]
                     x_next, y_next = pts_t[i+1] if i+1 < n else pts_t[i]
                     v1 = (x0 - x_prev, y0 - y_prev)
@@ -823,7 +832,6 @@ class FabricCNCApp:
                     path.append((x0, y0, angle, 1))  # Z up at corner
                     path.append((x0, y0, angle, 0))  # Z down at corner
                 path.append((x1, y1, angle, 0))  # Move/cut
-            # End: Z up at last point
             path.append((pts_t[-1][0], pts_t[-1][1], angle, 1))  # Z up at end
             toolpaths.append(path)
         self.toolpaths = toolpaths
