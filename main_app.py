@@ -926,9 +926,9 @@ class FabricCNCApp:
             self.root.after(100, self._run_toolpath_step)  # Longer pause between shapes
             return
         x, y, angle, z = path[step_idx]
-        # Swap x and y for correct display
-        self._current_toolpath_pos['X'] = y * INCH_TO_MM
-        self._current_toolpath_pos['Y'] = x * INCH_TO_MM
+        # Set toolpath position directly (no swap)
+        self._current_toolpath_pos['X'] = x * INCH_TO_MM
+        self._current_toolpath_pos['Y'] = y * INCH_TO_MM
         self._current_toolpath_pos['Z'] = 0.0 if z == 0 else Z_MAX_MM
         self._current_toolpath_pos['ROT'] = math.degrees(angle)
         if MOTOR_IMPORTS_AVAILABLE:
