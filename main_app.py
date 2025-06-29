@@ -1064,7 +1064,11 @@ class FabricCNCApp:
             pos = self._current_toolpath_pos
         else:
             pos = self.motor_ctrl.get_position()
-        text = f"X: {pos['X']/INCH_TO_MM:.2f} in\nY: {pos['Y']/INCH_TO_MM:.2f} in\nZ: {pos['Z']/INCH_TO_MM:.2f} in\nROT: {pos['ROT']:.1f}°"
+        x_disp = pos['X']/INCH_TO_MM
+        y_disp = 45.0 - (pos['Y']/INCH_TO_MM)  # Flip Y to match plot axis
+        z_disp = pos['Z']/INCH_TO_MM
+        rot_disp = pos['ROT']
+        text = f"X: {x_disp:.2f} in\nY: {y_disp:.2f} in\nZ: {z_disp:.2f} in\nROT: {rot_disp:.1f}°"
         self.coord_label.config(text=text)
         self.root.after(200, self._update_position_display)
 
