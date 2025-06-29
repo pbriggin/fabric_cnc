@@ -225,7 +225,6 @@ class RealMotorController:
 # --- Main App ---
 class FabricCNCApp:
     def __init__(self, root):
-        print("[DEBUG] FabricCNCApp.__init__ called")
         self.root = root
         self.root.title("Fabric CNC Main App")
         # Maximize window by default (cross-platform)
@@ -255,10 +254,8 @@ class FabricCNCApp:
         
         # Initialize motor controller based on system
         if SIMULATION_MODE:
-            print("Running in SIMULATION MODE")
             self.motor_ctrl = SimulatedMotorController()
         else:
-            print("Running with REAL MOTOR CONTROL")
             self.motor_ctrl = RealMotorController()
         
         self.dxf_doc = None
@@ -305,8 +302,6 @@ class FabricCNCApp:
         self.root.after(self._arrow_key_repeat_delay, lambda: self._arrow_jog_loop(key))
 
     def _setup_ui(self):
-        print("[DEBUG] FabricCNCApp._setup_ui called")
-        # Main layout: 3 columns (left, center, right)
         self.root.geometry("1200x700")
         self.root.minsize(1000, 600)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -575,7 +570,6 @@ class FabricCNCApp:
                 t = e.dxftype()
                 if t in ('LINE', 'LWPOLYLINE', 'POLYLINE', 'SPLINE', 'ARC', 'CIRCLE'):
                     entities.append(e)
-            print(f"[DEBUG] Found {len(entities)} supported entities: {[e.dxftype() for e in entities]}")
             if not entities:
                 messagebox.showerror("DXF Import Error", "No supported entities (LINE, LWPOLYLINE, POLYLINE, SPLINE, ARC, CIRCLE) found in DXF file.")
                 return
@@ -590,51 +584,6 @@ class FabricCNCApp:
             self.dxf_entities = entities
             self.toolpath = []
             self.gen_toolpath_btn.config(state=tk.NORMAL)
-            logger.info(f"Loaded DXF: {file_path} ({len(entities)} entities), units: {insunits}, scale: {self.dxf_unit_scale}")
-            # Print overall extents
-            min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
-            print(f"[DEBUG] Overall DXF extents: min_x={min_x}, min_y={min_y}, max_x={max_x}, max_y={max_y}")
-            # Print extents for each entity
-            scale = getattr(self, 'dxf_unit_scale', 1.0)
-            for i, e in enumerate(entities):
-                t = e.dxftype()
-                xs, ys = [], []
-                if t == 'LINE':
-                    xs = [e.dxf.start.x * scale, e.dxf.end.x * scale]
-                    ys = [e.dxf.start.y * scale, e.dxf.end.y * scale]
-                elif t == 'LWPOLYLINE':
-                    pts = [p[:2] for p in e.get_points()]
-                    xs = [p[0] * scale for p in pts]
-                    ys = [p[1] * scale for p in pts]
-                elif t == 'POLYLINE':
-                    pts = [(v.dxf.x * scale, v.dxf.y * scale) for v in e.vertices()]
-                    xs = [p[0] for p in pts]
-                    ys = [p[1] for p in pts]
-                elif t == 'SPLINE':
-                    pts = list(e.flattening(0.1))
-                    xs = [p[0] * scale for p in pts]
-                    ys = [p[1] * scale for p in pts]
-                elif t == 'ARC' or t == 'CIRCLE':
-                    center = e.dxf.center
-                    r = e.dxf.radius
-                    if t == 'ARC':
-                        start = math.radians(e.dxf.start_angle)
-                        end = math.radians(e.dxf.end_angle)
-                        if end < start:
-                            end += 2 * math.pi
-                        n = 32
-                        pts = [(center.x + r * math.cos(start + (end - start) * i / n),
-                                center.y + r * math.sin(start + (end - start) * i / n)) for i in range(n+1)]
-                    else:
-                        n = 32
-                        pts = [(center.x + r * math.cos(2 * math.pi * i / n),
-                                center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
-                    xs = [p[0] * scale for p in pts]
-                    ys = [p[1] * scale for p in pts]
-                else:
-                    xs, ys = [], []
-                if xs and ys:
-                    print(f"[DEBUG] Entity {i} ({t}): min_x={min(xs):.2f}, min_y={min(ys):.2f}, max_x={max(xs):.2f}, max_y={max(ys):.2f}")
             # Auto-orient to top-left, no scaling
             self._auto_orient_dxf_top_left(debug=True)
             self._draw_canvas()
@@ -811,8 +760,6 @@ class FabricCNCApp:
                 if pt != deduped[-1]:
                     deduped.append(pt)
             shapes.append(deduped)
-        print(f"[DEBUG] Grouped {len(shapes)} logical shapes for toolpath generation.")
-
         # --- Generate toolpaths from shapes ---
         toolpaths = []
         for pts in shapes:
@@ -880,7 +827,6 @@ class FabricCNCApp:
             path.append((pts_t[-1][0], pts_t[-1][1], angle, 1))  # Z up at end
             toolpaths.append(path)
         self.toolpaths = toolpaths
-        logger.info(f"Generated toolpaths for {len(toolpaths)} shapes.")
         self._draw_canvas()
         self.preview_btn.config(state=tk.NORMAL)
         self.run_btn.config(state=tk.NORMAL)
@@ -894,29 +840,17 @@ class FabricCNCApp:
         
         def animate_shape(shape_idx=0):
             if shape_idx >= len(self.toolpaths):
-                print(f"[DEBUG] All shapes animated.")
                 return
             path = self.toolpaths[shape_idx]
-            print(f"[DEBUG] Starting animation for shape {shape_idx+1}/{len(self.toolpaths)} (steps: {len(path)})")
-            # Highlight the current shape's path (as a polyline)
-            shape_points = [(x, y) for x, y, angle, z in path if z == 0]
-            if len(shape_points) > 1:
-                flat = []
-                for x, y in shape_points:
-                    x_c, y_c = self._inches_to_canvas(x, y)
-                    flat.extend([x_c, y_c])
-                self.canvas.create_line(flat, fill="#ff0", width=2, dash=(4, 2))
             def animate_step(idx=0):
                 steps_per_tick = 10  # Animate 10 steps per timer tick
                 if idx >= len(path):
-                    print(f"[DEBUG] Finished animation for shape {shape_idx+1}")
                     self.root.after(50, animate_shape, shape_idx+1)  # Short pause between shapes
                     return
                 for j in range(steps_per_tick):
                     if idx + j >= len(path):
                         break
                     x, y, angle, z = path[idx + j]
-                    print(f"[DEBUG] Shape {shape_idx+1} Step {idx + j + 1}/{len(path)}: (x={x:.2f}, y={y:.2f}, angle={angle:.2f}, z={z})")
                     r = 0.5  # radius in inches
                     x_c, y_c = self._inches_to_canvas(x, y)
                     # Draw green dot first if Z=0, then grey dot if Z=1 (slightly larger)
@@ -1120,23 +1054,17 @@ class FabricCNCApp:
 
 # --- Main entry point ---
 def main():
-    print("[DEBUG] Starting Fabric CNC App main()...")
     root = tk.Tk()
-    print("[DEBUG] Tk root created.")
     # Use ttk theme for modern look
     style = ttk.Style(root)
     if sys.platform == "darwin":
         style.theme_use("aqua")
     else:
         style.theme_use("clam")
-    print("[DEBUG] ttk theme set.")
     # Custom style for E-stop
     style.configure("Danger.TButton", foreground="#fff", background="#d00", font=("Arial", 12, "bold"))
-    print("[DEBUG] Creating FabricCNCApp instance...")
     app = FabricCNCApp(root)
-    print("[DEBUG] FabricCNCApp instance created. Entering mainloop...")
     root.mainloop()
-    print("[DEBUG] mainloop exited.")
 
     # In main(), print debug info for simulation mode
     print(f"[DEBUG] ON_RPI={ON_RPI}")
