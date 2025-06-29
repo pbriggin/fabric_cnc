@@ -413,6 +413,7 @@ class FabricCNCApp:
         self.canvas.create_rectangle(0, 0, self.canvas_width, self.canvas_height, outline="#333", width=2)
         # Draw home position indicator (red cross at 0,0)
         home_x, home_y = self._inches_to_canvas(0, 0)
+        home_y = self.canvas_height - home_y  # Mirror Y for the red X
         size = 10
         self.canvas.create_line(home_x - size, home_y - size, home_x + size, home_y + size, fill="#d00", width=2)
         self.canvas.create_line(home_x - size, home_y + size, home_x + size, home_y - size, fill="#d00", width=2)
