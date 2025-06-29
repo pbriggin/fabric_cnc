@@ -881,7 +881,32 @@ class FabricCNCApp:
         self._current_toolpath_idx = [0, 0]  # [shape_idx, step_idx]
         self._toolpath_total_steps = sum(len(path) for path in self.toolpaths)
         self._toolpath_step_count = 0
-        self._run_toolpath_step()
+        
+        # Start with travel move to first point
+        if self.toolpaths and self.toolpaths[0]:
+            first_point = self.toolpaths[0][0]
+            x, y, angle, z = first_point
+            self._travel_to_start(x * INCH_TO_MM, y * INCH_TO_MM)
+        else:
+            self._run_toolpath_step()
+
+    def _travel_to_start(self, x_mm, y_mm):
+        """Travel from home to the start position of the toolpath."""
+        # Move to start position with Z up
+        if MOTOR_IMPORTS_AVAILABLE:
+            self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=Z_MAX_MM, rot=0.0)
+        
+        # Update position and display
+        self._current_toolpath_pos['X'] = x_mm
+        self._current_toolpath_pos['Y'] = y_mm
+        self._current_toolpath_pos['Z'] = Z_MAX_MM
+        self._current_toolpath_pos['ROT'] = 0.0
+        
+        self._update_position_display()
+        self._draw_canvas(live_toolpath=True)
+        
+        # Wait a moment, then start the toolpath
+        self.root.after(500, self._run_toolpath_step)
 
     def _run_toolpath_step(self):
         if not self._running_toolpath:
@@ -898,11 +923,10 @@ class FabricCNCApp:
         if step_idx >= len(path):
             # Move to next shape
             self._current_toolpath_idx = [shape_idx + 1, 0]
-            self.root.after(20, self._run_toolpath_step)
+            self.root.after(100, self._run_toolpath_step)  # Longer pause between shapes
             return
         x, y, angle, z = path[step_idx]
         # Command the motors (simulate or real)
-        # For simplicity, just set the position instantly (replace with real motion logic as needed)
         self._current_toolpath_pos['X'] = x * INCH_TO_MM
         self._current_toolpath_pos['Y'] = y * INCH_TO_MM
         self._current_toolpath_pos['Z'] = 0.0 if z == 0 else Z_MAX_MM
@@ -919,7 +943,7 @@ class FabricCNCApp:
         # Next step
         self._current_toolpath_idx[1] += 1
         self._toolpath_step_count += 1
-        self.root.after(5, self._run_toolpath_step)
+        self.root.after(50, self._run_toolpath_step)  # Slower execution (50ms instead of 5ms)
 
     def _draw_live_tool_head_inches(self, pos):
         # Draw a green dot and orientation line at the current tool head position (in inches)
