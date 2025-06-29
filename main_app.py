@@ -938,6 +938,9 @@ class FabricCNCApp:
                 z=self._current_toolpath_pos['Z'],
                 rot=self._current_toolpath_pos['ROT']
             )
+        # Debug: print both toolpath and actual motor position
+        actual_pos = self.motor_ctrl.get_position()
+        print(f"[DEBUG] Toolpath pos: X={self._current_toolpath_pos['X']:.2f} Y={self._current_toolpath_pos['Y']:.2f} | Motor pos: X={actual_pos['X']:.2f} Y={actual_pos['Y']:.2f}")
         self._update_position_display()  # Force update after each move
         self._draw_canvas(live_toolpath=True)
         # Next step
