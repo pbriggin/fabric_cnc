@@ -366,6 +366,136 @@ class MotorController:
                 logger.warning(f"Error resetting motor pins: {e}")
             self._current_movement = None
 
+    def move_coordinated(self, x_distance_mm=0, y_distance_mm=0, z_distance_mm=0, rot_distance_mm=0):
+        """Move X and Y axes simultaneously in a coordinated manner."""
+        try:
+            # Set current movement and reset stop flag
+            self._current_movement = 'COORDINATED'
+            self._stop_requested = False
+            
+            # Debug: Print movement details
+            logger.info(f"Coordinated movement: X={x_distance_mm:.2f}mm, Y={y_distance_mm:.2f}mm, Z={z_distance_mm:.2f}mm, ROT={rot_distance_mm:.2f}mm")
+            
+            # Only proceed if we have X or Y movement
+            if abs(x_distance_mm) < 1e-6 and abs(y_distance_mm) < 1e-6:
+                logger.info("No X/Y movement detected, handling Z and ROT only")
+                # No X/Y movement, just handle Z and ROT if needed
+                if abs(z_distance_mm) > 1e-6:
+                    self._move_z(z_distance_mm)
+                if abs(rot_distance_mm) > 1e-6:
+                    self._move_rot(rot_distance_mm)
+                return
+            
+            # Calculate steps for each axis
+            x_config = self.motors['X']
+            y_config = self.motors['Y1']  # Use Y1 config for calculations
+            
+            x_revolutions = abs(x_distance_mm) / x_config['MM_PER_REV']
+            y_revolutions = abs(y_distance_mm) / y_config['MM_PER_REV']
+            
+            x_total_steps = int(x_revolutions * x_config['PULSES_PER_REV'])
+            y_total_steps = int(y_revolutions * y_config['PULSES_PER_REV'])
+            
+            # Use the larger number of steps to determine the movement duration
+            max_steps = max(x_total_steps, y_total_steps)
+            
+            if max_steps == 0:
+                return
+            
+            # Calculate step ratios for interpolation
+            x_step_ratio = x_total_steps / max_steps if max_steps > 0 else 0
+            y_step_ratio = y_total_steps / max_steps if max_steps > 0 else 0
+            
+            # Debug: Print step calculations
+            logger.info(f"Step calculations: X={x_total_steps} steps, Y={y_total_steps} steps, max_steps={max_steps}")
+            logger.info(f"Step ratios: X={x_step_ratio:.3f}, Y={y_step_ratio:.3f}")
+            
+            # Acceleration parameters (use the faster axis for timing)
+            fast_config = x_config if x_config['STEP_DELAY'] <= y_config['STEP_DELAY'] else y_config
+            accel_steps = min(max_steps // 4, 100)
+            decel_steps = min(max_steps // 4, 100)
+            cruise_steps = max_steps - accel_steps - decel_steps
+            
+            # Movement loop with acceleration/deceleration
+            x_step_counter = 0
+            y_step_counter = 0
+            
+            logger.info(f"Starting coordinated movement loop with {max_steps} total steps")
+            
+            for i in range(max_steps):
+                # Check if stop was requested
+                if self._stop_requested:
+                    logger.info("Stop requested - halting coordinated movement")
+                    break
+                
+                # Calculate current delay based on position in movement
+                if i < accel_steps:
+                    delay = fast_config['STEP_DELAY'] * (1 + (accel_steps - i) / accel_steps)
+                elif i >= max_steps - decel_steps:
+                    delay = fast_config['STEP_DELAY'] * (1 + (i - (max_steps - decel_steps)) / decel_steps)
+                else:
+                    delay = fast_config['STEP_DELAY']
+                
+                # Check sensors before moving (X and Y only - ROT sensor checking removed)
+                if self._check_sensor('X'):
+                    logger.warning("X sensor triggered during coordinated movement - stopping")
+                    break
+                if self._check_sensor('Y1'):
+                    logger.warning("Y1 sensor triggered during coordinated movement - stopping")
+                    break
+                if self._check_sensor('Y2'):
+                    logger.warning("Y2 sensor triggered during coordinated movement - stopping")
+                    break
+                
+                # Determine if we should step each axis based on interpolation
+                should_step_x = False
+                should_step_y = False
+                
+                if x_total_steps > 0:
+                    target_x_steps = (i + 1) * x_step_ratio
+                    if x_step_counter < target_x_steps:
+                        should_step_x = True
+                        x_step_counter += 1
+                
+                if y_total_steps > 0:
+                    target_y_steps = (i + 1) * y_step_ratio
+                    if y_step_counter < target_y_steps:
+                        should_step_y = True
+                        y_step_counter += 1
+                
+                # Step motors - both step functions include their own delays
+                if should_step_x:
+                    self._step_motor('X', x_distance_mm > 0, delay)
+                if should_step_y:
+                    self._step_y_axis(y_distance_mm > 0, delay)
+                
+                # Debug: Log every 1000 steps to show progress
+                if i % 1000 == 0 and i > 0:
+                    logger.info(f"Movement progress: {i}/{max_steps} steps completed")
+            
+            # Handle Z and ROT movement after X/Y movement
+            if abs(z_distance_mm) > 1e-6:
+                self._move_z(z_distance_mm)
+            if abs(rot_distance_mm) > 1e-6:
+                self._move_rot(rot_distance_mm)
+            
+        except Exception as e:
+            logger.error(f"Error during coordinated movement: {e}")
+            raise
+        finally:
+            # Keep motors enabled but reset step/dir pins
+            try:
+                for motor, config in self.motors.items():
+                    self._ensure_output(config['EN'])
+                    GPIO.output(config['EN'], GPIO.LOW)  # LOW = enabled
+                    self._ensure_output(config['STEP'])
+                    GPIO.output(config['STEP'], GPIO.LOW)
+                    self._ensure_output(config['DIR'])
+                    GPIO.output(config['DIR'], GPIO.LOW)
+            except Exception as e:
+                logger.warning(f"Error resetting motor pins: {e}")
+            self._current_movement = None
+
 
 
     def _move_x(self, distance_mm):
@@ -499,15 +629,6 @@ class MotorController:
         revolutions = abs(distance_mm) / config['MM_PER_REV']  # MM_PER_REV is 360 for rotation
         total_steps = int(revolutions * config['PULSES_PER_REV'])
         
-        # Check if sensor is triggered at start - allow movement away from home even if sensor is triggered
-        sensor_triggered = self._check_sensor('ROT')
-        if sensor_triggered:
-            logger.warning("ROT sensor is triggered - allowing movement away from home")
-            # Only prevent movement if trying to move toward home (negative distance for ROT)
-            if distance_mm < 0:
-                logger.error("ROT sensor is triggered - cannot move ROT toward home.")
-                return
-        
         # Acceleration parameters
         accel_steps = min(total_steps // 4, 50)  # Slower acceleration for rotation
         decel_steps = min(total_steps // 4, 50)
@@ -527,11 +648,6 @@ class MotorController:
                 delay = config['STEP_DELAY'] * (1 + (i - (total_steps - decel_steps)) / decel_steps)
             else:
                 delay = config['STEP_DELAY']
-            
-            # Check sensor during movement - only stop if moving toward home and sensor is triggered
-            if distance_mm < 0 and self._check_sensor('ROT'):
-                logger.warning("ROT sensor triggered during movement toward home - stopping")
-                break
             
             # Step motor (direction is determined by distance_mm > 0)
             self._step_motor('ROT', distance_mm > 0, delay)

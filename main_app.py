@@ -48,6 +48,8 @@ INCH_TO_MM = 25.4
 X_MAX_MM = 68 * INCH_TO_MM
 Y_MAX_MM = 45 * INCH_TO_MM
 Z_MAX_MM = 2.5 * INCH_TO_MM  # Set to 2.5 inches for Z travel
+Z_UP_MM = 0.0  # Z up position for travel (0mm)
+Z_DOWN_MM = 1.0  # Z down position for cutting (1mm)
 PLOT_BUFFER_IN = 1.0  # 1.0 inch buffer on all sides (was 0.5)
 
 logging.basicConfig(level=logging.INFO)
@@ -247,29 +249,46 @@ class RealMotorController:
 
     def move_to(self, x=None, y=None, z=None, rot=None):
         with self.lock:
-            # Move X and Y axes if needed
+            # Calculate deltas for all axes
+            delta_x = 0
+            delta_y = 0
+            delta_z = 0
+            delta_rot = 0
+            
             if x is not None:
                 delta_x = x - self.position['X']
-                if abs(delta_x) > 1e-6:
-                    self.motor_controller.move_distance(delta_x, 'X')
-                    self.position['X'] = x
             if y is not None:
                 delta_y = y - self.position['Y']
-                if abs(delta_y) > 1e-6:
-                    self.motor_controller.move_distance(delta_y, 'Y')
-                    self.position['Y'] = y
-            # Move Z axis if needed
             if z is not None:
                 delta_z = z - self.position['Z']
-                if abs(delta_z) > 1e-6:
-                    self.motor_controller.move_distance(delta_z, 'Z')
-                    self.position['Z'] = z
-            # Move rotation axis if needed
             if rot is not None:
                 delta_rot = rot - self.position['ROT']
+            
+            # Use coordinated movement for X and Y, individual for Z and ROT
+            if abs(delta_x) > 1e-6 or abs(delta_y) > 1e-6:
+                logger.info(f"Calling coordinated movement: delta_x={delta_x:.2f}mm, delta_y={delta_y:.2f}mm")
+                self.motor_controller.move_coordinated(
+                    x_distance_mm=delta_x,
+                    y_distance_mm=delta_y,
+                    z_distance_mm=delta_z,
+                    rot_distance_mm=delta_rot
+                )
+            else:
+                # Only Z or ROT movement needed
+                if abs(delta_z) > 1e-6:
+                    self.motor_controller.move_distance(delta_z, 'Z')
                 if abs(delta_rot) > 1e-6:
                     self.motor_controller.move_distance(delta_rot, 'ROT')
-                    self.position['ROT'] = rot
+            
+            # Update position tracking
+            if x is not None:
+                self.position['X'] = x
+            if y is not None:
+                self.position['Y'] = y
+            if z is not None:
+                self.position['Z'] = z
+            if rot is not None:
+                self.position['ROT'] = rot
             # logger.info(f"Real move_to: X={self.position['X']:.2f}, Y={self.position['Y']:.2f}, Z={self.position['Z']:.2f}, ROT={self.position['ROT']:.2f}")
 
 # --- Main App ---
@@ -537,14 +556,14 @@ class FabricCNCApp:
     def _draw_dxf_entities_inches(self):
         # Draw DXF entities, converting mm to inches for plotting
         if not (self.dxf_doc and self.dxf_entities):
+            logger.debug("No DXF entities to draw")
             return
         scale = getattr(self, 'dxf_unit_scale', 1.0)
-        min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
-        if min_x is not None and max_y is not None:
-            dx = min_x - PLOT_BUFFER_IN
-            dy = max_y + PLOT_BUFFER_IN
-        else:
-            dx, dy = 0, 0
+        
+        # Use the offset calculated during import
+        dx, dy = getattr(self, 'dxf_offset', (0, 0))
+        
+        logger.debug(f"Drawing DXF entities: scale={scale}, offset=({dx:.3f}, {dy:.3f}), entities={len(self.dxf_entities)}")
 
         # If toolpaths exist, use their shapes for color grouping
         color_cycle = [
@@ -571,30 +590,42 @@ class FabricCNCApp:
             if t == 'LINE':
                 x1, y1 = e.dxf.start.x, e.dxf.start.y
                 x2, y2 = e.dxf.end.x, e.dxf.end.y
-                x1c, y1c = self._inches_to_canvas(x1 * scale - dx, y1 * scale - dy)
-                x2c, y2c = self._inches_to_canvas(x2 * scale - dx, y2 * scale - dy)
+                # Apply scale and offset
+                x1_norm = x1 * scale - dx
+                y1_norm = y1 * scale - dy
+                x2_norm = x2 * scale - dx
+                y2_norm = y2 * scale - dy
+                x1c, y1c = self._inches_to_canvas(x1_norm, y1_norm)
+                x2c, y2c = self._inches_to_canvas(x2_norm, y2_norm)
                 self.canvas.create_line(x1c, y1c, x2c, y2c, fill="#888", width=2)
             elif t == 'LWPOLYLINE':
                 points = [(p[0], p[1]) for p in e.get_points()]
                 flat = []
                 for x, y in points:
-                    x_c, y_c = self._inches_to_canvas(x * scale - dx, y * scale - dy)
+                    # Apply scale and offset
+                    x_norm = x * scale - dx
+                    y_norm = y * scale - dy
+                    x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#888", width=2)
             elif t == 'POLYLINE':
                 points = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
                 flat = []
                 for x, y in points:
-                    x_c, y_c = self._inches_to_canvas(x * scale - dx, y * scale - dy)
+                    # Apply scale and offset
+                    x_norm = x * scale - dx
+                    y_norm = y * scale - dy
+                    x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#888", width=2)
             elif t == 'SPLINE':
                 points = list(e.flattening(0.1))
                 flat = []
                 for x, y, *_ in points:
-                    x_transformed = x * scale - dx
-                    y_transformed = y * scale - dy
-                    x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
+                    # Apply scale and offset
+                    x_norm = x * scale - dx
+                    y_norm = y * scale - dy
+                    x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#888", width=2)
             elif t == 'ARC':
@@ -610,9 +641,10 @@ class FabricCNCApp:
                     angle = start + (end - start) * i / n
                     x = center.x + r * math.cos(angle)
                     y = center.y + r * math.sin(angle)
-                    x_transformed = x * scale - dx
-                    y_transformed = y * scale - dy
-                    x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
+                    # Apply scale and offset
+                    x_norm = x * scale - dx
+                    y_norm = y * scale - dy
+                    x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
                     points.append((x_c, y_c))
                 self.canvas.create_line(*[coord for pt in points for coord in pt], fill="#888", width=2)
             elif t == 'CIRCLE':
@@ -624,9 +656,10 @@ class FabricCNCApp:
                     angle = 2 * math.pi * i / n
                     x = center.x + r * math.cos(angle)
                     y = center.y + r * math.sin(angle)
-                    x_transformed = x * scale - dx
-                    y_transformed = y * scale - dy
-                    x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
+                    # Apply scale and offset
+                    x_norm = x * scale - dx
+                    y_norm = y * scale - dy
+                    x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
                     points.append((x_c, y_c))
                 self.canvas.create_line(*[coord for pt in points for coord in pt], fill="#888", width=2)
 
@@ -723,6 +756,14 @@ class FabricCNCApp:
             self.dxf_entities = entities
             self.toolpath = []
             self.gen_toolpath_btn.config(state=tk.NORMAL)
+            
+            # Debug logging
+            logger.info(f"DXF imported successfully:")
+            logger.info(f"  - Entities found: {len(entities)}")
+            logger.info(f"  - Unit scale: {self.dxf_unit_scale}")
+            logger.info(f"  - Extents: min_x={min_x:.3f}, min_y={min_y:.3f}, max_x={max(all_x):.3f}, max_y={max(all_y):.3f}")
+            logger.info(f"  - Offset: dx={min_x:.3f}, dy={min_y:.3f}")
+            
             self._draw_canvas()
         except Exception as e:
             logger.error(f"Failed to load DXF: {e}")
@@ -905,6 +946,7 @@ class FabricCNCApp:
             n = len(pts_t)
             if n < 2:
                 continue
+            # Calculate angle - cutting wheel should be parallel to cutting direction
             angle0 = math.atan2(pts_t[1][1] - pts_t[0][1], pts_t[1][0] - pts_t[0][0])
             path.append((pts_t[0][0], pts_t[0][1], angle0, 1))  # Z up
             path.append((pts_t[0][0], pts_t[0][1], angle0, 0))  # Z down
@@ -934,6 +976,42 @@ class FabricCNCApp:
             path.append((pts_t[-1][0], pts_t[-1][1], angle, 1))  # Z up at end
             toolpaths.append(path)
         self.toolpaths = toolpaths
+        
+        # Debug: Print toolpath coordinates
+        print("\n=== TOOLPATH DEBUG INFO ===")
+        print(f"Generated {len(toolpaths)} toolpath(s)")
+        for i, path in enumerate(toolpaths):
+            print(f"\nToolpath {i+1} - {len(path)} points:")
+            for j, (x, y, angle, z) in enumerate(path):
+                x_mm = x * INCH_TO_MM
+                y_mm = y * INCH_TO_MM
+                angle_deg = math.degrees(angle)
+                z_pos = "UP" if z == 1 else "DOWN"
+                print(f"  Point {j+1}: X={x_mm:.2f}mm ({x:.3f}in), Y={y_mm:.2f}mm ({y:.3f}in), Angle={angle_deg:.1f}°, Z={z_pos}")
+        
+        # Check for positions that might be beyond machine limits
+        print(f"\n=== MACHINE LIMITS ===")
+        print(f"X limits: {-X_MAX_MM:.2f}mm to {X_MAX_MM:.2f}mm")
+        print(f"Y limits: {-Y_MAX_MM:.2f}mm to {Y_MAX_MM:.2f}mm")
+        
+        # Check if any points are beyond limits
+        beyond_limits = []
+        for i, path in enumerate(toolpaths):
+            for j, (x, y, angle, z) in enumerate(path):
+                x_mm = x * INCH_TO_MM
+                y_mm = y * INCH_TO_MM
+                if abs(x_mm) > X_MAX_MM or abs(y_mm) > Y_MAX_MM:
+                    beyond_limits.append((i+1, j+1, x_mm, y_mm))
+        
+        if beyond_limits:
+            print(f"\n⚠️  WARNING: {len(beyond_limits)} points beyond machine limits:")
+            for toolpath_idx, point_idx, x_mm, y_mm in beyond_limits:
+                print(f"  Toolpath {toolpath_idx}, Point {point_idx}: X={x_mm:.2f}mm, Y={y_mm:.2f}mm")
+        else:
+            print("\n✅ All points within machine limits")
+        
+        print("=== END DEBUG INFO ===\n")
+        
         self._draw_canvas()
         self.preview_btn.config(state=tk.NORMAL)
         self.run_btn.config(state=tk.NORMAL)
@@ -1001,16 +1079,16 @@ class FabricCNCApp:
         """Travel from home to the start position of the toolpath."""
         # Move to start position with Z up
         if MOTOR_IMPORTS_AVAILABLE:
-            self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=Z_MAX_MM, rot=0.0)
+            self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=Z_UP_MM, rot=0.0)
         
         # Update position and display
         self._current_toolpath_pos['X'] = x_mm
         self._current_toolpath_pos['Y'] = y_mm
-        self._current_toolpath_pos['Z'] = Z_MAX_MM
+        self._current_toolpath_pos['Z'] = Z_UP_MM
         self._current_toolpath_pos['ROT'] = 0.0
         
         self._update_position_display()
-        self._draw_canvas(live_toolpath=True)
+        self._draw_canvas()
         
         # Wait a moment, then start the toolpath
         self.root.after(500, self._run_toolpath_step)
@@ -1036,7 +1114,7 @@ class FabricCNCApp:
         # Set toolpath position directly (no swap)
         self._current_toolpath_pos['X'] = x * INCH_TO_MM
         self._current_toolpath_pos['Y'] = y * INCH_TO_MM
-        self._current_toolpath_pos['Z'] = 0.0 if z == 0 else Z_MAX_MM
+        self._current_toolpath_pos['Z'] = Z_DOWN_MM if z == 0 else Z_UP_MM
         self._current_toolpath_pos['ROT'] = math.degrees(angle)
         if MOTOR_IMPORTS_AVAILABLE:
             self.motor_ctrl.move_to(
