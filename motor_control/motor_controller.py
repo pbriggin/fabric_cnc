@@ -10,7 +10,7 @@ import time
 import logging
 import RPi.GPIO as GPIO
 import threading
-from config import MOTOR_CONFIG, MACHINE_CONFIG, DIRECTION_INVERTED
+from config import MOTOR_CONFIG, MACHINE_CONFIG, DIRECTION_INVERTED, config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -46,7 +46,48 @@ class MotorController:
         self._stop_requested = False
         self._current_movement = None
         
+        # Enhanced sensor debouncing with individual times per sensor
+        # Map internal motor names to config names
+        motor_to_config_map = {
+            'X': 'X',
+            'Y1': 'Y1', 
+            'Y2': 'Y2',
+            'Z': 'Z_LIFT',      # Map 'Z' to 'Z_LIFT' in config
+            'ROT': 'Z_ROTATE'   # Map 'ROT' to 'Z_ROTATE' in config
+        }
+        
+        self._sensor_debounce_times = {
+            motor: config.sensor_debounce_times[config_name] / 1000.0 
+            for motor, config_name in motor_to_config_map.items()
+        }
+        self._sensor_last_trigger_time = {
+            'X': 0,
+            'Y1': 0,
+            'Y2': 0,
+            'Z': 0,
+            'ROT': 0
+        }
+        self._sensor_last_state = {
+            'X': False,
+            'Y1': False,
+            'Y2': False,
+            'Z': False,
+            'ROT': False
+        }
+        # Multi-reading debounce for better noise immunity
+        self._sensor_readings = {
+            'X': [],
+            'Y1': [],
+            'Y2': [],
+            'Z': [],
+            'ROT': []
+        }
+        self._sensor_reading_count = config.sensor_reading_count  # Number of consistent readings required
+        
         logger.info("Motor controller initialized")
+        logger.info(f"X sensor debounce time: {self._sensor_debounce_times['X'] * 1000:.1f}ms")
+        logger.info(f"Other sensors debounce time: 10-12ms")
+        logger.info(f"Reading count required: {self._sensor_reading_count}")
 
     def _setup_motors(self):
         """Setup GPIO pins for all motors."""
@@ -66,8 +107,129 @@ class MotorController:
             logger.info(f"Setup {motor} hall effect sensor")
 
     def _check_sensor(self, motor):
-        """Check if hall effect sensor is triggered."""
-        return GPIO.input(self.motors[motor]['HALL']) == GPIO.LOW
+        """Check if hall effect sensor is triggered with optimized debouncing."""
+        import time
+        current_time = time.time()
+        
+        # Read current sensor state with minimal delay for performance
+        current_state = GPIO.input(self.motors[motor]['HALL']) == GPIO.LOW
+        
+        # Add current reading to history for multi-reading debounce
+        self._sensor_readings[motor].append(current_state)
+        if len(self._sensor_readings[motor]) > self._sensor_reading_count:
+            self._sensor_readings[motor].pop(0)  # Keep only the last N readings
+        
+        # Check if we have enough readings for debounce
+        if len(self._sensor_readings[motor]) < self._sensor_reading_count:
+            return self._sensor_last_state[motor]  # Not enough readings yet
+        
+        # Check if all recent readings are consistent (all True or all False)
+        all_triggered = all(self._sensor_readings[motor])
+        all_released = not any(self._sensor_readings[motor])
+        
+        # If sensor is triggered (all readings show LOW)
+        if all_triggered:
+            # Check if this is a new trigger (not within debounce time)
+            if current_time - self._sensor_last_trigger_time[motor] > self._sensor_debounce_times[motor]:
+                # This is a valid trigger
+                self._sensor_last_trigger_time[motor] = current_time
+                self._sensor_last_state[motor] = True
+                logger.debug(f"{motor} sensor triggered (optimized debounced)")
+                return True
+            else:
+                # Still within debounce time, return last known state
+                return self._sensor_last_state[motor]
+        elif all_released:
+            # Sensor is consistently not triggered (all readings show HIGH)
+            # Reset the trigger time when sensor is consistently released
+            if self._sensor_last_state[motor]:
+                self._sensor_last_trigger_time[motor] = 0
+                logger.debug(f"{motor} sensor released (optimized debounced)")
+            self._sensor_last_state[motor] = False
+            return False
+        else:
+            # Inconsistent readings - return last known state
+            return self._sensor_last_state[motor]
+
+    def set_sensor_debounce_time(self, debounce_time_ms, motor=None):
+        """Set the sensor debounce time in milliseconds.
+        
+        Args:
+            debounce_time_ms: Debounce time in milliseconds
+            motor: Specific motor to set debounce for ('X', 'Y1', 'Y2', 'Z', 'ROT'), or None for all
+        """
+        if motor is None:
+            # Set for all motors
+            for motor_name in self._sensor_debounce_times:
+                self._sensor_debounce_times[motor_name] = debounce_time_ms / 1000.0
+            logger.info(f"All sensor debounce times set to {debounce_time_ms}ms")
+        elif motor in self._sensor_debounce_times:
+            # Set for specific motor
+            self._sensor_debounce_times[motor] = debounce_time_ms / 1000.0
+            logger.info(f"{motor} sensor debounce time set to {debounce_time_ms}ms")
+        else:
+            raise ValueError(f"Invalid motor: {motor}")
+
+    def get_sensor_debounce_time(self, motor=None):
+        """Get the current sensor debounce time in milliseconds.
+        
+        Args:
+            motor: Specific motor to get debounce for ('X', 'Y1', 'Y2', 'Z', 'ROT'), or None for all
+            
+        Returns:
+            Debounce time in milliseconds (dict if motor=None, float if motor specified)
+        """
+        if motor is None:
+            # Return all debounce times
+            return {motor_name: time_ms * 1000.0 for motor_name, time_ms in self._sensor_debounce_times.items()}
+        elif motor in self._sensor_debounce_times:
+            # Return specific motor debounce time
+            return self._sensor_debounce_times[motor] * 1000.0
+        else:
+            raise ValueError(f"Invalid motor: {motor}")
+
+    def set_sensor_reading_count(self, count):
+        """Set the number of consistent readings required for debounce confirmation.
+        
+        Args:
+            count: Number of readings (recommended: 3-5)
+        """
+        if count < 1:
+            raise ValueError("Reading count must be at least 1")
+        self._sensor_reading_count = count
+        logger.info(f"Sensor reading count set to {count}")
+
+    def reset_sensor_debounce_state(self):
+        """Reset all sensor debounce states to prevent carryover issues."""
+        for motor in self._sensor_last_trigger_time:
+            self._sensor_last_trigger_time[motor] = 0
+            self._sensor_last_state[motor] = False
+            self._sensor_readings[motor].clear()
+        logger.info("Sensor debounce states reset")
+
+    def reset_sensor_debounce_state_for_axis(self, axis):
+        """Reset debounce state for a specific axis."""
+        if axis == 'X':
+            motor = 'X'
+        elif axis == 'Y':
+            # Reset both Y motors
+            for motor in ['Y1', 'Y2']:
+                self._sensor_last_trigger_time[motor] = 0
+                self._sensor_last_state[motor] = False
+                self._sensor_readings[motor].clear()
+            logger.info("Y axis sensor debounce states reset")
+            return
+        elif axis == 'Z':
+            motor = 'Z'
+        elif axis == 'ROT':
+            motor = 'ROT'
+        else:
+            return
+        
+        self._sensor_last_trigger_time[motor] = 0
+        self._sensor_last_state[motor] = False
+        self._sensor_readings[motor].clear()
+        logger.info(f"{axis} axis sensor debounce state reset")
 
     def _ensure_output(self, pin):
         try:
@@ -476,6 +638,9 @@ class MotorController:
     def _home_x(self):
         """Home the X axis."""
         config = self.motors['X']
+        # Reset debounce state to prevent carryover issues
+        self.reset_sensor_debounce_state_for_axis('X')
+        
         # Comment out or remove logger.info statements for homing routines
         # logger.info("Starting X axis homing sequence")
         
@@ -494,6 +659,16 @@ class MotorController:
         while not self._check_sensor('X'):
             self._step_motor('X', config['HOME_DIRECTION'] < 0, fine_speed)
         
+        # Move back slightly again to clear sensor for second approach
+        logger.info("Moving back for second approach...")
+        for _ in range(100):  # Smaller back-off for second approach
+            self._step_motor('X', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
+        
+        # Second fine approach to verify sensor position
+        logger.info("Second fine approach to verify home position...")
+        while not self._check_sensor('X'):
+            self._step_motor('X', config['HOME_DIRECTION'] < 0, fine_speed)
+        
         # Move away from home position to clear sensor and allow movement
         logger.info("Moving away from home position...")
         for _ in range(100):  # Move 100 steps away from home
@@ -504,6 +679,9 @@ class MotorController:
     def _home_y(self):
         """Home the Y axis - stop each motor when its own sensor triggers."""
         config = self.motors['Y1']  # Use Y1 config for calculations
+        # Reset debounce state to prevent carryover issues
+        self.reset_sensor_debounce_state_for_axis('Y')
+        
         logger.info("Starting Y axis homing sequence")
         
         # Step 1: Fast approach - Move until both sensors are triggered
@@ -550,8 +728,31 @@ class MotorController:
             if not y1_homed or not y2_homed:
                 self._step_y_axis_individual(config['HOME_DIRECTION'] < 0, fine_speed, y1_homed, y2_homed)
         
-        # Step 4: Final back off for clearance
-        logger.info("Step 4: Moving away from home position for clearance...")
+        # Step 3.5: Move back slightly again to clear sensors for second approach
+        logger.info("Step 3.5: Moving back for second approach...")
+        for _ in range(100):  # Smaller back-off for second approach
+            self._step_y_axis_individual(config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'], False, False)
+        
+        # Step 4: Second fine approach to verify sensor positions
+        logger.info("Step 4: Second fine approach to verify home position...")
+        y1_homed = False
+        y2_homed = False
+        
+        while not (y1_homed and y2_homed):
+            # Check sensors and update homed status
+            if not y1_homed and self._check_sensor('Y1'):
+                y1_homed = True
+                logger.info("Y1 (left) motor second fine approach complete")
+            if not y2_homed and self._check_sensor('Y2'):
+                y2_homed = True
+                logger.info("Y2 (right) motor second fine approach complete")
+            
+            # Step motors - only step motors that haven't found home yet
+            if not y1_homed or not y2_homed:
+                self._step_y_axis_individual(config['HOME_DIRECTION'] < 0, fine_speed, y1_homed, y2_homed)
+        
+        # Step 5: Final back off for clearance
+        logger.info("Step 5: Moving away from home position for clearance...")
         for _ in range(100):
             self._step_y_axis_individual(config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'], False, False)
         
@@ -560,6 +761,9 @@ class MotorController:
     def _home_z(self):
         """Home the Z axis."""
         config = self.motors['Z']
+        # Reset debounce state to prevent carryover issues
+        self.reset_sensor_debounce_state_for_axis('Z')
+        
         logger.info("Starting Z axis homing sequence")
         logger.info(f"Z HOME_DIRECTION: {config['HOME_DIRECTION']}, moving in direction: {config['HOME_DIRECTION'] < 0}")
         
@@ -578,16 +782,34 @@ class MotorController:
         for _ in range(1000):  # Much more aggressive back-off for Z axis to ensure sensors are cleared
             self._step_motor('Z', config['HOME_DIRECTION'] > 0, config['HOME_SPEED'])
         
-        # Move forward at normal speed until sensor is triggered again (no fine approach for Z due to friction)
-        logger.info("Approaching home position at normal speed...")
+        # Move forward very slowly until sensor is triggered again (fine approach)
+        logger.info("Fine approach to home position...")
+        fine_speed = 0.005  # Much slower speed for fine approach (5ms between pulses)
         approach_step_count = 0
         while not self._check_sensor('Z'):
-            self._step_motor('Z', config['HOME_DIRECTION'] < 0, config['HOME_SPEED'])
+            self._step_motor('Z', config['HOME_DIRECTION'] < 0, fine_speed)
             approach_step_count += 1
             if approach_step_count % 100 == 0:  # Log every 100 steps
-                logger.info(f"Z approach: {approach_step_count} steps completed")
+                logger.info(f"Z fine approach: {approach_step_count} steps completed")
         
-        logger.info(f"Z approach completed after {approach_step_count} steps")
+        logger.info(f"Z fine approach completed after {approach_step_count} steps")
+        
+        # Move back slightly again to clear sensor for second approach
+        logger.info("Moving back for second approach...")
+        for _ in range(100):  # Minimal back-off for second approach
+            self._step_motor('Z', config['HOME_DIRECTION'] > 0, config['HOME_SPEED'])
+        
+        # Second fine approach to verify sensor position
+        logger.info("Second fine approach to verify home position...")
+        second_approach_step_count = 0
+        fast_fine_speed = 0.002  # Faster speed for second approach (2ms between pulses)
+        while not self._check_sensor('Z'):
+            self._step_motor('Z', config['HOME_DIRECTION'] < 0, fast_fine_speed)
+            second_approach_step_count += 1
+            if second_approach_step_count % 100 == 0:  # Log every 100 steps
+                logger.info(f"Z second fine approach: {second_approach_step_count} steps completed")
+        
+        logger.info(f"Z second fine approach completed after {second_approach_step_count} steps")
         
         # Move away from home position to clear sensor and allow movement
         logger.info("Moving away from home position...")
@@ -599,6 +821,9 @@ class MotorController:
     def _home_rot(self):
         """Home the rotation axis."""
         config = self.motors['ROT']
+        # Reset debounce state to prevent carryover issues
+        self.reset_sensor_debounce_state_for_axis('ROT')
+        
         # logger.info("Starting rotation axis homing sequence")
         
         # Move until sensor is triggered
@@ -607,12 +832,22 @@ class MotorController:
         
         # Move back slightly to clear sensor
         logger.info("Moving back to clear sensor...")
-        for _ in range(200):  # Much more extreme back-off to ensure sensors are cleared
+        for _ in range(100):  # Reduced back-off to clear sensor
             self._step_motor('ROT', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
         
         # Move forward very slowly until sensor is triggered again (fine approach)
         logger.info("Fine approach to home position...")
         fine_speed = 0.005  # Much slower speed for fine approach (5ms between pulses)
+        while not self._check_sensor('ROT'):
+            self._step_motor('ROT', config['HOME_DIRECTION'] < 0, fine_speed)
+        
+        # Move back slightly again to clear sensor for second approach
+        logger.info("Moving back for second approach...")
+        for _ in range(100):  # Smaller back-off for second approach
+            self._step_motor('ROT', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
+        
+        # Second fine approach to verify sensor position
+        logger.info("Second fine approach to verify home position...")
         while not self._check_sensor('ROT'):
             self._step_motor('ROT', config['HOME_DIRECTION'] < 0, fine_speed)
         

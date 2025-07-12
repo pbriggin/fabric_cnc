@@ -72,6 +72,18 @@ class Config:
             os.getenv('FABRIC_CNC_STEP_PULSE_DURATION', '0.001')
         )
         
+        # Sensor debounce configuration (in milliseconds)
+        self.sensor_debounce_times = {
+            'X': 15,      # 15ms for X sensor (reduced from 25ms for better responsiveness)
+            'Y1': 10,     # 10ms for Y1 sensor
+            'Y2': 10,     # 10ms for Y2 sensor
+            'Z_LIFT': 40, # 40ms for Z sensor (increased for maximum noise immunity)
+            'Z_ROTATE': 25 # 25ms for ROT sensor (increased for better noise immunity)
+        }
+        
+        # Sensor reading count for multi-reading debounce
+        self.sensor_reading_count = 2  # Reduced from 3 to 2 for faster response
+        
         if config_path and config_path.exists():
             self.load_config(config_path)
             
