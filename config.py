@@ -37,11 +37,11 @@ class Config:
             config_path: Optional path to JSON configuration file
         """
         self.gpio_pins = {
-            'X': {'DIR': 2, 'STEP': 3, 'EN': 4, 'HALL': 17},
-            'Y1': {'DIR': 21, 'STEP': 19, 'EN': 23},  # Left Y motor
-            'Y2': {'DIR': 27, 'STEP': 17, 'EN': 22},  # Right Y motor
-            'Z_LIFT': {'DIR': 11, 'STEP': 12, 'EN': 13, 'HALL': 22},
-            'Z_ROTATE': {'DIR': 14, 'STEP': 15, 'EN': 16, 'HALL': 23},
+            'X': {'DIR': 23, 'STEP': 24, 'EN': 9, 'HALL': 16},  # X hall sensor on pin 16
+            'Y1': {'DIR': 27, 'STEP': 22, 'EN': 17, 'HALL': 1},  # Left Y motor hall sensor on pin 1
+            'Y2': {'DIR': 5, 'STEP': 6, 'EN': 10, 'HALL': 20},  # Right Y motor hall sensor on pin 20
+            'Z_LIFT': {'DIR': 7, 'STEP': 18, 'EN': 8, 'HALL': 25},  # Z hall sensor on pin 25 - matches motor_drive_universal.py
+            'Z_ROTATE': {'DIR': 19, 'STEP': 26, 'EN': 13, 'HALL': 12},  # ROT hall sensor on pin 12 - matches hall_sensor_test.py
         }
         
         self.steps_per_mm = {
@@ -53,11 +53,11 @@ class Config:
         }
         
         self.direction_inverted = {
-            'X': False,
-            'Y1': False,
-            'Y2': True,
+            'X': True,  # Invert X direction to fix flipped axis
+            'Y1': True,  # Invert Y1 to fix Y direction
+            'Y2': False,  # Keep Y2 normal (opposite of Y1 for sync)
             'Z_LIFT': False,
-            'Z_ROTATE': False,
+            'Z_ROTATE': True,  # Invert direction to fix one-way rotation issue
         }
         
         self.work_area = WorkArea(x=1524, y=1016)
@@ -192,43 +192,67 @@ LIFT_HEIGHT_MM = config.motion.lift_height_mm
 USE_SIMULATION_MODE = config.simulation_mode
 STEP_PULSE_DURATION = config.step_pulse_duration
 
-# Motor configuration
+# Motor configuration - Updated to match tested pin assignments
 MOTOR_CONFIG = {
     'X': {
         'PULSES_PER_REV': 800,  # DIP switches set for 800 steps per revolution
         'MM_PER_REV': 20,  # 20mm per revolution (adjusted based on observed movement)
         'STEP_DELAY': 0.0005,  # 0.5ms between pulses = 1000 steps/sec
-        'STEP': 17,  # GPIO17 (Pin 11)
-        'DIR': 27,   # GPIO27 (Pin 13)
-        'EN': 22,    # GPIO22 (Pin 15)
-        'HALL': 20,  # GPIO20 (Pin 38) - Hall effect sensor pin
-        'HOME_DIRECTION': -1,  # Negative direction for homing
-        'HOME_SPEED': 0.001,  # Slower speed for homing (1ms between pulses)
+        'STEP': 24,  # GPIO24 (Pin 18) - Motor 3 (X)
+        'DIR': 23,   # GPIO23 (Pin 16) - Motor 3 (X)
+        'EN': 9,     # GPIO9 (Pin 21) - Motor 3 (X)
+        'HALL': 16,  # GPIO16 (Pin 36) - Hall effect sensor pin
+        'HOME_DIRECTION': 1,  # Positive direction for homing
+        'HOME_SPEED': 0.0005,  # Faster speed for homing (0.5ms between pulses)
         'VERIFY_SPEED': 0.002  # Even slower speed for verification (2ms between pulses)
     },
     'Y1': {
         'PULSES_PER_REV': 800,
         'MM_PER_REV': 20,
         'STEP_DELAY': 0.0005,
-        'STEP': 23,  # GPIO23 (Pin 16)
-        'DIR': 24,   # GPIO24 (Pin 18)
-        'EN': 25,    # GPIO25 (Pin 22)
-        'HALL': 21,  # GPIO21 (Pin 40) - Hall effect sensor pin
-        'HOME_DIRECTION': -1,
-        'HOME_SPEED': 0.001,
+        'STEP': 22,  # GPIO22 (Pin 15) - Motor 2 (Left Y)
+        'DIR': 27,   # GPIO27 (Pin 13) - Motor 2 (Left Y)
+        'EN': 17,    # GPIO17 (Pin 11) - Motor 2 (Left Y)
+        'HALL': 1,   # GPIO1 (Pin 28) - Hall effect sensor pin (Left Y)
+        'HOME_DIRECTION': 1,
+        'HOME_SPEED': 0.0005,
         'VERIFY_SPEED': 0.002
     },
     'Y2': {
         'PULSES_PER_REV': 800,
         'MM_PER_REV': 20,
         'STEP_DELAY': 0.0005,
-        'STEP': 5,   # GPIO5 (Pin 29)
-        'DIR': 6,    # GPIO6 (Pin 31)
-        'EN': 13,    # GPIO13 (Pin 33)
-        'HALL': 16,  # GPIO16 (Pin 36) - Hall effect sensor pin
+        'STEP': 6,   # GPIO6 (Pin 31) - Motor 1 (Right Y)
+        'DIR': 5,    # GPIO5 (Pin 29) - Motor 1 (Right Y)
+        'EN': 10,    # GPIO10 (Pin 19) - Motor 1 (Right Y) - Changed from GPIO4
+        'HALL': 20,  # GPIO20 (Pin 38) - Hall effect sensor pin (Right Y)
+        'HOME_DIRECTION': 1,
+        'HOME_SPEED': 0.0005,
+        'VERIFY_SPEED': 0.002
+    },
+    'Z_LIFT': {
+        'PULSES_PER_REV': 800,
+        'MM_PER_REV': 5,  # 5mm per revolution for Z axis
+        'STEP_DELAY': 0.001,  # 1ms between pulses = 500 steps/sec
+        'STEP': 18,  # GPIO18 (Pin 12) - Motor 4 (Z) - matches motor_drive_universal.py
+        'DIR': 7,    # GPIO7 (Pin 26) - Motor 4 (Z) - matches motor_drive_universal.py
+        'EN': 8,     # GPIO8 (Pin 24) - Motor 4 (Z) - matches motor_drive_universal.py
+        'HALL': 25,  # GPIO25 (Pin 22) - Hall effect sensor pin - matches hall_sensor_test.py
         'HOME_DIRECTION': -1,
         'HOME_SPEED': 0.001,
-        'VERIFY_SPEED': 0.002
+        'VERIFY_SPEED': 0.004
+    },
+    'Z_ROTATE': {
+        'PULSES_PER_REV': 1600,  # Updated to match actual motor driver setting
+        'MM_PER_REV': 360,  # 360 degrees per revolution
+        'STEP_DELAY': 0.001,  # 1ms between pulses = 500 steps/sec
+        'STEP': 26,  # GPIO26 (Pin 37) - Motor 5 (Rotation) - matches motor_drive_universal.py
+        'DIR': 19,   # GPIO19 (Pin 35) - Motor 5 (Rotation) - matches motor_drive_universal.py
+        'EN': 13,    # GPIO13 (Pin 33) - Motor 5 (Rotation) - matches motor_drive_universal.py
+        'HALL': 12,  # GPIO12 (Pin 32) - Hall effect sensor pin - matches hall_sensor_test.py
+        'HOME_DIRECTION': -1,
+        'HOME_SPEED': 0.001,
+        'VERIFY_SPEED': 0.004
     }
 }
 

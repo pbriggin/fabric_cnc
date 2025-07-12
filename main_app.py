@@ -47,7 +47,7 @@ SIMULATION_MODE = not ON_RPI or not MOTOR_IMPORTS_AVAILABLE
 INCH_TO_MM = 25.4
 X_MAX_MM = 68 * INCH_TO_MM
 Y_MAX_MM = 45 * INCH_TO_MM
-Z_MAX_MM = 2 * INCH_TO_MM
+Z_MAX_MM = 2.5 * INCH_TO_MM  # Set to 2.5 inches for Z travel
 PLOT_BUFFER_IN = 1.0  # 1.0 inch buffer on all sides (was 0.5)
 
 logging.basicConfig(level=logging.INFO)
@@ -62,11 +62,11 @@ class SimulatedMotorController:
 
     def _clamp(self, axis, value):
         if axis == 'X':
-            return max(0.0, min(value, X_MAX_MM))
+            return max(-X_MAX_MM, min(value, X_MAX_MM))  # Allow negative X positions
         elif axis == 'Y':
-            return max(0.0, min(value, Y_MAX_MM))
+            return max(-Y_MAX_MM, min(value, Y_MAX_MM))  # Allow negative Y positions
         elif axis == 'Z':
-            return max(0.0, min(value, Z_MAX_MM))
+            return max(0.0, min(value, Z_MAX_MM))  # Keep Z positive only
         else:
             return value
 
@@ -87,6 +87,22 @@ class SimulatedMotorController:
                 self.position[axis] = 0.0
             self.is_homing = False
             logger.info(f"Homed {axis} axis.")
+            return True
+
+    def home_all_synchronous(self):
+        """Home all axes simultaneously (simulated)."""
+        with self.lock:
+            if self.is_homing:
+                return False
+            self.is_homing = True
+            # Simulate homing delay
+            time.sleep(2)
+            self.position['X'] = 0.0
+            self.position['Y'] = 0.0
+            self.position['Z'] = 0.0
+            self.position['ROT'] = 0.0
+            self.is_homing = False
+            logger.info("Homed all axes simultaneously.")
             return True
 
     def get_position(self):
@@ -122,11 +138,11 @@ class RealMotorController:
 
     def _clamp(self, axis, value):
         if axis == 'X':
-            return max(0.0, min(value, X_MAX_MM))
+            return max(-X_MAX_MM, min(value, X_MAX_MM))  # Allow negative X positions
         elif axis == 'Y':
-            return max(0.0, min(value, Y_MAX_MM))
+            return max(-Y_MAX_MM, min(value, Y_MAX_MM))  # Allow negative Y positions
         elif axis == 'Z':
-            return max(0.0, min(value, Z_MAX_MM))
+            return max(-Z_MAX_MM, min(value, Z_MAX_MM))  # Allow negative Z positions
         else:
             return value
 
@@ -142,9 +158,9 @@ class RealMotorController:
                     elif axis == 'Y':
                         self.motor_controller.move_distance(move_delta, 'Y')
                     elif axis == 'Z':
-                        logger.warning("Z axis not implemented")
+                        self.motor_controller.move_distance(move_delta, 'Z')
                     elif axis == 'ROT':
-                        logger.warning("Rotation axis not implemented")
+                        self.motor_controller.move_distance(move_delta, 'ROT')
                     self.position[axis] = clamped_val
                     logger.info(f"Jogged {axis} by {move_delta}mm")
             except Exception as e:
@@ -165,11 +181,13 @@ class RealMotorController:
                     self.position['Y'] = 0.0
                     success = True
                 elif axis == 'Z':
-                    logger.warning("Z axis homing not implemented")
-                    success = False
+                    self.motor_controller.home_axis('Z')
+                    self.position['Z'] = 0.0
+                    success = True
                 elif axis == 'ROT':
-                    logger.warning("Rotation axis homing not implemented")
-                    success = False
+                    self.motor_controller.home_axis('ROT')
+                    self.position['ROT'] = 0.0
+                    success = True
                 else:
                     success = False
                 self.is_homing = False
@@ -179,26 +197,51 @@ class RealMotorController:
                 self.is_homing = False
                 return False
 
+    def home_all_synchronous(self):
+        """Home all axes simultaneously."""
+        with self.lock:
+            if self.is_homing:
+                return False
+            self.is_homing = True
+            try:
+                self.motor_controller.home_all_synchronous()
+                # Reset all positions to 0 after successful homing
+                self.position['X'] = 0.0
+                self.position['Y'] = 0.0
+                self.position['Z'] = 0.0
+                self.position['ROT'] = 0.0
+                self.is_homing = False
+                return True
+            except Exception as e:
+                logger.error(f"Synchronous home error: {e}")
+                self.is_homing = False
+                return False
+
     def get_position(self):
         with self.lock:
             return dict(self.position)
 
     def estop(self):
         try:
-            if GPIO_AVAILABLE:
-                # Emergency stop - disable all motors
-                for motor, config in self.motor_controller.motors.items():
-                    GPIO.output(config['EN'], GPIO.HIGH)
-                    GPIO.output(config['STEP'], GPIO.LOW)
-                    GPIO.output(config['DIR'], GPIO.LOW)
-            logger.warning("EMERGENCY STOP triggered")
+            # Emergency stop - stop movement and disable all motors
+            self.motor_controller.stop_movement()
+            self.motor_controller.cleanup()
+            logger.warning("EMERGENCY STOP triggered - all motors disabled")
         except Exception as e:
             logger.error(f"E-stop error: {e}")
 
+    def stop_movement(self):
+        """Stop any ongoing movement immediately."""
+        try:
+            self.motor_controller.stop_movement()
+            logger.info("Movement stopped")
+        except Exception as e:
+            logger.error(f"Stop movement error: {e}")
+
     def cleanup(self):
         try:
-            if GPIO_AVAILABLE:
-                GPIO.cleanup()
+            # Use the motor controller's cleanup method to disable motors
+            self.motor_controller.cleanup()
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
 
@@ -215,11 +258,18 @@ class RealMotorController:
                 if abs(delta_y) > 1e-6:
                     self.motor_controller.move_distance(delta_y, 'Y')
                     self.position['Y'] = y
-            # Z and ROT are not implemented in hardware, just update the value
+            # Move Z axis if needed
             if z is not None:
-                self.position['Z'] = z
+                delta_z = z - self.position['Z']
+                if abs(delta_z) > 1e-6:
+                    self.motor_controller.move_distance(delta_z, 'Z')
+                    self.position['Z'] = z
+            # Move rotation axis if needed
             if rot is not None:
-                self.position['ROT'] = rot
+                delta_rot = rot - self.position['ROT']
+                if abs(delta_rot) > 1e-6:
+                    self.motor_controller.move_distance(delta_rot, 'ROT')
+                    self.position['ROT'] = rot
             # logger.info(f"Real move_to: X={self.position['X']:.2f}, Y={self.position['Y']:.2f}, Z={self.position['Z']:.2f}, ROT={self.position['ROT']:.2f}")
 
 # --- Main App ---
@@ -262,8 +312,10 @@ class FabricCNCApp:
         self.dxf_entities = []
         self.toolpath = []
         self.jog_speed = 0.25 * INCH_TO_MM  # 0.25 inch per jog, in mm internally
-        self._arrow_key_state = {'Left': False, 'Right': False, 'Up': False, 'Down': False}
-        self._arrow_key_repeat_delay = 60  # ms between jogs when holding key
+        self._arrow_key_state = {'Left': False, 'Right': False, 'Up': False, 'Down': False, 'Page_Up': False, 'Page_Down': False, 'Home': False, 'End': False}
+        self._arrow_key_repeat_delay = 100  # ms between jogs when holding key (increased for safety)
+        self._arrow_key_after_ids = {'Left': None, 'Right': None, 'Up': None, 'Down': None, 'Page_Up': None, 'Page_Down': None, 'Home': None, 'End': None}  # Track pending after() calls
+        self._jog_in_progress = {'X': False, 'Y': False, 'Z': False, 'ROT': False}
         self._setup_ui()
         self._bind_arrow_keys()
         self._update_position_display()
@@ -279,27 +331,81 @@ class FabricCNCApp:
         self.root.bind('<KeyRelease-Up>', lambda e: self._on_arrow_release('Up'))
         self.root.bind('<KeyPress-Down>', lambda e: self._on_arrow_press('Down'))
         self.root.bind('<KeyRelease-Down>', lambda e: self._on_arrow_release('Down'))
+        # Z axis controls
+        self.root.bind('<KeyPress-Prior>', lambda e: self._on_arrow_press('Page_Up'))  # Page Up for Z+
+        self.root.bind('<KeyRelease-Prior>', lambda e: self._on_arrow_release('Page_Up'))
+        self.root.bind('<KeyPress-Next>', lambda e: self._on_arrow_press('Page_Down'))  # Page Down for Z-
+        self.root.bind('<KeyRelease-Next>', lambda e: self._on_arrow_release('Page_Down'))
+        # Rotation controls
+        self.root.bind('<KeyPress-Home>', lambda e: self._on_arrow_press('Home'))  # Home key for ROT+
+        self.root.bind('<KeyRelease-Home>', lambda e: self._on_arrow_release('Home'))
+        self.root.bind('<KeyPress-End>', lambda e: self._on_arrow_press('End'))  # End key for ROT-
+        self.root.bind('<KeyRelease-End>', lambda e: self._on_arrow_release('End'))
+        # Bind Escape key to stop movement
+        self.root.bind('<KeyPress-Escape>', lambda e: self._stop_movement())
 
     def _on_arrow_press(self, key):
         if not self._arrow_key_state[key]:
             self._arrow_key_state[key] = True
             self._arrow_jog_loop(key)
 
-    def _on_arrow_release(self, key):
-        self._arrow_key_state[key] = False
-
     def _arrow_jog_loop(self, key):
         if not self._arrow_key_state[key]:
             return
+        axis = None
+        delta = 0
         if key == 'Left':
-            self._jog('X', -self.jog_speed)
+            axis = 'X'
+            delta = -self.jog_speed
         elif key == 'Right':
-            self._jog('X', self.jog_speed)
+            axis = 'X'
+            delta = self.jog_speed
         elif key == 'Up':
-            self._jog('Y', self.jog_speed)
+            axis = 'Y'
+            delta = self.jog_speed
         elif key == 'Down':
-            self._jog('Y', -self.jog_speed)
-        self.root.after(self._arrow_key_repeat_delay, lambda: self._arrow_jog_loop(key))
+            axis = 'Y'
+            delta = -self.jog_speed
+        elif key == 'Page_Up':
+            axis = 'Z'
+            delta = 1.0 * INCH_TO_MM  # 1 inch up
+        elif key == 'Page_Down':
+            axis = 'Z'
+            delta = -1.0 * INCH_TO_MM  # 1 inch down
+        elif key == 'Home':
+            axis = 'ROT'
+            delta = 5.0  # 5 degrees clockwise
+        elif key == 'End':
+            axis = 'ROT'
+            delta = -5.0  # 5 degrees counter-clockwise
+        if axis:
+            if not self._jog_in_progress[axis]:
+                self._jog_in_progress[axis] = True
+                self._jog_with_flag(axis, delta, key)
+        # Schedule next iteration and store the after_id
+        self._arrow_key_after_ids[key] = self.root.after(self._arrow_key_repeat_delay, lambda: self._arrow_jog_loop(key))
+
+    def _jog_with_flag(self, axis, delta, key):
+        try:
+            self._jog(axis, delta)
+        finally:
+            self._jog_in_progress[axis] = False
+
+    def _on_arrow_release(self, key):
+        self._arrow_key_state[key] = False
+        # Cancel any pending after() call for this key
+        if self._arrow_key_after_ids[key] is not None:
+            self.root.after_cancel(self._arrow_key_after_ids[key])
+            self._arrow_key_after_ids[key] = None
+        # Reset jog-in-progress for the axis
+        if key in ['Left', 'Right']:
+            self._jog_in_progress['X'] = False
+        elif key in ['Up', 'Down']:
+            self._jog_in_progress['Y'] = False
+        elif key in ['Page_Up', 'Page_Down']:
+            self._jog_in_progress['Z'] = False
+        elif key in ['Home', 'End']:
+            self._jog_in_progress['ROT'] = False
 
     def _setup_ui(self):
         self.root.geometry("1200x700")
@@ -371,7 +477,7 @@ class FabricCNCApp:
         self.canvas_height = event.height
         self._draw_canvas()
 
-    def _draw_canvas(self, live_toolpath=False):
+    def _draw_canvas(self):
         self.canvas.delete("all")
         # Draw axes in inches
         self._draw_axes_in_inches()
@@ -381,16 +487,12 @@ class FabricCNCApp:
         # Draw toolpath if generated
         if self.toolpath:
             self._draw_toolpath_inches()
-        # Draw current tool head position
-        if live_toolpath and hasattr(self, '_current_toolpath_pos'):
-            pos = self._current_toolpath_pos
-            self._draw_live_tool_head_inches(pos)
-        else:
-            pos = self.motor_ctrl.get_position()
-            x = max(0.0, min(pos['X'], X_MAX_MM))
-            y = max(0.0, min(pos['Y'], Y_MAX_MM))
-            clamped_pos = {'X': x, 'Y': y}
-            self._draw_tool_head_inches(clamped_pos)
+        # Draw current tool head position (all axes)
+        pos = self.motor_ctrl.get_position()
+        x = max(0.0, min(pos['X'], X_MAX_MM))
+        y = max(0.0, min(pos['Y'], Y_MAX_MM))
+        clamped_pos = {'X': x, 'Y': y}
+        self._draw_tool_head_inches(clamped_pos)
 
     def _draw_axes_in_inches(self):
         # Draw X and Y axes with inch ticks and labels, with buffer
@@ -401,38 +503,36 @@ class FabricCNCApp:
             self.canvas.create_text(x_px, self.canvas_height-20, text=f"{x_in}", fill="#444", font=("Arial", 9))
         for y_in in range(0, 46, inch_tick):
             _, y_px = self._inches_to_canvas(0, y_in)
-            y_px = self.canvas_height - y_px
             self.canvas.create_line(0, y_px, 10, y_px, fill="#888")
             self.canvas.create_text(25, y_px, text=f"{y_in}", fill="#444", font=("Arial", 9), anchor="w")
         # Draw border
         self.canvas.create_rectangle(0, 0, self.canvas_width, self.canvas_height, outline="#333", width=2)
         # Draw home position indicator (red cross at 0,0)
         home_x, home_y = self._inches_to_canvas(0, 0)
-        home_y = self.canvas_height - home_y  # Mirror Y for the red X
         size = 10
         self.canvas.create_line(home_x - size, home_y - size, home_x + size, home_y + size, fill="#d00", width=2)
         self.canvas.create_line(home_x - size, home_y + size, home_x + size, home_y - size, fill="#d00", width=2)
 
     def _inches_to_canvas(self, x_in, y_in):
-        # Flip Y for canvas (Tkinter Y is top-down)
+        # Convert inches to canvas coordinates with home at bottom-left
         plot_width_in = 68 + 2 * PLOT_BUFFER_IN
         plot_height_in = 45 + 2 * PLOT_BUFFER_IN
         sx = self.canvas_width / plot_width_in
         sy = self.canvas_height / plot_height_in
         ox = PLOT_BUFFER_IN * sx
         oy = PLOT_BUFFER_IN * sy
-        y_in_flipped = 45 - y_in  # Flip Y for canvas
-        return x_in * sx + ox, y_in_flipped * sy + oy
+        # Y coordinate: 0 at bottom, 45 at top (Tkinter Y is top-down)
+        y_canvas = (45 - y_in) * sy + oy
+        return x_in * sx + ox, y_canvas
 
     def _draw_tool_head_inches(self, pos):
         # Draw a small circle at the current tool head position (in inches)
-        x_in = pos['X'] / INCH_TO_MM
         y_in = pos['Y'] / INCH_TO_MM
+        x_in = pos['X'] / INCH_TO_MM
         x_c, y_c = self._inches_to_canvas(x_in, y_in)
-        y_c = self.canvas_height - y_c  # Mirror Y for the green dot only
         r = 7
         self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill="#0a0", outline="#080", width=2)
-        self.canvas.create_text(x_c, y_c - 18, text=f"({x_in:.2f}, {y_in:.2f})", fill="#080", font=("Arial", 10, "bold"))
+        self.canvas.create_text(x_c, y_c - 18, text=f"(X={x_in:.2f}, Y={y_in:.2f})", fill="#080", font=("Arial", 10, "bold"))
 
     def _draw_dxf_entities_inches(self):
         # Draw DXF entities, converting mm to inches for plotting
@@ -471,21 +571,21 @@ class FabricCNCApp:
             if t == 'LINE':
                 x1, y1 = e.dxf.start.x, e.dxf.start.y
                 x2, y2 = e.dxf.end.x, e.dxf.end.y
-                x1c, y1c = self._inches_to_canvas(x1 * scale - dx, dy - y1 * scale)
-                x2c, y2c = self._inches_to_canvas(x2 * scale - dx, dy - y2 * scale)
+                x1c, y1c = self._inches_to_canvas(x1 * scale - dx, y1 * scale - dy)
+                x2c, y2c = self._inches_to_canvas(x2 * scale - dx, y2 * scale - dy)
                 self.canvas.create_line(x1c, y1c, x2c, y2c, fill="#888", width=2)
             elif t == 'LWPOLYLINE':
                 points = [(p[0], p[1]) for p in e.get_points()]
                 flat = []
                 for x, y in points:
-                    x_c, y_c = self._inches_to_canvas(x * scale - dx, dy - y * scale)
+                    x_c, y_c = self._inches_to_canvas(x * scale - dx, y * scale - dy)
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#888", width=2)
             elif t == 'POLYLINE':
                 points = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
                 flat = []
                 for x, y in points:
-                    x_c, y_c = self._inches_to_canvas(x * scale - dx, dy - y * scale)
+                    x_c, y_c = self._inches_to_canvas(x * scale - dx, y * scale - dy)
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#888", width=2)
             elif t == 'SPLINE':
@@ -493,7 +593,7 @@ class FabricCNCApp:
                 flat = []
                 for x, y, *_ in points:
                     x_transformed = x * scale - dx
-                    y_transformed = dy - y * scale
+                    y_transformed = y * scale - dy
                     x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
                     flat.extend([x_c, y_c])
                 self.canvas.create_line(flat, fill="#888", width=2)
@@ -511,7 +611,7 @@ class FabricCNCApp:
                     x = center.x + r * math.cos(angle)
                     y = center.y + r * math.sin(angle)
                     x_transformed = x * scale - dx
-                    y_transformed = dy - y * scale
+                    y_transformed = y * scale - dy
                     x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
                     points.append((x_c, y_c))
                 self.canvas.create_line(*[coord for pt in points for coord in pt], fill="#888", width=2)
@@ -525,7 +625,7 @@ class FabricCNCApp:
                     x = center.x + r * math.cos(angle)
                     y = center.y + r * math.sin(angle)
                     x_transformed = x * scale - dx
-                    y_transformed = dy - y * scale
+                    y_transformed = y * scale - dy
                     x_c, y_c = self._inches_to_canvas(x_transformed, y_transformed)
                     points.append((x_c, y_c))
                 self.canvas.create_line(*[coord for pt in points for coord in pt], fill="#888", width=2)
@@ -549,7 +649,6 @@ class FabricCNCApp:
             for x, y in points:
                 x_in, y_in = x / INCH_TO_MM, y / INCH_TO_MM
                 x_c, y_c = self._inches_to_canvas(x_in, y_in)
-                y_c = self.canvas_height - y_c
                 flat.extend([x_c, y_c])
             self.canvas.create_line(flat, fill=color, width=2, dash=(4, 2))
 
@@ -950,7 +1049,7 @@ class FabricCNCApp:
         actual_pos = self.motor_ctrl.get_position()
         print(f"[DEBUG] Toolpath pos: X={self._current_toolpath_pos['X']:.2f} Y={self._current_toolpath_pos['Y']:.2f} | Motor pos: X={actual_pos['X']:.2f} Y={actual_pos['Y']:.2f}")
         self._update_position_display()  # Force update after each move
-        self._draw_canvas(live_toolpath=True)
+        self._draw_canvas()
         # Next step
         self._current_toolpath_idx[1] += 1
         self._toolpath_step_count += 1
@@ -1017,7 +1116,9 @@ class FabricCNCApp:
         ttk.Button(home_frame, text="Home Y", command=lambda: self._home('Y')).pack(fill=tk.X, pady=2)
         ttk.Button(home_frame, text="Home Z", command=lambda: self._home('Z')).pack(fill=tk.X, pady=2)
         ttk.Button(home_frame, text="Home ROT", command=lambda: self._home('ROT')).pack(fill=tk.X, pady=2)
-        ttk.Button(home_frame, text="Home All", command=self._home_all).pack(fill=tk.X, pady=2)
+        ttk.Button(home_frame, text="Home All (Sync)", command=self._home_all).pack(fill=tk.X, pady=2)
+        
+
         
         # E-stop
         ttk.Separator(self.right_toolbar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
@@ -1048,35 +1149,42 @@ class FabricCNCApp:
         self._update_position_display()
 
     def _home_all(self):
-        """Home all axes in sequence"""
-        axes = ['X', 'Y', 'Z', 'ROT']
-        for axis in axes:
-            if axis in ['Z', 'ROT']:
-                # Skip unimplemented axes
-                continue
-            success = self.motor_ctrl.home(axis)
-            if not success:
-                messagebox.showerror("Homing Failed", f"Failed to home {axis} axis")
-                return
-        messagebox.showinfo("Homing Complete", "All axes homed successfully")
+        """Home all axes simultaneously"""
+        success = self.motor_ctrl.home_all_synchronous()
+        if success:
+            messagebox.showinfo("Homing Complete", "All axes homed successfully")
+        else:
+            messagebox.showerror("Homing Failed", "Failed to home one or more axes")
         self._draw_canvas()
         self._update_position_display()
+
+
+
+
+
+    def _stop_movement(self):
+        """Stop all movement and cancel any pending arrow key operations."""
+        # Stop any ongoing motor movement
+        self.motor_ctrl.stop_movement()
+        
+        # Cancel all pending arrow key operations
+        for key in self._arrow_key_after_ids:
+            if self._arrow_key_after_ids[key] is not None:
+                self.root.after_cancel(self._arrow_key_after_ids[key])
+                self._arrow_key_after_ids[key] = None
+            self._arrow_key_state[key] = False
+        
+        logger.info("All movement stopped")
 
     def _estop(self):
         self.motor_ctrl.estop()
         messagebox.showwarning("EMERGENCY STOP", "All motors stopped")
 
     def _update_position_display(self):
-        # Use toolpath position if running, otherwise use motor controller position
-        running_toolpath = hasattr(self, '_running_toolpath') and self._running_toolpath and hasattr(self, '_current_toolpath_pos')
-        if running_toolpath:
-            pos = self._current_toolpath_pos
-            y_disp = 45.0 - (pos['Y']/INCH_TO_MM)  # Flip Y only during toolpath
-        else:
-            pos = self.motor_ctrl.get_position()
-            y_disp = pos['Y']/INCH_TO_MM  # No flip for jog/idle
+        pos = self.motor_ctrl.get_position()
         x_disp = pos['X']/INCH_TO_MM
-        z_disp = pos['Z']/INCH_TO_MM
+        y_disp = pos['Y']/INCH_TO_MM
+        z_disp = pos['Z']/INCH_TO_MM  # Convert Z to inches
         rot_disp = pos['ROT']
         text = f"X: {x_disp:.2f} in\nY: {y_disp:.2f} in\nZ: {z_disp:.2f} in\nROT: {rot_disp:.1f}°"
         self.coord_label.config(text=text)
