@@ -48,8 +48,8 @@ INCH_TO_MM = 25.4
 X_MAX_MM = 68 * INCH_TO_MM
 Y_MAX_MM = 45 * INCH_TO_MM
 Z_MAX_MM = 2.5 * INCH_TO_MM
-Z_UP_MM = 0.0
-Z_DOWN_MM = -34.29  # 1.35 inches down (1.35 * 25.4 = 34.29mm)
+Z_UP_MM = 19.05  # 0.75 inches up (0.75 * 25.4 = 19.05mm)
+Z_DOWN_MM = -38.1  # 1.5 inches down (1.5 * 25.4 = 38.1mm)
 PLOT_BUFFER_IN = 1.0
 
 logging.basicConfig(level=logging.INFO)

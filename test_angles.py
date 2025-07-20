@@ -245,7 +245,7 @@ def test_angle_calculation():
                 y_mm = y * INCH_TO_MM
                 angle_deg = math.degrees(angle)
                 z_pos = "UP" if z == 1 else "DOWN"
-                z_mm = 0.0 if z == 1 else -34.29  # Z UP = 0mm, Z DOWN = -34.29mm (1.35 inches down)
+                z_mm = 19.05 if z == 1 else -38.1  # Z UP = 19.05mm (0.75 inches), Z DOWN = -38.1mm (1.5 inches down)
                 print(f"  Point {j+1}: X={x_mm:.2f}mm ({x:.3f}in), Y={y_mm:.2f}mm ({y:.3f}in), Angle={angle_deg:.1f}°, Z={z_pos} ({z_mm:.1f}mm)")
     
     except Exception as e:
