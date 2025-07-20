@@ -68,6 +68,81 @@ ERROR_COLOR = '#b00020'
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
+def calculate_angle_between_points(p1, p2, p3):
+    """Calculate the angle between three points (p1 -> p2 -> p3) in degrees."""
+    if p1 == p2 or p2 == p3:
+        return 0.0
+    
+    # Calculate vectors
+    v1 = (p1[0] - p2[0], p1[1] - p2[1])
+    v2 = (p3[0] - p2[0], p3[1] - p2[1])
+    
+    # Calculate dot product
+    dot_product = v1[0] * v2[0] + v1[1] * v2[1]
+    
+    # Calculate magnitudes
+    mag1 = math.sqrt(v1[0]**2 + v1[1]**2)
+    mag2 = math.sqrt(v2[0]**2 + v2[1]**2)
+    
+    if mag1 == 0 or mag2 == 0:
+        return 0.0
+    
+    # Calculate angle
+    cos_angle = dot_product / (mag1 * mag2)
+    cos_angle = max(-1.0, min(1.0, cos_angle))  # Clamp to [-1, 1]
+    angle_rad = math.acos(cos_angle)
+    angle_deg = math.degrees(angle_rad)
+    
+    return angle_deg
+
+def flatten_spline_with_angle_limit(spline, max_angle_deg=2.0):
+    """Flatten a spline ensuring maximum angle between segments is less than max_angle_deg."""
+    # Start with a coarse tolerance to get initial points
+    coarse_tolerance = 0.1
+    points = list(spline.flattening(coarse_tolerance))
+    
+    if len(points) < 3:
+        return points
+    
+    # Refine points to meet angle requirement
+    refined_points = [points[0]]
+    
+    for i in range(1, len(points) - 1):
+        p1 = refined_points[-1]
+        p2 = points[i]
+        p3 = points[i + 1]
+        
+        angle = calculate_angle_between_points(p1, p2, p3)
+        
+        if angle > max_angle_deg:
+            # Need to add more points between p1 and p2
+            # Use finer tolerance for this segment
+            fine_tolerance = 0.001
+            segment_points = list(spline.flattening(fine_tolerance))
+            
+            # Find points between p1 and p2
+            start_idx = None
+            end_idx = None
+            
+            for j, pt in enumerate(segment_points):
+                if abs(pt[0] - p1[0]) < 0.001 and abs(pt[1] - p1[1]) < 0.001:
+                    start_idx = j
+                if abs(pt[0] - p2[0]) < 0.001 and abs(pt[1] - p2[1]) < 0.001:
+                    end_idx = j
+                    break
+            
+            if start_idx is not None and end_idx is not None:
+                # Add intermediate points
+                for k in range(start_idx + 1, end_idx):
+                    refined_points.append(segment_points[k])
+        
+        refined_points.append(p2)
+    
+    # Add the last point
+    refined_points.append(points[-1])
+    
+    return refined_points
+
 # --- Motor simulation logic ---
 class SimulatedMotorController:
     def __init__(self):
@@ -819,13 +894,14 @@ class FabricCNCApp:
                     center = e.dxf.center
                     r = e.dxf.radius
                     logger.info(f"Processing CIRCLE: center=({center.x}, {center.y}), radius={r}")
-                    # Generate points around the circle circumference for proper bounding box
-                    # Use many more segments for very smooth circles - scale with radius
-                    base_segments = 128
-                    radius_inches = r * self.dxf_unit_scale
-                    n = max(base_segments, int(base_segments * radius_inches))
-                    # Ensure we don't create too many segments
-                    n = min(n, 512)
+                                    # Generate points around the circle circumference for proper bounding box
+                # Calculate segments based on angle requirement
+                max_angle_deg = 2.0
+                # For a circle, angle between segments = 360 / n
+                # We want angle < max_angle_deg, so n > 360 / max_angle_deg
+                min_segments = int(360 / max_angle_deg) + 1
+                n = max(min_segments, 128)  # At least 128 segments
+                n = min(n, 512)  # Max 512 segments
                     for i in range(n):
                         angle = 2 * math.pi * i / n
                         x = center.x + r * math.cos(angle)
@@ -835,13 +911,13 @@ class FabricCNCApp:
                 elif t == 'SPLINE':
                     logger.info(f"Processing SPLINE")
                     # Flatten spline to points for bounding box calculation
-                    tolerance = 0.001  # Much finer than 0.01
-                    pts = list(e.flattening(tolerance))
+                    max_angle_deg = 2.0
+                    pts = flatten_spline_with_angle_limit(e, max_angle_deg)
                     for pt in pts:
                         if len(pt) >= 2:
                             all_x.append(pt[0] * self.dxf_unit_scale)
                             all_y.append(pt[1] * self.dxf_unit_scale)
-                    logger.info(f"  Generated {len(pts)} points from spline with tolerance {tolerance}")
+                    logger.info(f"  Generated {len(pts)} points from spline (max angle: {max_angle_deg}°)")
             logger.info(f"Collected {len(all_x)} points for bounding box calculation")
             if not all_x or not all_y:
                 raise ValueError("No valid points found in DXF file for bounding box calculation")
@@ -895,27 +971,33 @@ class FabricCNCApp:
                 xs = [p[0] for p in pts]
                 ys = [p[1] for p in pts]
             elif t == 'SPLINE':
-                tolerance = 0.001  # Much finer than 0.01
-                pts = list(e.flattening(tolerance))
+                max_angle_deg = 2.0
+                pts = flatten_spline_with_angle_limit(e, max_angle_deg)
                 xs = [p[0] for p in pts]
                 ys = [p[1] for p in pts]
             elif t == 'ARC' or t == 'CIRCLE':
                 center = e.dxf.center
                 r = e.dxf.radius
-                # Use many more segments for very smooth circles - scale with radius
-                base_segments = 128
-                radius_inches = r * scale
-                n = max(base_segments, int(base_segments * radius_inches))
-                # Ensure we don't create too many segments
-                n = min(n, 512)
+                # Calculate segments based on angle requirement
+                max_angle_deg = 2.0
                 if t == 'ARC':
                     start = math.radians(e.dxf.start_angle)
                     end = math.radians(e.dxf.end_angle)
                     if end < start:
                         end += 2 * math.pi
+                    arc_angle_rad = end - start
+                    arc_angle_deg = math.degrees(arc_angle_rad)
+                    min_segments = int(arc_angle_deg / max_angle_deg) + 1
+                    n = max(min_segments, 64)  # At least 64 segments
+                    n = min(n, 512)  # Max 512 segments
                     pts = [(center.x + r * math.cos(start + (end - start) * i / n),
                             center.y + r * math.sin(start + (end - start) * i / n)) for i in range(n+1)]
                 else:
+                    # For circles, angle between segments = 360 / n
+                    # We want angle < max_angle_deg, so n > 360 / max_angle_deg
+                    min_segments = int(360 / max_angle_deg) + 1
+                    n = max(min_segments, 128)  # At least 128 segments
+                    n = min(n, 512)  # Max 512 segments
                     pts = [(center.x + r * math.cos(2 * math.pi * i / n),
                             center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
                 xs = [p[0] for p in pts]
@@ -959,10 +1041,11 @@ class FabricCNCApp:
                 if getattr(e, 'is_closed', False) or (len(pts) > 2 and pts[0] == pts[-1]):
                     segments.append((pts[-1], pts[0]))
             elif t == 'SPLINE':
-                # Use very fine tolerance for smooth splines - especially for circles
-                tolerance = 0.001  # Much finer than 0.01
-                pts = [(p[0], p[1]) for p in e.flattening(tolerance)]
-                logger.info(f"  SPLINE: flattened to {len(pts)} points with tolerance {tolerance}")
+                # Use angle-based flattening for smooth splines
+                max_angle_deg = 2.0
+                pts = flatten_spline_with_angle_limit(e, max_angle_deg)
+                pts = [(p[0], p[1]) for p in pts]
+                logger.info(f"  SPLINE: flattened to {len(pts)} points (max angle: {max_angle_deg}°)")
                 for i in range(1, len(pts)):
                     segments.append((pts[i-1], pts[i]))
             elif t == 'ARC':
@@ -972,7 +1055,15 @@ class FabricCNCApp:
                 end = math.radians(e.dxf.end_angle)
                 if end < start:
                     end += 2 * math.pi
-                n = 32
+                
+                # Calculate segments based on angle requirement
+                max_angle_deg = 2.0
+                arc_angle_rad = end - start
+                arc_angle_deg = math.degrees(arc_angle_rad)
+                min_segments = int(arc_angle_deg / max_angle_deg) + 1
+                n = max(min_segments, 64)  # At least 64 segments
+                n = min(n, 512)  # Max 512 segments
+                logger.info(f"  ARC: {arc_angle_deg:.1f}° arc, {n} segments (max angle: {arc_angle_deg/n:.2f}°)")
                 pts = [(center.x + r * math.cos(start + (end - start) * i / n),
                         center.y + r * math.sin(start + (end - start) * i / n)) for i in range(n+1)]
                 for i in range(1, len(pts)):
@@ -980,14 +1071,12 @@ class FabricCNCApp:
             elif t == 'CIRCLE':
                 center = e.dxf.center
                 r = e.dxf.radius
-                # Use many more segments for very smooth circles - scale with radius
-                # For a 1-inch radius, use 128 segments. Scale up for larger circles
-                base_segments = 128
-                radius_inches = r * self.dxf_unit_scale
-                n = max(base_segments, int(base_segments * radius_inches))
-                # Ensure we don't create too many segments
-                n = min(n, 512)
-                logger.info(f"  Circle: radius={r:.3f}, radius_inches={radius_inches:.3f}, segments={n}")
+                # Calculate segments based on angle requirement
+                max_angle_deg = 2.0
+                min_segments = int(360 / max_angle_deg) + 1
+                n = max(min_segments, 128)  # At least 128 segments
+                n = min(n, 512)  # Max 512 segments
+                logger.info(f"  Circle: radius={r:.3f}, radius_inches={r * self.dxf_unit_scale:.3f}, segments={n} (max angle: {360/n:.2f}°)")
                 pts = [(center.x + r * math.cos(2 * math.pi * i / n),
                         center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
                 for i in range(1, len(pts)):
