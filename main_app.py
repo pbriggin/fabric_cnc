@@ -894,14 +894,14 @@ class FabricCNCApp:
                     center = e.dxf.center
                     r = e.dxf.radius
                     logger.info(f"Processing CIRCLE: center=({center.x}, {center.y}), radius={r}")
-                                    # Generate points around the circle circumference for proper bounding box
-                # Calculate segments based on angle requirement
-                max_angle_deg = 2.0
-                # For a circle, angle between segments = 360 / n
-                # We want angle < max_angle_deg, so n > 360 / max_angle_deg
-                min_segments = int(360 / max_angle_deg) + 1
-                n = max(min_segments, 128)  # At least 128 segments
-                n = min(n, 512)  # Max 512 segments
+                    # Generate points around the circle circumference for proper bounding box
+                    # Calculate segments based on angle requirement
+                    max_angle_deg = 2.0
+                    # For a circle, angle between segments = 360 / n
+                    # We want angle < max_angle_deg, so n > 360 / max_angle_deg
+                    min_segments = int(360 / max_angle_deg) + 1
+                    n = max(min_segments, 128)  # At least 128 segments
+                    n = min(n, 512)  # Max 512 segments
                     for i in range(n):
                         angle = 2 * math.pi * i / n
                         x = center.x + r * math.cos(angle)
