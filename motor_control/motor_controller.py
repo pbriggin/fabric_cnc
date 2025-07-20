@@ -609,8 +609,8 @@ class MotorController:
                 return
         
         # Acceleration parameters
-        accel_steps = min(total_steps // 4, 25)  # Faster acceleration for Z
-        decel_steps = min(total_steps // 4, 25)
+        accel_steps = min(total_steps // 4, 15)  # Even faster acceleration for Z
+        decel_steps = min(total_steps // 4, 15)
         cruise_steps = total_steps - accel_steps - decel_steps
         
         # Movement loop with acceleration/deceleration

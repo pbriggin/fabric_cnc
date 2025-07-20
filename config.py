@@ -245,14 +245,14 @@ MOTOR_CONFIG = {
     'Z_LIFT': {
         'PULSES_PER_REV': 800,
         'MM_PER_REV': 5,  # 5mm per revolution for Z axis
-        'STEP_DELAY': 0.0005,  # 0.5ms between pulses = 1000 steps/sec (2x faster)
+        'STEP_DELAY': 0.00025,  # 0.25ms between pulses = 2000 steps/sec (4x faster than original)
         'STEP': 18,  # GPIO18 (Pin 12) - Motor 4 (Z) - matches motor_drive_universal.py
         'DIR': 7,    # GPIO7 (Pin 26) - Motor 4 (Z) - matches motor_drive_universal.py
         'EN': 8,     # GPIO8 (Pin 24) - Motor 4 (Z) - matches motor_drive_universal.py
         'HALL': 25,  # GPIO25 (Pin 22) - Hall effect sensor pin - matches hall_sensor_test.py
         'HOME_DIRECTION': -1,
-        'HOME_SPEED': 0.0005,  # Faster homing speed too
-        'VERIFY_SPEED': 0.002  # Faster verification speed
+        'HOME_SPEED': 0.00025,  # Even faster homing speed
+        'VERIFY_SPEED': 0.001  # Faster verification speed
     },
     'Z_ROTATE': {
         'PULSES_PER_REV': 1600,  # Updated to match actual motor driver setting
