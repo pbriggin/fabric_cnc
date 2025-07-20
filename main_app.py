@@ -1260,9 +1260,8 @@ class FabricCNCApp:
                         absolute_angle += 360
                     angles.append(math.radians(absolute_angle))
             
-            # Start with first point
-            path.append((pts_t[0][0], pts_t[0][1], angles[0], 1))  # Z up
-            path.append((pts_t[0][0], pts_t[0][1], angles[0], 0))  # Z down
+            # Start with first point - only Z down to start cutting
+            path.append((pts_t[0][0], pts_t[0][1], angles[0], 0))  # Z down to start cutting
             
             for i in range(1, n):
                 x0, y0 = pts_t[i-1]
@@ -1280,9 +1279,9 @@ class FabricCNCApp:
                         angle_change_rad = 2 * math.pi - angle_change_rad
                     angle_change_deg = math.degrees(angle_change_rad)
                     
-                    # Z up if angle change > 2 degrees, Z down if cutting (small angle change)
+                    # Only add Z up/down if angle change > 2 degrees
                     if angle_change_deg > 2.0:
-                        path.append((x0, y0, current_angle, 1))  # Z up for large angle change
+                        path.append((x0, y0, prev_angle, 1))  # Z up for large angle change
                         path.append((x0, y0, current_angle, 0))  # Z down to continue cutting
                 
                 path.append((x1, y1, current_angle, 0))  # Move/cut
@@ -1301,17 +1300,17 @@ class FabricCNCApp:
                     angle_change_rad = 2 * math.pi - angle_change_rad
                 angle_change_deg = math.degrees(angle_change_rad)
                 
-                # Z up if angle change > 2 degrees, Z down if cutting (small angle change)
+                # Only add Z up/down if angle change > 2 degrees
                 if angle_change_deg > 2.0:
-                    path.append((x0, y0, final_angle, 1))  # Z up for large angle change
+                    path.append((x0, y0, prev_angle, 1))  # Z up for large angle change
                     path.append((x0, y0, final_angle, 0))  # Z down to continue cutting
                 
                 path.append((x1, y1, final_angle, 0))  # Move/cut back to start
                 
-                # End with first point (Z up) - this is the final position
-                path.append((pts_t[0][0], pts_t[0][1], angles[0], 1))  # Z up at end (point 0)
+                # End with Z up at the final position
+                path.append((pts_t[0][0], pts_t[0][1], angles[0], 1))  # Z up at end
             else:
-                # End with last point (Z up) for open shapes
+                # End with Z up at the last point for open shapes
                 path.append((pts_t[-1][0], pts_t[-1][1], angles[-1], 1))  # Z up at end
             toolpaths.append(path)
         self.toolpaths = toolpaths
