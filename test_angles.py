@@ -217,19 +217,22 @@ def test_angle_calculation():
                 x0, y0 = pts_clean[i-1]
                 x1, y1 = pts_clean[i]
                 current_angle = angles[i-1]  # Angle for current segment (from i-1 to i)
-                prev_angle = angles[i-2] if i > 1 else angles[-1]  # Angle for previous segment
                 
-                # Calculate angle change in degrees
-                angle_change_rad = abs(current_angle - prev_angle)
-                # Normalize to handle angle wrapping (e.g., 179° to -179°)
-                if angle_change_rad > math.pi:
-                    angle_change_rad = 2 * math.pi - angle_change_rad
-                angle_change_deg = math.degrees(angle_change_rad)
-                
-                # Z up if angle change > 2 degrees, Z down if cutting (small angle change)
-                if angle_change_deg > angle_change_threshold_deg:
-                    path.append((x0, y0, current_angle, 1))  # Z up for large angle change
-                    path.append((x0, y0, current_angle, 0))  # Z down to continue cutting
+                # Only check angle change for segments after the first one
+                if i > 1:
+                    prev_angle = angles[i-2]  # Angle for previous segment
+                    
+                    # Calculate angle change in degrees
+                    angle_change_rad = abs(current_angle - prev_angle)
+                    # Normalize to handle angle wrapping (e.g., 179° to -179°)
+                    if angle_change_rad > math.pi:
+                        angle_change_rad = 2 * math.pi - angle_change_rad
+                    angle_change_deg = math.degrees(angle_change_rad)
+                    
+                                        # Z up if angle change > 2 degrees, Z down if cutting (small angle change)
+                    if angle_change_deg > angle_change_threshold_deg:
+                        path.append((x0, y0, current_angle, 1))  # Z up for large angle change
+                        path.append((x0, y0, current_angle, 0))  # Z down to continue cutting
                 
                 path.append((x1, y1, current_angle, 0))  # Move/cut
             
@@ -242,7 +245,8 @@ def test_angle_calculation():
                 y_mm = y * INCH_TO_MM
                 angle_deg = math.degrees(angle)
                 z_pos = "UP" if z == 1 else "DOWN"
-                print(f"  Point {j+1}: X={x_mm:.2f}mm ({x:.3f}in), Y={y_mm:.2f}mm ({y:.3f}in), Angle={angle_deg:.1f}°, Z={z_pos}")
+                z_mm = 0.0 if z == 1 else -12.7  # Z UP = 0mm, Z DOWN = -12.7mm (0.5 inches down)
+                print(f"  Point {j+1}: X={x_mm:.2f}mm ({x:.3f}in), Y={y_mm:.2f}mm ({y:.3f}in), Angle={angle_deg:.1f}°, Z={z_pos} ({z_mm:.1f}mm)")
     
     except Exception as e:
         print(f"Error: {e}")
