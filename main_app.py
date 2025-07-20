@@ -820,7 +820,12 @@ class FabricCNCApp:
                     r = e.dxf.radius
                     logger.info(f"Processing CIRCLE: center=({center.x}, {center.y}), radius={r}")
                     # Generate points around the circle circumference for proper bounding box
-                    n = 32
+                    # Use more segments for smoother circles - scale with radius
+                    base_segments = 64
+                    radius_inches = r * self.dxf_unit_scale
+                    n = max(base_segments, int(base_segments * radius_inches))
+                    # Ensure we don't create too many segments
+                    n = min(n, 256)
                     for i in range(n):
                         angle = 2 * math.pi * i / n
                         x = center.x + r * math.cos(angle)
@@ -895,7 +900,12 @@ class FabricCNCApp:
             elif t == 'ARC' or t == 'CIRCLE':
                 center = e.dxf.center
                 r = e.dxf.radius
-                n = 32
+                # Use more segments for smoother circles - scale with radius
+                base_segments = 64
+                radius_inches = r * scale
+                n = max(base_segments, int(base_segments * radius_inches))
+                # Ensure we don't create too many segments
+                n = min(n, 256)
                 if t == 'ARC':
                     start = math.radians(e.dxf.start_angle)
                     end = math.radians(e.dxf.end_angle)
@@ -926,8 +936,10 @@ class FabricCNCApp:
         dx, dy = self.dxf_offset
         # --- Flatten all entities into segments ---
         segments = []
-        for e in self.dxf_entities:
+        logger.info(f"Flattening {len(self.dxf_entities)} entities into segments")
+        for i, e in enumerate(self.dxf_entities):
             t = e.dxftype()
+            logger.info(f"Processing entity {i+1}/{len(self.dxf_entities)}: {t}")
             if t == 'LINE':
                 x1, y1 = e.dxf.start.x, e.dxf.start.y
                 x2, y2 = e.dxf.end.x, e.dxf.end.y
@@ -963,11 +975,19 @@ class FabricCNCApp:
             elif t == 'CIRCLE':
                 center = e.dxf.center
                 r = e.dxf.radius
-                n = 32
+                # Use more segments for smoother circles - scale with radius
+                # For a 1-inch radius, use 64 segments. Scale up for larger circles
+                base_segments = 64
+                radius_inches = r * self.dxf_unit_scale
+                n = max(base_segments, int(base_segments * radius_inches))
+                # Ensure we don't create too many segments
+                n = min(n, 256)
+                logger.info(f"  Circle: radius={r:.3f}, radius_inches={radius_inches:.3f}, segments={n}")
                 pts = [(center.x + r * math.cos(2 * math.pi * i / n),
                         center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
                 for i in range(1, len(pts)):
                     segments.append((pts[i-1], pts[i]))
+                logger.info(f"  Added {len(pts)-1} circle segments")
         # --- Group segments into shapes by connectivity ---
         from collections import defaultdict, deque
         point_map = defaultdict(list)
@@ -979,6 +999,7 @@ class FabricCNCApp:
             point_map[p2r].append((idx, p1r))
         visited = set()
         shapes = []
+        logger.info(f"Processing {len(segments)} segments into shapes")
         for idx in seg_indices:
             if idx in visited:
                 continue
@@ -1016,6 +1037,8 @@ class FabricCNCApp:
                 if pt != deduped[-1]:
                     deduped.append(pt)
             shapes.append(deduped)
+            logger.info(f"Created shape {len(shapes)} with {len(deduped)} points")
+        logger.info(f"Total shapes created: {len(shapes)}")
         toolpaths = []
         for pts in shapes:
             if len(pts) < 2:
