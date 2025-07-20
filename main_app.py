@@ -1045,7 +1045,8 @@ class FabricCNCApp:
                 print(f"  Point {i}: ({x:.3f}, {y:.3f})")
             
             path = []
-            angle_thresh = math.radians(30)
+            # Angle change threshold for Z control (2 degrees)
+            angle_change_threshold_deg = 2.0
             n = len(pts_t)
             if n < 2:
                 continue
@@ -1086,27 +1087,20 @@ class FabricCNCApp:
             for i in range(1, n):
                 x0, y0 = pts_t[i-1]
                 x1, y1 = pts_t[i]
-                current_angle = angles[i]  # Angle for segment starting from this point
+                current_angle = angles[i-1]  # Angle for current segment (from i-1 to i)
+                prev_angle = angles[i-2] if i > 1 else angles[-1]  # Angle for previous segment
                 
-                is_corner = False
-                if 1 <= i < n-1:
-                    x_prev, y_prev = pts_t[i-2] if i-2 >= 0 else pts_t[i-1]
-                    x_next, y_next = pts_t[i+1] if i+1 < n else pts_t[i]
-                    v1 = (x0 - x_prev, y0 - y_prev)
-                    v2 = (x1 - x0, y1 - y0)
-                    len1 = math.hypot(*v1)
-                    len2 = math.hypot(*v2)
-                    if len1 > 1e-8 and len2 > 1e-8:
-                        dot = v1[0]*v2[0] + v1[1]*v2[1]
-                        cos_theta = dot / (len1 * len2)
-                        cos_theta = max(-1.0, min(1.0, cos_theta))
-                        theta = math.acos(cos_theta)
-                        if theta > angle_thresh:
-                            is_corner = True
+                # Calculate angle change in degrees
+                angle_change_rad = abs(current_angle - prev_angle)
+                # Normalize to handle angle wrapping (e.g., 179° to -179°)
+                if angle_change_rad > math.pi:
+                    angle_change_rad = 2 * math.pi - angle_change_rad
+                angle_change_deg = math.degrees(angle_change_rad)
                 
-                if is_corner:
-                    path.append((x0, y0, current_angle, 1))  # Z up at corner
-                    path.append((x0, y0, current_angle, 0))  # Z down at corner
+                # Z up if angle change > 2 degrees, Z down if cutting (small angle change)
+                if angle_change_deg > 2.0:
+                    path.append((x0, y0, current_angle, 1))  # Z up for large angle change
+                    path.append((x0, y0, current_angle, 0))  # Z down to continue cutting
                 
                 path.append((x1, y1, current_angle, 0))  # Move/cut
             
@@ -1115,23 +1109,19 @@ class FabricCNCApp:
                 x0, y0 = pts_t[-1]  # Last point
                 x1, y1 = pts_t[0]   # First point
                 final_angle = angles[-1]  # Angle for segment from last to first
+                prev_angle = angles[-2]   # Angle for previous segment (from second-to-last to last)
                 
-                # Check if this is a corner
-                if n >= 3:
-                    x_prev, y_prev = pts_t[-2]  # Second to last point
-                    x_next, y_next = pts_t[0]   # First point
-                    v1 = (x0 - x_prev, y0 - y_prev)
-                    v2 = (x1 - x0, y1 - y0)
-                    len1 = math.hypot(*v1)
-                    len2 = math.hypot(*v2)
-                    if len1 > 1e-8 and len2 > 1e-8:
-                        dot = v1[0]*v2[0] + v1[1]*v2[1]
-                        cos_theta = dot / (len1 * len2)
-                        cos_theta = max(-1.0, min(1.0, cos_theta))
-                        theta = math.acos(cos_theta)
-                        if theta > angle_thresh:
-                            path.append((x0, y0, final_angle, 1))  # Z up at corner
-                            path.append((x0, y0, final_angle, 0))  # Z down at corner
+                # Calculate angle change in degrees for final segment
+                angle_change_rad = abs(final_angle - prev_angle)
+                # Normalize to handle angle wrapping (e.g., 179° to -179°)
+                if angle_change_rad > math.pi:
+                    angle_change_rad = 2 * math.pi - angle_change_rad
+                angle_change_deg = math.degrees(angle_change_rad)
+                
+                # Z up if angle change > 2 degrees, Z down if cutting (small angle change)
+                if angle_change_deg > 2.0:
+                    path.append((x0, y0, final_angle, 1))  # Z up for large angle change
+                    path.append((x0, y0, final_angle, 0))  # Z down to continue cutting
                 
                 path.append((x1, y1, final_angle, 0))  # Move/cut back to start
                 
