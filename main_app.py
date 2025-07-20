@@ -1072,14 +1072,14 @@ class FabricCNCApp:
                         # Check if bounding boxes are very similar (within 0.1 inches)
                         if (abs(x1_min - x2_min) < 0.1 and abs(y1_min - y2_min) < 0.1 and
                             abs(x1_max - x2_max) < 0.1 and abs(y1_max - y2_max) < 0.1):
-                            logger.info(f"Found similar shapes {i+1} and {j+1}, merging...")
+                            logger.info(f"Found similar shapes {i+1} and {j+1}, keeping shape {i+1} and removing shape {j+1}")
                             # Use the first shape and mark the second as used
                             used_indices.add(j)
                             similar_found = True
                             break
                 
-                if not similar_found:
-                    merged_shapes.append(shape1)
+                # Always add the current shape to merged_shapes (either it's unique or it's the one we're keeping)
+                merged_shapes.append(shape1)
                 used_indices.add(i)
             
             shapes = merged_shapes
