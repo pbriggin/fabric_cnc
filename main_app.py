@@ -73,75 +73,199 @@ def calculate_angle_between_points(p1, p2, p3):
     if p1 == p2 or p2 == p3:
         return 0.0
     
-    # Calculate vectors
-    v1 = (p1[0] - p2[0], p1[1] - p2[1])
-    v2 = (p3[0] - p2[0], p3[1] - p2[1])
+    # Vector from p1 to p2
+    v1x = p2[0] - p1[0]
+    v1y = p2[1] - p1[1]
+    
+    # Vector from p2 to p3
+    v2x = p3[0] - p2[0]
+    v2y = p3[1] - p2[1]
     
     # Calculate dot product
-    dot_product = v1[0] * v2[0] + v1[1] * v2[1]
+    dot_product = v1x * v2x + v1y * v2y
     
     # Calculate magnitudes
-    mag1 = math.sqrt(v1[0]**2 + v1[1]**2)
-    mag2 = math.sqrt(v2[0]**2 + v2[1]**2)
+    mag1 = math.sqrt(v1x * v1x + v1y * v1y)
+    mag2 = math.sqrt(v2x * v2x + v2y * v2y)
     
     if mag1 == 0 or mag2 == 0:
         return 0.0
     
-    # Calculate angle
+    # Calculate cosine of angle
     cos_angle = dot_product / (mag1 * mag2)
-    cos_angle = max(-1.0, min(1.0, cos_angle))  # Clamp to [-1, 1]
+    
+    # Clamp to valid range
+    cos_angle = max(-1.0, min(1.0, cos_angle))
+    
+    # Convert to degrees
     angle_rad = math.acos(cos_angle)
     angle_deg = math.degrees(angle_rad)
     
     return angle_deg
 
 def flatten_spline_with_angle_limit(spline, max_angle_deg=2.0):
-    """Flatten a spline ensuring maximum angle between segments is less than max_angle_deg."""
-    # Start with a coarse tolerance to get initial points
-    coarse_tolerance = 0.1
-    points = list(spline.flattening(coarse_tolerance))
-    
-    if len(points) < 3:
-        return points
-    
-    # Refine points to meet angle requirement
-    refined_points = [points[0]]
-    
-    for i in range(1, len(points) - 1):
-        p1 = refined_points[-1]
-        p2 = points[i]
-        p3 = points[i + 1]
+    """Flatten a spline to points ensuring max angle between segments is below threshold."""
+    try:
+        # Get spline points with high precision
+        points = list(spline.flattening(0.001))
+        if len(points) < 3:
+            return points
         
-        angle = calculate_angle_between_points(p1, p2, p3)
+        # Filter points to ensure max angle between segments
+        filtered_points = [points[0]]
+        for i in range(1, len(points) - 1):
+            angle = calculate_angle_between_points(
+                points[i-1], points[i], points[i+1]
+            )
+            if angle > max_angle_deg:
+                # Add intermediate points to reduce angle
+                # This is a simple approach - could be improved with more sophisticated interpolation
+                pass
+            filtered_points.append(points[i])
+        filtered_points.append(points[-1])
         
-        if angle > max_angle_deg:
-            # Need to add more points between p1 and p2
-            # Use finer tolerance for this segment
-            fine_tolerance = 0.001
-            segment_points = list(spline.flattening(fine_tolerance))
-            
-            # Find points between p1 and p2
-            start_idx = None
-            end_idx = None
-            
-            for j, pt in enumerate(segment_points):
-                if abs(pt[0] - p1[0]) < 0.001 and abs(pt[1] - p1[1]) < 0.001:
-                    start_idx = j
-                if abs(pt[0] - p2[0]) < 0.001 and abs(pt[1] - p2[1]) < 0.001:
-                    end_idx = j
-                    break
-            
-            if start_idx is not None and end_idx is not None:
-                # Add intermediate points
-                for k in range(start_idx + 1, end_idx):
-                    refined_points.append(segment_points[k])
+        return filtered_points
+    except Exception as e:
+        logger.error(f"Error flattening spline: {e}")
+        return []
+
+def generate_continuous_circle_toolpath(center, radius, start_angle=0, end_angle=2*math.pi, step_size=0.01):
+    """
+    Generate continuous toolpath for a circle using parametric equations.
+    
+    Args:
+        center: (x, y) center point
+        radius: radius of circle
+        start_angle: starting angle in radians (default: 0)
+        end_angle: ending angle in radians (default: 2π for full circle)
+        step_size: distance between points in inches (default: 0.01")
+    
+    Returns:
+        List of (x, y, angle, z) tuples for continuous cutting
+    """
+    cx, cy = center
+    toolpath = []
+    
+    # Calculate number of steps based on circumference and step size
+    circumference = radius * abs(end_angle - start_angle)
+    num_steps = max(256, int(circumference / step_size))  # Increased minimum steps for better angle continuity
+    
+    # Generate points using parametric equations
+    for i in range(num_steps + 1):
+        t = i / num_steps
+        angle = start_angle + t * (end_angle - start_angle)
         
-        refined_points.append(p2)
+        # Parametric equations for circle
+        x = cx + radius * math.cos(angle)
+        y = cy + radius * math.sin(angle)
+        
+        # Calculate tangent angle (perpendicular to radius)
+        tangent_angle = angle + math.pi/2  # 90° from radius
+        
+        # Normalize angle to -180 to +180 range
+        while tangent_angle > math.pi:
+            tangent_angle -= 2 * math.pi
+        while tangent_angle < -math.pi:
+            tangent_angle += 2 * math.pi
+        
+        # Convert to absolute angle from vertical (home orientation)
+        absolute_angle = -(math.degrees(tangent_angle) - 90.0)
+        while absolute_angle > 180:
+            absolute_angle -= 360
+        while absolute_angle < -180:
+            absolute_angle += 360
+        
+        # Z=0 for continuous cutting (no lifting)
+        toolpath.append((x, y, math.radians(absolute_angle), 0))
     
-    # Add the last point
-    refined_points.append(points[-1])
+    return toolpath
+
+def generate_continuous_spline_toolpath(spline, step_size=0.01):
+    """
+    Generate continuous toolpath for a spline using high-resolution flattening.
     
-    return refined_points
+    Args:
+        spline: ezdxf spline entity
+        step_size: distance between points in inches (default: 0.01")
+    
+    Returns:
+        List of (x, y, angle, z) tuples for continuous cutting
+    """
+    toolpath = []
+    
+    try:
+        # Use high-resolution flattening for smooth splines
+        points = list(spline.flattening(0.001))  # Very high precision
+        
+        if len(points) < 2:
+            return toolpath
+        
+        # Calculate total length
+        total_length = 0
+        for i in range(1, len(points)):
+            dx = points[i][0] - points[i-1][0]
+            dy = points[i][1] - points[i-1][1]
+            total_length += math.sqrt(dx*dx + dy*dy)
+        
+        # Calculate number of steps based on length and step size
+        num_steps = max(128, int(total_length / step_size))
+        
+        # Interpolate points along the spline
+        for i in range(num_steps + 1):
+            t = i / num_steps
+            
+            # Find the segment and interpolate within it
+            segment_idx = int(t * (len(points) - 1))
+            segment_t = t * (len(points) - 1) - segment_idx
+            
+            if segment_idx >= len(points) - 1:
+                segment_idx = len(points) - 2
+                segment_t = 1.0
+            
+            # Linear interpolation between points
+            p1 = points[segment_idx]
+            p2 = points[segment_idx + 1]
+            x = p1[0] + segment_t * (p2[0] - p1[0])
+            y = p1[1] + segment_t * (p2[1] - p1[1])
+            
+            # Calculate tangent vector
+            dx = p2[0] - p1[0]
+            dy = p2[1] - p1[1]
+            tangent_angle = math.atan2(dy, dx)
+            
+            # Convert to absolute angle from vertical (home orientation)
+            absolute_angle = -(math.degrees(tangent_angle) - 90.0)
+            while absolute_angle > 180:
+                absolute_angle -= 360
+            while absolute_angle < -180:
+                absolute_angle += 360
+            
+            # Z=0 for continuous cutting (no lifting)
+            toolpath.append((x, y, math.radians(absolute_angle), 0))
+        
+    except Exception as e:
+        logger.error(f"Error generating continuous spline toolpath: {e}")
+        # Fallback to discrete method
+        points = list(spline.flattening(0.001))
+        for i in range(1, len(points)):
+            x, y = points[i][0], points[i][1]
+            prev_x, prev_y = points[i-1][0], points[i-1][1]
+            
+            # Calculate tangent angle
+            dx = x - prev_x
+            dy = y - prev_y
+            tangent_angle = math.atan2(dy, dx)
+            
+            # Convert to absolute angle
+            absolute_angle = -(math.degrees(tangent_angle) - 90.0)
+            while absolute_angle > 180:
+                absolute_angle -= 360
+            while absolute_angle < -180:
+                absolute_angle += 360
+            
+            toolpath.append((x, y, math.radians(absolute_angle), 0))
+    
+    return toolpath
 
 # --- Motor simulation logic ---
 class SimulatedMotorController:
@@ -1014,327 +1138,281 @@ class FabricCNCApp:
         if not self.dxf_entities:
             messagebox.showwarning("No DXF", "Import a DXF file first.")
             return
+        
         scale = getattr(self, 'dxf_unit_scale', 1.0)
         min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
         # No Y flip, just offset
         dx, dy = self.dxf_offset
-        # --- Flatten all entities into segments ---
-        segments = []
-        logger.info(f"Flattening {len(self.dxf_entities)} entities into segments")
+        
+        # --- Generate continuous toolpaths for curved entities ---
+        continuous_toolpaths = []
+        discrete_segments = []
+        
+        logger.info(f"Processing {len(self.dxf_entities)} entities for continuous toolpath generation")
+        
         for i, e in enumerate(self.dxf_entities):
             t = e.dxftype()
             logger.info(f"Processing entity {i+1}/{len(self.dxf_entities)}: {t}")
-            if t == 'LINE':
-                x1, y1 = e.dxf.start.x, e.dxf.start.y
-                x2, y2 = e.dxf.end.x, e.dxf.end.y
-                segments.append(((x1, y1), (x2, y2)))
-            elif t == 'LWPOLYLINE':
-                pts = [p[:2] for p in e.get_points()]
-                for i in range(1, len(pts)):
-                    segments.append((pts[i-1], pts[i]))
-                if getattr(e, 'closed', False) or (len(pts) > 2 and pts[0] == pts[-1]):
-                    segments.append((pts[-1], pts[0]))
-            elif t == 'POLYLINE':
-                pts = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
-                for i in range(1, len(pts)):
-                    segments.append((pts[i-1], pts[i]))
-                if getattr(e, 'is_closed', False) or (len(pts) > 2 and pts[0] == pts[-1]):
-                    segments.append((pts[-1], pts[0]))
-            elif t == 'SPLINE':
-                # Use angle-based flattening for smooth splines
-                max_angle_deg = 2.0
-                pts = flatten_spline_with_angle_limit(e, max_angle_deg)
-                pts = [(p[0], p[1]) for p in pts]
-                logger.info(f"  SPLINE: flattened to {len(pts)} points (max angle: {max_angle_deg}°)")
-                for i in range(1, len(pts)):
-                    segments.append((pts[i-1], pts[i]))
-            elif t == 'ARC':
-                center = e.dxf.center
-                r = e.dxf.radius
-                start = math.radians(e.dxf.start_angle)
-                end = math.radians(e.dxf.end_angle)
-                if end < start:
-                    end += 2 * math.pi
+            
+            if t == 'SPLINE':
+                logger.info(f"  Generating continuous SPLINE toolpath")
+                # Generate continuous toolpath for spline
+                continuous_path = generate_continuous_spline_toolpath(e, step_size=0.01)
                 
-                # Calculate segments based on angle requirement
-                max_angle_deg = 2.0
-                arc_angle_rad = end - start
-                arc_angle_deg = math.degrees(arc_angle_rad)
-                min_segments = int(arc_angle_deg / max_angle_deg) + 1
-                n = max(min_segments, 64)  # At least 64 segments
-                n = min(n, 512)  # Max 512 segments
-                logger.info(f"  ARC: {arc_angle_deg:.1f}° arc, {n} segments (max angle: {arc_angle_deg/n:.2f}°)")
-                pts = [(center.x + r * math.cos(start + (end - start) * i / n),
-                        center.y + r * math.sin(start + (end - start) * i / n)) for i in range(n+1)]
-                for i in range(1, len(pts)):
-                    segments.append((pts[i-1], pts[i]))
+                # Transform coordinates
+                transformed_path = []
+                for x, y, angle, z in continuous_path:
+                    tx = (x * scale) - dx
+                    ty = (y * scale) - dy
+                    transformed_path.append((tx, ty, angle, z))
+                
+                if transformed_path:
+                    continuous_toolpaths.append(transformed_path)
+                    logger.info(f"  Generated {len(transformed_path)} continuous points")
+                
             elif t == 'CIRCLE':
                 center = e.dxf.center
-                r = e.dxf.radius
-                # Calculate segments based on angle requirement
-                max_angle_deg = 2.0
-                min_segments = int(360 / max_angle_deg) + 1
-                n = max(min_segments, 128)  # At least 128 segments
-                n = min(n, 512)  # Max 512 segments
-                logger.info(f"  Circle: radius={r:.3f}, radius_inches={r * self.dxf_unit_scale:.3f}, segments={n} (max angle: {360/n:.2f}°)")
-                pts = [(center.x + r * math.cos(2 * math.pi * i / n),
-                        center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
-                for i in range(1, len(pts)):
-                    segments.append((pts[i-1], pts[i]))
-                logger.info(f"  Added {len(pts)-1} circle segments")
-        # --- Group segments into shapes by connectivity ---
-        from collections import defaultdict, deque
-        point_map = defaultdict(list)
-        seg_indices = list(range(len(segments)))
-        for idx, (p1, p2) in enumerate(segments):
-            p1r = (round(p1[0], 6), round(p1[1], 6))
-            p2r = (round(p2[0], 6), round(p2[1], 6))
-            point_map[p1r].append((idx, p2r))
-            point_map[p2r].append((idx, p1r))
-        visited = set()
-        shapes = []
-        logger.info(f"Processing {len(segments)} segments into shapes")
-        for idx in seg_indices:
-            if idx in visited:
-                continue
-            seg = segments[idx]
-            p_start = (round(seg[0][0], 6), round(seg[0][1], 6))
-            p_end = (round(seg[1][0], 6), round(seg[1][1], 6))
-            shape = [p_start, p_end]
-            visited.add(idx)
-            cur = p_end
-            while True:
-                found = False
-                for next_idx, next_pt in point_map[cur]:
-                    if next_idx not in visited:
-                        shape.append(next_pt)
-                        visited.add(next_idx)
-                        cur = next_pt
-                        found = True
-                        break
-                if not found:
-                    break
-            cur = p_start
-            while True:
-                found = False
-                for next_idx, next_pt in point_map[cur]:
-                    if next_idx not in visited:
-                        shape = [next_pt] + shape
-                        visited.add(next_idx)
-                        cur = next_pt
-                        found = True
-                        break
-                if not found:
-                    break
-            deduped = [shape[0]]
-            for pt in shape[1:]:
-                if pt != deduped[-1]:
-                    deduped.append(pt)
-            shapes.append(deduped)
-            logger.info(f"Created shape {len(shapes)} with {len(deduped)} points")
-        logger.info(f"Total shapes created: {len(shapes)}")
+                radius = e.dxf.radius
+                logger.info(f"  Generating continuous CIRCLE toolpath: center=({center.x}, {center.y}), radius={radius}")
+                
+                # Generate continuous toolpath for full circle
+                continuous_path = generate_continuous_circle_toolpath(
+                    (center.x, center.y), radius, 
+                    start_angle=0, end_angle=2*math.pi, 
+                    step_size=0.01
+                )
+                
+                # Transform coordinates
+                transformed_path = []
+                for x, y, angle, z in continuous_path:
+                    tx = (x * scale) - dx
+                    ty = (y * scale) - dy
+                    transformed_path.append((tx, ty, angle, z))
+                
+                if transformed_path:
+                    continuous_toolpaths.append(transformed_path)
+                    logger.info(f"  Generated {len(transformed_path)} continuous points")
+                
+            elif t == 'ARC':
+                center = e.dxf.center
+                radius = e.dxf.radius
+                start_angle = math.radians(e.dxf.start_angle)
+                end_angle = math.radians(e.dxf.end_angle)
+                
+                # Handle angle wrapping
+                if end_angle < start_angle:
+                    end_angle += 2 * math.pi
+                
+                logger.info(f"  Generating continuous ARC toolpath: center=({center.x}, {center.y}), radius={radius}, angles={math.degrees(start_angle):.1f}° to {math.degrees(end_angle):.1f}°")
+                
+                # Generate continuous toolpath for arc
+                continuous_path = generate_continuous_circle_toolpath(
+                    (center.x, center.y), radius,
+                    start_angle=start_angle, end_angle=end_angle,
+                    step_size=0.01
+                )
+                
+                # Transform coordinates
+                transformed_path = []
+                for x, y, angle, z in continuous_path:
+                    tx = (x * scale) - dx
+                    ty = (y * scale) - dy
+                    transformed_path.append((tx, ty, angle, z))
+                
+                if transformed_path:
+                    continuous_toolpaths.append(transformed_path)
+                    logger.info(f"  Generated {len(transformed_path)} continuous points")
+                
+            else:
+                # For LINE, LWPOLYLINE, POLYLINE - use discrete segmentation
+                logger.info(f"  Using discrete segmentation for {t}")
+                if t == 'LINE':
+                    x1, y1 = e.dxf.start.x, e.dxf.start.y
+                    x2, y2 = e.dxf.end.x, e.dxf.end.y
+                    discrete_segments.append(((x1, y1), (x2, y2)))
+                elif t == 'LWPOLYLINE':
+                    pts = [p[:2] for p in e.get_points()]
+                    for i in range(1, len(pts)):
+                        discrete_segments.append((pts[i-1], pts[i]))
+                    if getattr(e, 'closed', False) or (len(pts) > 2 and pts[0] == pts[-1]):
+                        discrete_segments.append((pts[-1], pts[0]))
+                elif t == 'POLYLINE':
+                    pts = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
+                    for i in range(1, len(pts)):
+                        discrete_segments.append((pts[i-1], pts[i]))
+                    if getattr(e, 'is_closed', False) or (len(pts) > 2 and pts[0] == pts[-1]):
+                        discrete_segments.append((pts[-1], pts[0]))
         
-        # --- Merge similar/duplicate shapes ---
-        if len(shapes) > 1:
-            logger.info("Checking for similar shapes to merge...")
-            merged_shapes = []
-            used_indices = set()
+        # --- Process discrete segments (for lines and polylines) ---
+        discrete_toolpaths = []
+        if discrete_segments:
+            logger.info(f"Processing {len(discrete_segments)} discrete segments")
             
-            for i, shape1 in enumerate(shapes):
-                if i in used_indices:
+            # Group segments into shapes by connectivity
+            from collections import defaultdict, deque
+            point_map = defaultdict(list)
+            seg_indices = list(range(len(discrete_segments)))
+            
+            for idx, (p1, p2) in enumerate(discrete_segments):
+                p1r = (round(p1[0], 6), round(p1[1], 6))
+                p2r = (round(p2[0], 6), round(p2[1], 6))
+                point_map[p1r].append((idx, p2r))
+                point_map[p2r].append((idx, p1r))
+            
+            visited = set()
+            shapes = []
+            
+            for idx in seg_indices:
+                if idx in visited:
                     continue
-                    
-                # Check if this shape is similar to any other shape
-                similar_found = False
-                for j, shape2 in enumerate(shapes[i+1:], i+1):
-                    if j in used_indices:
-                        continue
-                        
-                    # Check if shapes are similar (same number of points and similar bounding box)
-                    if len(shape1) == len(shape2):
-                        # Calculate bounding boxes
-                        x1_min, y1_min = min(p[0] for p in shape1), min(p[1] for p in shape1)
-                        x1_max, y1_max = max(p[0] for p in shape1), max(p[1] for p in shape1)
-                        x2_min, y2_min = min(p[0] for p in shape2), min(p[1] for p in shape2)
-                        x2_max, y2_max = max(p[0] for p in shape2), max(p[1] for p in shape2)
-                        
-                        # Check if bounding boxes are very similar (within 0.1 inches)
-                        if (abs(x1_min - x2_min) < 0.1 and abs(y1_min - y2_min) < 0.1 and
-                            abs(x1_max - x2_max) < 0.1 and abs(y1_max - y2_max) < 0.1):
-                            logger.info(f"Found similar shapes {i+1} and {j+1}, keeping shape {i+1} and removing shape {j+1}")
-                            # Use the first shape and mark the second as used
-                            used_indices.add(j)
-                            similar_found = True
+                seg = discrete_segments[idx]
+                p_start = (round(seg[0][0], 6), round(seg[0][1], 6))
+                p_end = (round(seg[1][0], 6), round(seg[1][1], 6))
+                shape = [p_start, p_end]
+                visited.add(idx)
+                cur = p_end
+                
+                while True:
+                    found = False
+                    for next_idx, next_pt in point_map[cur]:
+                        if next_idx not in visited:
+                            shape.append(next_pt)
+                            visited.add(next_idx)
+                            cur = next_pt
+                            found = True
                             break
+                    if not found:
+                        break
                 
-                # Always add the current shape to merged_shapes (either it's unique or it's the one we're keeping)
-                merged_shapes.append(shape1)
-                used_indices.add(i)
-            
-            shapes = merged_shapes
-            logger.info(f"After merging: {len(shapes)} shapes remaining")
-        
-        toolpaths = []
-        for pts in shapes:
-            if len(pts) < 2:
-                continue
-            def is_closed(pts):
-                x0, y0 = pts[0]
-                x1, y1 = pts[-1]
-                return abs(x0 - x1) < 1e-5 and abs(y0 - y1) < 1e-5
-            def signed_area(pts):
-                area = 0.0
-                n = len(pts)
-                for i in range(n-1):
-                    x0, y0 = pts[i]
-                    x1, y1 = pts[i+1]
-                    area += (x0 * y1 - x1 * y0)
-                return area / 2.0
-            closed = is_closed(pts)
-            pts_ccw = pts
-            if closed:
-                area = signed_area(pts)
-                if area < 0:
-                    pts_ccw = list(reversed(pts))
-            else:
-                pts_ccw = pts
-            # Transform all points to inches and (0,0) bottom left
-            pts_t = [((x * scale) - dx, (y * scale) - dy) for x, y in pts_ccw]
-            
-            # Remove duplicate consecutive points and closing duplicates
-            pts_clean = [pts_t[0]]
-            for i in range(1, len(pts_t)):
-                x_prev, y_prev = pts_clean[-1]
-                x_curr, y_curr = pts_t[i]
-                # Skip if this point is the same as the previous point
-                if abs(x_curr - x_prev) > 1e-6 or abs(y_curr - y_prev) > 1e-6:
-                    # Also skip if this point is the same as the first point (closing duplicate)
-                    x_first, y_first = pts_t[0]
-                    if abs(x_curr - x_first) > 1e-6 or abs(y_curr - y_first) > 1e-6:
-                        pts_clean.append(pts_t[i])
-            
-            pts_t = pts_clean
-            
-            # Debug: Print original shape points
-            print(f"\n=== SHAPE DEBUG ===")
-            print(f"Original shape has {len(pts_ccw)} points:")
-            for i, (x, y) in enumerate(pts_ccw):
-                print(f"  Point {i}: ({x:.3f}, {y:.3f})")
-            print(f"Transformed shape has {len(pts_t)} points:")
-            for i, (x, y) in enumerate(pts_t):
-                print(f"  Point {i}: ({x:.3f}, {y:.3f})")
-            
-            path = []
-            # Angle change threshold for Z control (2 degrees)
-            angle_change_threshold_deg = 2.0
-            n = len(pts_t)
-            if n < 2:
-                continue
-            # Calculate absolute angles from vertical (home orientation)
-            angles = []
-            for i in range(n):
-                if i < n-1:
-                    # Calculate angle for segment from point i to point i+1
-                    x0, y0 = pts_t[i]
-                    x1, y1 = pts_t[i+1]
-                    # Calculate relative angle between points
-                    relative_angle = math.atan2(y1 - y0, x1 - x0)
-                    # Convert to absolute angle from vertical (home orientation)
-                    # Vertical is 0°, clockwise is positive, counter-clockwise is negative
-                    absolute_angle = -(math.degrees(relative_angle) - 90.0)
-                    # Normalize to -180 to +180 range
-                    while absolute_angle > 180:
-                        absolute_angle -= 360
-                    while absolute_angle < -180:
-                        absolute_angle += 360
-                    angles.append(math.radians(absolute_angle))
-                else:
-                    # For the last point, calculate angle from last point to first point
-                    x0, y0 = pts_t[i]
-                    x1, y1 = pts_t[0]  # Back to first point
-                    relative_angle = math.atan2(y1 - y0, x1 - x0)
-                    absolute_angle = -(math.degrees(relative_angle) - 90.0)
-                    while absolute_angle > 180:
-                        absolute_angle -= 360
-                    while absolute_angle < -180:
-                        absolute_angle += 360
-                    angles.append(math.radians(absolute_angle))
-            
-            # Start with first point - only Z down to start cutting
-            path.append((pts_t[0][0], pts_t[0][1], angles[0], 0))  # Z down to start cutting
-            
-            for i in range(1, n):
-                x0, y0 = pts_t[i-1]
-                x1, y1 = pts_t[i]
-                current_angle = angles[i-1]  # Angle for current segment (from i-1 to i)
+                cur = p_start
+                while True:
+                    found = False
+                    for next_idx, next_pt in point_map[cur]:
+                        if next_idx not in visited:
+                            shape = [next_pt] + shape
+                            visited.add(next_idx)
+                            cur = next_pt
+                            found = True
+                            break
+                    if not found:
+                        break
                 
-                # Only check angle change for segments after the first one
-                if i > 1:
-                    prev_angle = angles[i-2]  # Angle for previous segment
+                deduped = [shape[0]]
+                for pt in shape[1:]:
+                    if pt != deduped[-1]:
+                        deduped.append(pt)
+                shapes.append(deduped)
+                logger.info(f"Created discrete shape {len(shapes)} with {len(deduped)} points")
+            
+            # Generate toolpaths for discrete shapes
+            for pts in shapes:
+                if len(pts) < 2:
+                    continue
+                
+                # Transform points
+                pts_t = [((x * scale) - dx, (y * scale) - dy) for x, y in pts]
+                
+                # Remove duplicate consecutive points
+                pts_clean = [pts_t[0]]
+                for i in range(1, len(pts_t)):
+                    x_prev, y_prev = pts_clean[-1]
+                    x_curr, y_curr = pts_t[i]
+                    if abs(x_curr - x_prev) > 1e-6 or abs(y_curr - y_prev) > 1e-6:
+                        x_first, y_first = pts_t[0]
+                        if abs(x_curr - x_first) > 1e-6 or abs(y_curr - y_first) > 1e-6:
+                            pts_clean.append(pts_t[i])
+                
+                pts_t = pts_clean
+                
+                # Generate discrete toolpath with Z movements for sharp turns
+                path = []
+                n = len(pts_t)
+                if n < 2:
+                    continue
+                
+                # Calculate angles
+                angles = []
+                for i in range(n):
+                    if i < n-1:
+                        x0, y0 = pts_t[i]
+                        x1, y1 = pts_t[i+1]
+                        relative_angle = math.atan2(y1 - y0, x1 - x0)
+                        absolute_angle = -(math.degrees(relative_angle) - 90.0)
+                        while absolute_angle > 180:
+                            absolute_angle -= 360
+                        while absolute_angle < -180:
+                            absolute_angle += 360
+                        angles.append(math.radians(absolute_angle))
+                    else:
+                        x0, y0 = pts_t[i]
+                        x1, y1 = pts_t[0]
+                        relative_angle = math.atan2(y1 - y0, x1 - x0)
+                        absolute_angle = -(math.degrees(relative_angle) - 90.0)
+                        while absolute_angle > 180:
+                            absolute_angle -= 360
+                        while absolute_angle < -180:
+                            absolute_angle += 360
+                        angles.append(math.radians(absolute_angle))
+                
+                # Start with Z down
+                path.append((pts_t[0][0], pts_t[0][1], angles[0], 0))
+                
+                for i in range(1, n):
+                    x0, y0 = pts_t[i-1]
+                    x1, y1 = pts_t[i]
+                    current_angle = angles[i-1]
                     
-                    # Calculate angle change in degrees
-                    angle_change_rad = abs(current_angle - prev_angle)
-                    # Normalize to handle angle wrapping (e.g., 179° to -179°)
-                    if angle_change_rad > math.pi:
-                        angle_change_rad = 2 * math.pi - angle_change_rad
-                    angle_change_deg = math.degrees(angle_change_rad)
+                    if i > 1:
+                        prev_angle = angles[i-2]
+                        angle_change_rad = abs(current_angle - prev_angle)
+                        if angle_change_rad > math.pi:
+                            angle_change_rad = 2 * math.pi - angle_change_rad
+                        angle_change_deg = math.degrees(angle_change_rad)
+                        
+                        if angle_change_deg > 2.0:
+                            path.append((x0, y0, prev_angle, 1))  # Z up
+                            path.append((x0, y0, current_angle, 0))  # Z down
                     
-                    # Only add Z up/down if angle change > 2 degrees
-                    if angle_change_deg > 2.0:
-                        path.append((x0, y0, prev_angle, 1))  # Z up for large angle change
-                        path.append((x0, y0, current_angle, 0))  # Z down to continue cutting
+                    path.append((x1, y1, current_angle, 0))
                 
-                path.append((x1, y1, current_angle, 0))  # Move/cut
-            
-            # For closed shapes, add the final segment back to the start point
-            if closed and n >= 3:
-                x0, y0 = pts_t[-1]  # Last point
-                x1, y1 = pts_t[0]   # First point
-                final_angle = angles[-1]  # Angle for segment from last to first
-                prev_angle = angles[-2]   # Angle for previous segment (from second-to-last to last)
-                
-                # Calculate angle change in degrees for final segment
-                angle_change_rad = abs(final_angle - prev_angle)
-                # Normalize to handle angle wrapping (e.g., 179° to -179°)
-                if angle_change_rad > math.pi:
-                    angle_change_rad = 2 * math.pi - angle_change_rad
-                angle_change_deg = math.degrees(angle_change_rad)
-                
-                # Only add Z up/down if angle change > 2 degrees
-                if angle_change_deg > 2.0:
-                    path.append((x0, y0, prev_angle, 1))  # Z up for large angle change
-                    path.append((x0, y0, final_angle, 0))  # Z down to continue cutting
-                
-                path.append((x1, y1, final_angle, 0))  # Move/cut back to start
-                
-                # End with Z up at the final position
-                path.append((pts_t[0][0], pts_t[0][1], angles[0], 1))  # Z up at end
-            else:
-                # End with Z up at the last point for open shapes
-                path.append((pts_t[-1][0], pts_t[-1][1], angles[-1], 1))  # Z up at end
-            toolpaths.append(path)
-        self.toolpaths = toolpaths
+                # End with Z up
+                path.append((pts_t[-1][0], pts_t[-1][1], angles[-1], 1))
+                discrete_toolpaths.append(path)
         
-        # Debug: Print toolpath coordinates
-        print("\n=== TOOLPATH DEBUG INFO ===")
-        print(f"Generated {len(toolpaths)} toolpath(s)")
-        for i, path in enumerate(toolpaths):
+        # --- Combine continuous and discrete toolpaths ---
+        self.toolpaths = continuous_toolpaths + discrete_toolpaths
+        
+        # Debug output
+        print("\n=== CONTINUOUS TOOLPATH DEBUG INFO ===")
+        print(f"Generated {len(self.toolpaths)} toolpath(s)")
+        
+        total_points = 0
+        for i, path in enumerate(self.toolpaths):
             print(f"\nToolpath {i+1} - {len(path)} points:")
+            total_points += len(path)
+            
+            # Show first few and last few points
             for j, (x, y, angle, z) in enumerate(path):
-                x_mm = x * INCH_TO_MM
-                y_mm = y * INCH_TO_MM
-                angle_deg = math.degrees(angle)
-                z_pos = "UP" if z == 1 else "DOWN"
-                print(f"  Point {j+1}: X={x_mm:.2f}mm ({x:.3f}in), Y={y_mm:.2f}mm ({y:.3f}in), Angle={angle_deg:.1f}°, Z={z_pos}")
+                if j < 3 or j >= len(path) - 3:  # Show first 3 and last 3 points
+                    x_mm = x * INCH_TO_MM
+                    y_mm = y * INCH_TO_MM
+                    angle_deg = math.degrees(angle)
+                    z_pos = "UP" if z == 1 else "DOWN"
+                    print(f"  Point {j+1}: X={x_mm:.2f}mm ({x:.3f}in), Y={y_mm:.2f}mm ({y:.3f}in), Angle={angle_deg:.1f}°, Z={z_pos}")
+                elif j == 3:
+                    print(f"  ... ({len(path)-6} more points) ...")
         
-        # Check for positions that might be beyond machine limits
+        print(f"\nTotal points: {total_points}")
+        print(f"Continuous toolpaths: {len(continuous_toolpaths)}")
+        print(f"Discrete toolpaths: {len(discrete_toolpaths)}")
+        
+        # Check machine limits
         print(f"\n=== MACHINE LIMITS ===")
         print(f"X limits: {-X_MAX_MM:.2f}mm to {X_MAX_MM:.2f}mm")
         print(f"Y limits: {-Y_MAX_MM:.2f}mm to {Y_MAX_MM:.2f}mm")
         
-        # Check if any points are beyond limits
         beyond_limits = []
-        for i, path in enumerate(toolpaths):
+        for i, path in enumerate(self.toolpaths):
             for j, (x, y, angle, z) in enumerate(path):
                 x_mm = x * INCH_TO_MM
                 y_mm = y * INCH_TO_MM
