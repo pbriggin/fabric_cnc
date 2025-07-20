@@ -215,8 +215,8 @@ MOTOR_CONFIG = {
         'EN': 9,     # GPIO9 (Pin 21) - Motor 3 (X)
         'HALL': 16,  # GPIO16 (Pin 36) - Hall effect sensor pin
         'HOME_DIRECTION': 1,  # Positive direction for homing
-        'HOME_SPEED': 0.00025,  # Faster speed for homing (0.25ms between pulses)
-        'VERIFY_SPEED': 0.001  # Faster verification speed (1ms between pulses)
+        'HOME_SPEED': 0.0005,  # Original homing speed (0.5ms between pulses)
+        'VERIFY_SPEED': 0.002  # Original verification speed (2ms between pulses)
     },
     'Y1': {
         'PULSES_PER_REV': 800,
@@ -227,8 +227,8 @@ MOTOR_CONFIG = {
         'EN': 17,    # GPIO17 (Pin 11) - Motor 2 (Left Y)
         'HALL': 1,   # GPIO1 (Pin 28) - Hall effect sensor pin (Left Y)
         'HOME_DIRECTION': 1,
-        'HOME_SPEED': 0.00025,  # Faster homing speed
-        'VERIFY_SPEED': 0.001  # Faster verification speed
+        'HOME_SPEED': 0.0005,  # Original homing speed
+        'VERIFY_SPEED': 0.002  # Original verification speed
     },
     'Y2': {
         'PULSES_PER_REV': 800,
@@ -239,8 +239,8 @@ MOTOR_CONFIG = {
         'EN': 10,    # GPIO10 (Pin 19) - Motor 1 (Right Y) - Changed from GPIO4
         'HALL': 20,  # GPIO20 (Pin 38) - Hall effect sensor pin (Right Y)
         'HOME_DIRECTION': 1,
-        'HOME_SPEED': 0.00025,  # Faster homing speed
-        'VERIFY_SPEED': 0.001  # Faster verification speed
+        'HOME_SPEED': 0.0005,  # Original homing speed
+        'VERIFY_SPEED': 0.002  # Original verification speed
     },
     'Z_LIFT': {
         'PULSES_PER_REV': 800,
@@ -251,8 +251,8 @@ MOTOR_CONFIG = {
         'EN': 8,     # GPIO8 (Pin 24) - Motor 4 (Z) - matches motor_drive_universal.py
         'HALL': 25,  # GPIO25 (Pin 22) - Hall effect sensor pin - matches hall_sensor_test.py
         'HOME_DIRECTION': -1,
-        'HOME_SPEED': 0.00025,  # Even faster homing speed
-        'VERIFY_SPEED': 0.001  # Faster verification speed
+        'HOME_SPEED': 0.001,  # Original homing speed
+        'VERIFY_SPEED': 0.004  # Original verification speed
     },
     'Z_ROTATE': {
         'PULSES_PER_REV': 1600,  # Updated to match actual motor driver setting
@@ -263,8 +263,8 @@ MOTOR_CONFIG = {
         'EN': 13,    # GPIO13 (Pin 33) - Motor 5 (Rotation) - matches motor_drive_universal.py
         'HALL': 12,  # GPIO12 (Pin 32) - Hall effect sensor pin - matches hall_sensor_test.py
         'HOME_DIRECTION': -1,
-        'HOME_SPEED': 0.00025,  # Faster homing speed
-        'VERIFY_SPEED': 0.001  # Faster verification speed
+        'HOME_SPEED': 0.001,  # Original homing speed
+        'VERIFY_SPEED': 0.004  # Original verification speed
     }
 }
 
