@@ -47,6 +47,17 @@ def test_dxf_loading(filename):
                     all_x.append(x)
                     all_y.append(y)
                 logger.info(f"  Generated {n} points around circle circumference")
+            elif t == 'SPLINE':
+                logger.info(f"  SPLINE: flattening to points")
+                # Flatten spline to points for bounding box calculation
+                pts = list(e.flattening(0.1))
+                for pt in pts:
+                    if len(pt) >= 2:
+                        all_x.append(pt[0])
+                        all_y.append(pt[1])
+                logger.info(f"  Generated {len(pts)} points from spline")
+            elif t == 'HATCH':
+                logger.info(f"  HATCH: skipping (no geometry for bounding box)")
         
         logger.info(f"Collected {len(all_x)} points for bounding box calculation")
         

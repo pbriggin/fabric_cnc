@@ -827,6 +827,15 @@ class FabricCNCApp:
                         y = center.y + r * math.sin(angle)
                         all_x.append(x * self.dxf_unit_scale)
                         all_y.append(y * self.dxf_unit_scale)
+                elif t == 'SPLINE':
+                    logger.info(f"Processing SPLINE")
+                    # Flatten spline to points for bounding box calculation
+                    pts = list(e.flattening(0.1))
+                    for pt in pts:
+                        if len(pt) >= 2:
+                            all_x.append(pt[0] * self.dxf_unit_scale)
+                            all_y.append(pt[1] * self.dxf_unit_scale)
+                    logger.info(f"  Generated {len(pts)} points from spline")
             logger.info(f"Collected {len(all_x)} points for bounding box calculation")
             if not all_x or not all_y:
                 raise ValueError("No valid points found in DXF file for bounding box calculation")
