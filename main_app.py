@@ -835,12 +835,13 @@ class FabricCNCApp:
                 elif t == 'SPLINE':
                     logger.info(f"Processing SPLINE")
                     # Flatten spline to points for bounding box calculation
-                    pts = list(e.flattening(0.1))
+                    tolerance = 0.01  # Much finer than 0.1
+                    pts = list(e.flattening(tolerance))
                     for pt in pts:
                         if len(pt) >= 2:
                             all_x.append(pt[0] * self.dxf_unit_scale)
                             all_y.append(pt[1] * self.dxf_unit_scale)
-                    logger.info(f"  Generated {len(pts)} points from spline")
+                    logger.info(f"  Generated {len(pts)} points from spline with tolerance {tolerance}")
             logger.info(f"Collected {len(all_x)} points for bounding box calculation")
             if not all_x or not all_y:
                 raise ValueError("No valid points found in DXF file for bounding box calculation")
@@ -894,7 +895,8 @@ class FabricCNCApp:
                 xs = [p[0] for p in pts]
                 ys = [p[1] for p in pts]
             elif t == 'SPLINE':
-                pts = list(e.flattening(0.1))
+                tolerance = 0.01  # Much finer than 0.1
+                pts = list(e.flattening(tolerance))
                 xs = [p[0] for p in pts]
                 ys = [p[1] for p in pts]
             elif t == 'ARC' or t == 'CIRCLE':
@@ -957,7 +959,10 @@ class FabricCNCApp:
                 if getattr(e, 'is_closed', False) or (len(pts) > 2 and pts[0] == pts[-1]):
                     segments.append((pts[-1], pts[0]))
             elif t == 'SPLINE':
-                pts = [(p[0], p[1]) for p in e.flattening(0.1)]
+                # Use finer tolerance for smoother splines - especially for circles
+                tolerance = 0.01  # Much finer than 0.1
+                pts = [(p[0], p[1]) for p in e.flattening(tolerance)]
+                logger.info(f"  SPLINE: flattened to {len(pts)} points with tolerance {tolerance}")
                 for i in range(1, len(pts)):
                     segments.append((pts[i-1], pts[i]))
             elif t == 'ARC':
@@ -1039,6 +1044,47 @@ class FabricCNCApp:
             shapes.append(deduped)
             logger.info(f"Created shape {len(shapes)} with {len(deduped)} points")
         logger.info(f"Total shapes created: {len(shapes)}")
+        
+        # --- Merge similar/duplicate shapes ---
+        if len(shapes) > 1:
+            logger.info("Checking for similar shapes to merge...")
+            merged_shapes = []
+            used_indices = set()
+            
+            for i, shape1 in enumerate(shapes):
+                if i in used_indices:
+                    continue
+                    
+                # Check if this shape is similar to any other shape
+                similar_found = False
+                for j, shape2 in enumerate(shapes[i+1:], i+1):
+                    if j in used_indices:
+                        continue
+                        
+                    # Check if shapes are similar (same number of points and similar bounding box)
+                    if len(shape1) == len(shape2):
+                        # Calculate bounding boxes
+                        x1_min, y1_min = min(p[0] for p in shape1), min(p[1] for p in shape1)
+                        x1_max, y1_max = max(p[0] for p in shape1), max(p[1] for p in shape1)
+                        x2_min, y2_min = min(p[0] for p in shape2), min(p[1] for p in shape2)
+                        x2_max, y2_max = max(p[0] for p in shape2), max(p[1] for p in shape2)
+                        
+                        # Check if bounding boxes are very similar (within 0.1 inches)
+                        if (abs(x1_min - x2_min) < 0.1 and abs(y1_min - y2_min) < 0.1 and
+                            abs(x1_max - x2_max) < 0.1 and abs(y1_max - y2_max) < 0.1):
+                            logger.info(f"Found similar shapes {i+1} and {j+1}, merging...")
+                            # Use the first shape and mark the second as used
+                            used_indices.add(j)
+                            similar_found = True
+                            break
+                
+                if not similar_found:
+                    merged_shapes.append(shape1)
+                used_indices.add(i)
+            
+            shapes = merged_shapes
+            logger.info(f"After merging: {len(shapes)} shapes remaining")
+        
         toolpaths = []
         for pts in shapes:
             if len(pts) < 2:
