@@ -803,8 +803,10 @@ class FabricCNCApp:
                 self.dxf_unit_scale = 1.0  # inches or unitless
             # Normalize all points to inches and (0,0) bottom left
             all_x, all_y = [], []
+            logger.info(f"Processing {len(entities)} entities for bounding box calculation")
             for e in entities:
                 t = e.dxftype()
+                logger.info(f"Processing entity type: {t}")
                 if t == 'LINE':
                     all_x.extend([e.dxf.start.x * self.dxf_unit_scale, e.dxf.end.x * self.dxf_unit_scale])
                     all_y.extend([e.dxf.start.y * self.dxf_unit_scale, e.dxf.end.y * self.dxf_unit_scale])
@@ -816,6 +818,7 @@ class FabricCNCApp:
                 elif t == 'CIRCLE':
                     center = e.dxf.center
                     r = e.dxf.radius
+                    logger.info(f"Processing CIRCLE: center=({center.x}, {center.y}), radius={r}")
                     # Generate points around the circle circumference for proper bounding box
                     n = 32
                     for i in range(n):
@@ -824,6 +827,9 @@ class FabricCNCApp:
                         y = center.y + r * math.sin(angle)
                         all_x.append(x * self.dxf_unit_scale)
                         all_y.append(y * self.dxf_unit_scale)
+            logger.info(f"Collected {len(all_x)} points for bounding box calculation")
+            if not all_x or not all_y:
+                raise ValueError("No valid points found in DXF file for bounding box calculation")
             min_x = min(all_x)
             min_y = min(all_y)
             max_x = max(all_x)
