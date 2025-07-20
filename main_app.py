@@ -815,8 +815,15 @@ class FabricCNCApp:
                         all_y.append(y * self.dxf_unit_scale)
                 elif t == 'CIRCLE':
                     center = e.dxf.center
-                    all_x.append(center.x * self.dxf_unit_scale)
-                    all_y.append(center.y * self.dxf_unit_scale)
+                    r = e.dxf.radius
+                    # Generate points around the circle circumference for proper bounding box
+                    n = 32
+                    for i in range(n):
+                        angle = 2 * math.pi * i / n
+                        x = center.x + r * math.cos(angle)
+                        y = center.y + r * math.sin(angle)
+                        all_x.append(x * self.dxf_unit_scale)
+                        all_y.append(y * self.dxf_unit_scale)
             min_x = min(all_x)
             min_y = min(all_y)
             max_x = max(all_x)
