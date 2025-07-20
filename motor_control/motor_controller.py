@@ -206,6 +206,21 @@ class MotorController:
             self._sensor_last_state[motor] = False
             self._sensor_readings[motor].clear()
         logger.info("Sensor debounce states reset")
+    
+    def get_sensor_states(self):
+        """Get current sensor states for debugging."""
+        states = {}
+        for motor in ['X', 'Y1', 'Y2', 'Z', 'ROT']:
+            raw_state = GPIO.input(self.motors[motor]['HALL']) == GPIO.LOW
+            debounced_state = self._check_sensor(motor)
+            states[motor] = {
+                'raw': raw_state,
+                'debounced': debounced_state,
+                'last_trigger_time': self._sensor_last_trigger_time[motor],
+                'last_state': self._sensor_last_state[motor],
+                'readings': self._sensor_readings[motor][-3:] if self._sensor_readings[motor] else []
+            }
+        return states
 
     def reset_sensor_debounce_state_for_axis(self, axis):
         """Reset debounce state for a specific axis."""
@@ -978,6 +993,8 @@ class MotorController:
         """Stop any ongoing movement immediately."""
         self._stop_requested = True
         logger.info("Stop movement requested")
+    
+
 
     def cleanup(self):
         """Clean up resources and disable all motors."""

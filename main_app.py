@@ -238,6 +238,11 @@ class RealMotorController:
     def get_position(self):
         with self.lock:
             return dict(self.position)
+    
+    def get_sensor_states(self):
+        """Get current sensor states for debugging."""
+        with self.lock:
+            return self.motor_controller.get_sensor_states()
 
     def estop(self):
         try:
@@ -279,10 +284,11 @@ class RealMotorController:
                 delta_z = z - self.position['Z']
             if rot is not None:
                 delta_rot = rot - self.position['ROT']
+                logger.info(f"Rotation calculation: current={self.position['ROT']:.1f}°, target={rot:.1f}°, delta={delta_rot:.1f}°")
             
             # Use coordinated movement for X and Y, individual for Z and ROT
             if abs(delta_x) > 1e-6 or abs(delta_y) > 1e-6:
-                logger.info(f"Calling coordinated movement: delta_x={delta_x:.2f}mm, delta_y={delta_y:.2f}mm")
+                logger.info(f"Calling coordinated movement: delta_x={delta_x:.2f}mm, delta_y={delta_y:.2f}mm, delta_rot={delta_rot:.2f}°")
                 self.motor_controller.move_coordinated(
                     x_distance_mm=delta_x,
                     y_distance_mm=delta_y,
@@ -311,10 +317,17 @@ class FabricCNCApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Fabric CNC (Material Design)")
-        self.root.geometry("1200x800")
+        # Force fullscreen on startup - try multiple approaches
+        try:
+            self.root.attributes('-fullscreen', True)
+        except:
+            try:
+                self.root.state('zoomed')
+            except:
+                pass
         self.root.configure(bg=BACKGROUND)
-        self.jog_speed = 10.0  # mm
-        self.jog_speed_var = ctk.DoubleVar(value=self.jog_speed / INCH_TO_MM)
+        self.jog_speed = 1.0 * INCH_TO_MM  # Default to 1 inch
+        self.jog_speed_var = ctk.DoubleVar(value=1.0)  # Default to 1 inch
         self._arrow_key_state = {}
         self._arrow_key_after_ids = {}
         self._current_toolpath_idx = [0, 0]
@@ -324,16 +337,29 @@ class FabricCNCApp:
         self.motor_ctrl = SimulatedMotorController() if SIMULATION_MODE else RealMotorController()
         self._jog_in_progress = {'X': False, 'Y': False, 'Z': False, 'ROT': False}
         self._arrow_key_repeat_delay = 100
+        # Initialize DXF-related attributes
+        self.dxf_doc = None
+        self.dxf_entities = []
+        self.toolpath = []
         self._setup_ui()
+        self._bind_arrow_keys()
         self._update_position_display()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        # Force fullscreen after UI setup
+        self.root.after(100, lambda: self.root.attributes('-fullscreen', True))
 
     def _setup_ui(self):
         # App Bar
         self.app_bar = ctk.CTkFrame(self.root, fg_color=PRIMARY_COLOR, corner_radius=0, height=56)
         self.app_bar.pack(fill="x", side="top")
-        self.title = ctk.CTkLabel(self.app_bar, text="Fabric CNC", text_color=ON_PRIMARY, font=("Roboto", 22, "bold"))
+        self.title = ctk.CTkLabel(self.app_bar, text="Fabric CNC", text_color=ON_PRIMARY, font=("Arial", 16, "bold"))
         self.title.pack(side="left", padx=24, pady=12)
+        
+        # Close button
+        close_button = ctk.CTkButton(self.app_bar, text="✕", width=40, height=30, 
+                                   command=self._close_app, fg_color="transparent", 
+                                   text_color=ON_PRIMARY, hover_color="#ff5a5f", corner_radius=6)
+        close_button.pack(side="right", padx=24, pady=12)
 
         # Main layout
         self.main_frame = ctk.CTkFrame(self.root, fg_color=BACKGROUND)
@@ -344,64 +370,89 @@ class FabricCNCApp:
         # Left Toolbar
         self.left_toolbar = ctk.CTkFrame(self.main_frame, fg_color=SURFACE, corner_radius=12, width=180)
         self.left_toolbar.grid(row=0, column=0, sticky="nsw", padx=(24, 12), pady=24)
-        ctk.CTkLabel(self.left_toolbar, text="File & DXF", font=("Roboto", 14, "bold"), text_color=PRIMARY_COLOR).pack(pady=(20, 10))
-        ctk.CTkButton(self.left_toolbar, text="Import DXF", command=self._import_dxf, fg_color=PRIMARY_COLOR, text_color=ON_PRIMARY, hover_color=PRIMARY_VARIANT, corner_radius=8).pack(fill="x", padx=16, pady=6)
-        ctk.CTkButton(self.left_toolbar, text="Generate Toolpath", command=self._generate_toolpath, fg_color=SECONDARY_COLOR, text_color=ON_SURFACE, hover_color=PRIMARY_COLOR, corner_radius=8).pack(fill="x", padx=16, pady=6)
-        ctk.CTkButton(self.left_toolbar, text="Preview Toolpath", command=self._preview_toolpath, fg_color=SURFACE, text_color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR, corner_radius=8).pack(fill="x", padx=16, pady=6)
-        ctk.CTkButton(self.left_toolbar, text="Run Toolpath", command=self._run_toolpath, fg_color=PRIMARY_COLOR, text_color=ON_PRIMARY, hover_color=PRIMARY_VARIANT, corner_radius=8).pack(fill="x", padx=16, pady=6)
-        ctk.CTkButton(self.left_toolbar, text="E-Stop", command=self._estop, fg_color=ERROR_COLOR, text_color=ON_PRIMARY, hover_color="#ff5a5f", corner_radius=8).pack(fill="x", padx=16, pady=(24, 6))
+        # File & DXF section
+        file_section = ctk.CTkFrame(self.left_toolbar, fg_color="#d0d0d0", corner_radius=8)
+        file_section.pack(fill="x", padx=16, pady=(20, 10))
+        ctk.CTkLabel(file_section, text="File & DXF", font=("Arial", 16, "bold"), text_color=PRIMARY_COLOR).pack(pady=(10, 10))
+        ctk.CTkButton(file_section, text="Import DXF", command=self._import_dxf, fg_color=PRIMARY_COLOR, text_color=ON_PRIMARY, hover_color=PRIMARY_VARIANT, corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
+        ctk.CTkButton(file_section, text="Generate Toolpath", command=self._generate_toolpath, fg_color=SECONDARY_COLOR, text_color=ON_SURFACE, hover_color=PRIMARY_COLOR, corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
+        ctk.CTkButton(file_section, text="Preview Toolpath", command=self._preview_toolpath, fg_color=SURFACE, text_color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR, corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
+        ctk.CTkButton(file_section, text="Run Toolpath", command=self._run_toolpath, fg_color=PRIMARY_COLOR, text_color=ON_PRIMARY, hover_color=PRIMARY_VARIANT, corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
+        ctk.CTkButton(file_section, text="E-Stop", command=self._estop, fg_color=ERROR_COLOR, text_color=ON_PRIMARY, hover_color="#ff5a5f", corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=(6, 10))
+        
+        # Status section
+        status_section = ctk.CTkFrame(self.left_toolbar, fg_color="#d0d0d0", corner_radius=8)
+        status_section.pack(fill="x", padx=16, pady=10)
+        ctk.CTkLabel(status_section, text="Status:", font=("Arial", 16, "bold"), text_color=PRIMARY_COLOR).pack(pady=(10, 5))
+        self.status_label = ctk.CTkLabel(status_section, text="Ready", font=("Arial", 16, "bold"), text_color=ON_SURFACE)
+        self.status_label.pack(pady=(0, 10))
 
         # Center Canvas
-        self.center_canvas_frame = ctk.CTkFrame(self.main_frame, fg_color=SURFACE, corner_radius=12)
-        self.center_canvas_frame.grid(row=0, column=1, sticky="nsew", padx=(0, 12), pady=24)
-        self.canvas = ctk.CTkCanvas(self.center_canvas_frame, bg=SURFACE, highlightthickness=0)
-        self.canvas.pack(expand=True, fill="both", padx=24, pady=24)
+        self.center_frame = ctk.CTkFrame(self.main_frame, fg_color=SURFACE, corner_radius=12)
+        self.center_frame.grid(row=0, column=1, sticky="nsew", padx=(0, 12), pady=24)
+        self.center_frame.grid_columnconfigure(0, weight=1)
+        self.center_frame.grid_rowconfigure(0, weight=1)
+        self._setup_center_canvas()
 
         # Right Toolbar
         self.right_toolbar = ctk.CTkFrame(self.main_frame, fg_color=SURFACE, corner_radius=12, width=220)
         self.right_toolbar.grid(row=0, column=2, sticky="nse", padx=(12, 24), pady=24)
-        ctk.CTkLabel(self.right_toolbar, text="Motor Controls", font=("Roboto", 14, "bold"), text_color=PRIMARY_COLOR).pack(pady=(20, 10))
-        # Jog controls (arrow key layout)
-        jog_frame = ctk.CTkFrame(self.right_toolbar, fg_color=SURFACE, corner_radius=12)
-        jog_frame.pack(fill=ctk.X, padx=10, pady=8)
-        jog_frame.grid_columnconfigure(0, minsize=32)
-        jog_frame.grid_columnconfigure(1, minsize=32)
-        jog_frame.grid_columnconfigure(2, minsize=32)
-        jog_frame.grid_rowconfigure(0, minsize=32)
-        jog_frame.grid_rowconfigure(1, minsize=32)
-        jog_frame.grid_rowconfigure(2, minsize=32)
-        self._add_jog_button(jog_frame, "↑", lambda: self._jog('Y', +self.jog_speed)).grid(row=0, column=1, padx=2, pady=2)
-        self._add_jog_button(jog_frame, "←", lambda: self._jog('X', -self.jog_speed)).grid(row=1, column=0, padx=2, pady=2)
-        self._add_jog_button(jog_frame, "→", lambda: self._jog('X', +self.jog_speed)).grid(row=1, column=2, padx=2, pady=2)
-        self._add_jog_button(jog_frame, "↓", lambda: self._jog('Y', -self.jog_speed)).grid(row=2, column=1, padx=2, pady=2)
-        # Z and ROT jogs below
-        zrot_frame = ctk.CTkFrame(self.right_toolbar, fg_color=SURFACE, corner_radius=12)
-        zrot_frame.pack(fill=ctk.X, padx=10, pady=(0, 8))
-        self._add_jog_button(zrot_frame, "Z+", lambda: self._jog('Z', +1)).grid(row=0, column=0, padx=2, pady=2)
-        self._add_jog_button(zrot_frame, "Z-", lambda: self._jog('Z', -1)).grid(row=0, column=1, padx=2, pady=2)
-        self._add_jog_button(zrot_frame, "ROT+", lambda: self._jog('ROT', +5)).grid(row=0, column=2, padx=2, pady=2)
-        self._add_jog_button(zrot_frame, "ROT-", lambda: self._jog('ROT', -5)).grid(row=0, column=3, padx=2, pady=2)
-        # Speed adjustment (slider + entry)
-        speed_frame = ctk.CTkFrame(self.right_toolbar, fg_color=SURFACE, corner_radius=12)
-        speed_frame.pack(fill=ctk.X, padx=10, pady=(0, 8))
-        ctk.CTkLabel(speed_frame, text="Jog Step (in)").pack(side=ctk.LEFT)
-        # Use int range for slider, scale by 0.01 for inches
-        self._jog_slider_scale = 0.01
-        speed_slider = ctk.CTkSlider(speed_frame, from_=1, to=200, number_of_steps=199, variable=None, width=120, command=lambda v: self._on_jog_slider(v))
+        ctk.CTkLabel(self.right_toolbar, text="Motor Controls", font=("Arial", 16, "bold"), text_color=PRIMARY_COLOR).pack(pady=(20, 10))
+        # Jog controls section
+        jog_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
+        jog_section.pack(fill=ctk.X, padx=10, pady=8)
+        # Configure grid for centered layout
+        jog_section.grid_columnconfigure(0, weight=1)
+        jog_section.grid_columnconfigure(1, weight=1)
+        jog_section.grid_columnconfigure(2, weight=1)
+        jog_section.grid_rowconfigure(0, weight=1)
+        jog_section.grid_rowconfigure(1, weight=1)
+        jog_section.grid_rowconfigure(2, weight=1)
+        # Center the arrow buttons
+        self._add_jog_button(jog_section, "↑", lambda: self._jog('Y', +self.jog_speed)).grid(row=0, column=1, padx=4, pady=4, sticky="nsew")
+        self._add_jog_button(jog_section, "←", lambda: self._jog('X', -self.jog_speed)).grid(row=1, column=0, padx=4, pady=4, sticky="nsew")
+        self._add_jog_button(jog_section, "→", lambda: self._jog('X', +self.jog_speed)).grid(row=1, column=2, padx=4, pady=4, sticky="nsew")
+        self._add_jog_button(jog_section, "↓", lambda: self._jog('Y', -self.jog_speed)).grid(row=2, column=1, padx=4, pady=4, sticky="nsew")
+        # Z and ROT controls section
+        zrot_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
+        zrot_section.pack(fill=ctk.X, padx=10, pady=(0, 8))
+        # Configure grid for centered layout
+        zrot_section.grid_columnconfigure(0, weight=1)
+        zrot_section.grid_columnconfigure(1, weight=1)
+        zrot_section.grid_columnconfigure(2, weight=1)
+        zrot_section.grid_columnconfigure(3, weight=1)
+        zrot_section.grid_rowconfigure(0, weight=1)
+        # Center the Z and ROT buttons
+        self._add_jog_button(zrot_section, "Z+", lambda: self._jog('Z', +1)).grid(row=0, column=0, padx=4, pady=4, sticky="nsew")
+        self._add_jog_button(zrot_section, "Z-", lambda: self._jog('Z', -1)).grid(row=0, column=1, padx=4, pady=4, sticky="nsew")
+        self._add_jog_button(zrot_section, "ROT+", lambda: self._jog('ROT', +5)).grid(row=0, column=2, padx=4, pady=4, sticky="nsew")
+        self._add_jog_button(zrot_section, "ROT-", lambda: self._jog('ROT', -5)).grid(row=0, column=3, padx=4, pady=4, sticky="nsew")
+        # Speed adjustment section
+        speed_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
+        speed_section.pack(fill=ctk.X, padx=10, pady=(0, 8))
+        ctk.CTkLabel(speed_section, text="Jog Step (in)", font=("Arial", 16, "bold")).pack(side=ctk.LEFT, padx=10, pady=10)
+        # Use range 0.1 to 5.0 inches with 0.1 increments
+        self._jog_slider_scale = 0.1
+        # Calculate initial slider value (1.0 inch = 10 steps)
+        initial_slider_value = int(self.jog_speed_var.get() / self._jog_slider_scale)
+        speed_slider = ctk.CTkSlider(speed_section, from_=1, to=50, number_of_steps=49, variable=None, width=120, command=lambda v: self._on_jog_slider(v))
+        speed_slider.set(initial_slider_value)
         speed_slider.pack(side=ctk.LEFT, padx=5)
-        speed_entry = ctk.CTkEntry(speed_frame, textvariable=self.jog_speed_var, width=50)
+        speed_entry = ctk.CTkEntry(speed_section, textvariable=self.jog_speed_var, width=50)
         speed_entry.pack(side=ctk.LEFT, padx=5)
         self.jog_speed_var.trace_add('write', lambda *a: self._update_jog_speed())
-        # Home controls
-        home_frame = ctk.CTkFrame(self.right_toolbar, fg_color=SURFACE, corner_radius=12)
-        home_frame.pack(fill=ctk.X, padx=10, pady=8)
-        ctk.CTkButton(home_frame, text="Home X", command=lambda: self._home('X')).pack(fill=ctk.X, pady=2)
-        ctk.CTkButton(home_frame, text="Home Y", command=lambda: self._home('Y')).pack(fill=ctk.X, pady=2)
-        ctk.CTkButton(home_frame, text="Home Z", command=lambda: self._home('Z')).pack(fill=ctk.X, pady=2)
-        ctk.CTkButton(home_frame, text="Home ROT", command=lambda: self._home('ROT')).pack(fill=ctk.X, pady=2)
-        ctk.CTkButton(home_frame, text="Home All (Sync)", command=self._home_all).pack(fill=ctk.X, pady=2)
-        # Coordinates display
-        self.coord_label = ctk.CTkLabel(self.right_toolbar, text="", font=("Consolas", 13, "bold"), text_color=ON_SURFACE)
+        # Home controls section
+        home_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
+        home_section.pack(fill=ctk.X, padx=10, pady=8)
+        ctk.CTkButton(home_section, text="Home X", command=lambda: self._home('X'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, padx=10, pady=2)
+        ctk.CTkButton(home_section, text="Home Y", command=lambda: self._home('Y'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, padx=10, pady=2)
+        ctk.CTkButton(home_section, text="Home Z", command=lambda: self._home('Z'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, padx=10, pady=2)
+        ctk.CTkButton(home_section, text="Home ROT", command=lambda: self._home('ROT'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, padx=10, pady=2)
+        ctk.CTkButton(home_section, text="Home All (Sync)", command=self._home_all, height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, padx=10, pady=2)
+        # Coordinates display section
+        coord_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
+        coord_section.pack(fill=ctk.X, padx=10, pady=8)
+        self.coord_label = ctk.CTkLabel(coord_section, text="", font=("Consolas", 16, "bold"), text_color=ON_SURFACE)
         self.coord_label.pack(pady=10)
 
     def _bind_arrow_keys(self):
@@ -425,6 +476,12 @@ class FabricCNCApp:
         self.root.bind('<KeyRelease-End>', lambda e: self._on_arrow_release('End'))
         # Bind Escape key to stop movement
         self.root.bind('<KeyPress-Escape>', lambda e: self._stop_movement())
+        # Bind F11 to toggle full screen
+        self.root.bind('<KeyPress-F11>', lambda e: self._toggle_fullscreen())
+        # Bind Ctrl+Q to close app
+        self.root.bind('<Control-q>', lambda e: self._close_app())
+        # Bind window close button
+        self.root.protocol("WM_DELETE_WINDOW", self._close_app)
 
     def _on_arrow_press(self, key):
         if not self._arrow_key_state.get(key, False):
@@ -489,41 +546,20 @@ class FabricCNCApp:
         elif key in ['Home', 'End']:
             self._jog_in_progress['ROT'] = False
 
-    def _setup_left_toolbar(self):
-        ctk.CTkLabel(self.left_toolbar, text="DXF Tools", font=("Arial", 14, "bold")).pack(pady=(20, 10))
-        self.import_btn = ctk.CTkButton(self.left_toolbar, text="Import DXF File", command=self._import_dxf)
-        self.import_btn.pack(pady=(10, 4), padx=10, fill="x")
-        self.gen_toolpath_btn = ctk.CTkButton(self.left_toolbar, text="Generate Toolpath", command=self._generate_toolpath, state="disabled")
-        self.gen_toolpath_btn.pack(pady=4, padx=10, fill="x")
-        self.preview_btn = ctk.CTkButton(self.left_toolbar, text="Preview Toolpath", command=self._preview_toolpath, state="disabled")
-        self.preview_btn.pack(pady=4, padx=10, fill="x")
-        self.run_btn = ctk.CTkButton(self.left_toolbar, text="Run Toolpath", command=self._run_toolpath, state="disabled")
-        self.run_btn.pack(pady=4, padx=10, fill="x")
-        ctk.CTkFrame(self.left_toolbar, height=2, fg_color="#e0e0e0").pack(fill="x", pady=20)
-        status_frame = ctk.CTkFrame(self.left_toolbar, fg_color=SURFACE, corner_radius=8)
-        status_frame.pack(fill="x", padx=10, pady=10)
-        mode_text = "SIMULATION" if SIMULATION_MODE else "REAL MOTORS"
-        mode_color = "red" if SIMULATION_MODE else "green"
-        self.status_label = ctk.CTkLabel(status_frame, text=f"Mode: {mode_text}", text_color=mode_color)
-        self.status_label.pack(pady=2)
-        if not MOTOR_IMPORTS_AVAILABLE:
-            ctk.CTkLabel(status_frame, text="Motor modules not found", text_color="orange").pack(pady=2)
-        if not ON_RPI:
-            ctk.CTkLabel(status_frame, text="Not on Raspberry Pi", text_color="orange").pack(pady=2)
-        # Canvas
-        self.canvas = ctk.CTkCanvas(self.center_canvas_frame, bg="#f8f8f8")
-        self.canvas.pack(expand=True, fill="both", padx=24, pady=24)
+
 
     # --- Center Canvas: DXF/toolpath/position ---
     def _setup_center_canvas(self):
-        # Remove tk.Canvas and use ctk.CTkCanvas
-        self.canvas = ctk.CTkCanvas(self.center_canvas_frame, bg=SURFACE, highlightthickness=0)
-        self.canvas.pack(expand=True, fill="both", padx=24, pady=24)
-        self.center_canvas_frame.bind("<Configure>", self._on_canvas_resize)
+        # Setup canvas with proper sizing and drawing - using original working approach
+        self.canvas = ctk.CTkCanvas(self.center_frame, bg=SURFACE, highlightthickness=0)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.center_frame.bind("<Configure>", self._on_canvas_resize)
+        # Initialize canvas dimensions
         self.canvas_width = 800
         self.canvas_height = 600
         self.canvas_scale = 1.0
         self.canvas_offset = (0, 0)
+        # Draw initial canvas
         self._draw_canvas()
 
     def _on_canvas_resize(self, event):
@@ -551,21 +587,36 @@ class FabricCNCApp:
     def _draw_axes_in_inches(self):
         # Draw X and Y axes with inch ticks and labels, with buffer
         inch_tick = 5
+        
+        # Draw X-axis ticks (horizontal axis at bottom)
         for x_in in range(0, 69, inch_tick):
-            x_px, _ = self._inches_to_canvas(x_in, 0)
-            self.canvas.create_line(x_px, self.canvas_height, x_px, self.canvas_height-10, fill=PRIMARY_VARIANT)
-            self.canvas.create_text(x_px, self.canvas_height-20, text=f"{x_in}", fill=ON_SURFACE, font=("Arial", 9))
+            x_px, y_px = self._inches_to_canvas(x_in, 0)
+            # Ensure we're within canvas bounds
+            if 0 <= x_px <= self.canvas_width and 0 <= y_px <= self.canvas_height:
+                # Draw tick mark pointing up from bottom
+                self.canvas.create_line(x_px, y_px, x_px, y_px + 10, fill=PRIMARY_VARIANT, width=2)
+                # Draw label below tick (ensure it's visible)
+                # For X-axis labels, position them at a fixed distance from the bottom
+                label_y = self.canvas_height - 35
+                # Always draw labels, they should be visible - use same format as Y-axis
+                self.canvas.create_text(x_px, label_y, text=f"{x_in}", fill=ON_SURFACE, font=("Arial", 9), anchor="n")
+                # Debug: log first few labels to see positioning
+                if x_in <= 15:
+                    logger.debug(f"X-axis label {x_in}: canvas_pos=({x_px:.1f}, {y_px:.1f}), label_y={label_y:.1f}, canvas_height={self.canvas_height}")
+        
+        # Draw Y-axis ticks (vertical axis on left)
         for y_in in range(0, 46, inch_tick):
-            _, y_px = self._inches_to_canvas(0, y_in)
-            self.canvas.create_line(0, y_px, 10, y_px, fill=PRIMARY_VARIANT)
-            self.canvas.create_text(25, y_px, text=f"{y_in}", fill=ON_SURFACE, font=("Arial", 9), anchor="w")
+            x_px, y_px = self._inches_to_canvas(0, y_in)
+            # Ensure we're within canvas bounds
+            if 0 <= x_px <= self.canvas_width and 0 <= y_px <= self.canvas_height:
+                # Draw tick mark pointing right from left edge
+                self.canvas.create_line(x_px, y_px, x_px + 10, y_px, fill=PRIMARY_VARIANT, width=2)
+                # Draw label to the left of tick (ensure it's visible)
+                label_x = max(x_px - 5, 15)
+                self.canvas.create_text(label_x, y_px, text=f"{y_in}", fill=ON_SURFACE, font=("Arial", 9), anchor="e")
+        
         # Draw border
         self.canvas.create_rectangle(0, 0, self.canvas_width, self.canvas_height, outline=PRIMARY_COLOR, width=2)
-        # Draw home position indicator (red cross at 0,0)
-        home_x, home_y = self._inches_to_canvas(0, 0)
-        size = 10
-        self.canvas.create_line(home_x - size, home_y - size, home_x + size, home_y + size, fill=ERROR_COLOR, width=2)
-        self.canvas.create_line(home_x - size, home_y + size, home_x + size, home_y - size, fill=ERROR_COLOR, width=2)
 
     def _inches_to_canvas(self, x_in, y_in):
         # Convert inches to canvas coordinates with home at bottom-left
@@ -584,9 +635,18 @@ class FabricCNCApp:
         y_in = pos['Y'] / INCH_TO_MM
         x_in = pos['X'] / INCH_TO_MM
         x_c, y_c = self._inches_to_canvas(x_in, y_in)
-        r = 7
+        
+        # Make tool head more visible
+        r = 10  # Larger radius
+        # Draw outer circle (background)
+        self.canvas.create_oval(x_c - r - 2, y_c - r - 2, x_c + r + 2, y_c + r + 2, fill=PRIMARY_COLOR, outline=PRIMARY_COLOR, width=1)
+        # Draw inner circle (tool head)
         self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill=SECONDARY_COLOR, outline=PRIMARY_COLOR, width=2)
-        self.canvas.create_text(x_c, y_c - 18, text=f"(X={x_in:.2f}, Y={y_in:.2f})", fill=PRIMARY_VARIANT, font=("Arial", 10, "bold"))
+        # Draw coordinates
+        self.canvas.create_text(x_c, y_c - r - 15, text=f"(X={x_in:.2f}, Y={y_in:.2f})", fill=PRIMARY_VARIANT, font=("Arial", 10, "bold"))
+        
+        # Debug: log position for troubleshooting
+        logger.debug(f"Tool head at canvas pos: ({x_c:.1f}, {y_c:.1f}), inches: ({x_in:.2f}, {y_in:.2f})")
 
     def _draw_dxf_entities_inches(self):
         # Draw DXF entities, converting mm to inches for plotting
@@ -759,17 +819,30 @@ class FabricCNCApp:
                     all_y.append(center.y * self.dxf_unit_scale)
             min_x = min(all_x)
             min_y = min(all_y)
-            self.dxf_offset = (min_x, min_y)
+            max_x = max(all_x)
+            max_y = max(all_y)
+            
+            # Add 1-inch buffer around the DXF content
+            buffer_inches = 1.0
+            self.dxf_offset = (min_x - buffer_inches, min_y - buffer_inches)
+            
+            # Store the buffered extents for reference
+            self.dxf_buffered_extents = (
+                min_x - buffer_inches,  # buffered_min_x
+                min_y - buffer_inches,  # buffered_min_y
+                max_x + buffer_inches,  # buffered_max_x
+                max_y + buffer_inches   # buffered_max_y
+            )
             self.dxf_doc = doc
             self.dxf_entities = entities
             self.toolpath = []
-            self.gen_toolpath_btn.configure(state="normal")
             # Debug logging
             logger.info(f"DXF imported successfully:")
             logger.info(f"  - Entities found: {len(entities)}")
             logger.info(f"  - Unit scale: {self.dxf_unit_scale}")
-            logger.info(f"  - Extents: min_x={min_x:.3f}, min_y={min_y:.3f}, max_x={max(all_x):.3f}, max_y={max(all_y):.3f}")
-            logger.info(f"  - Offset: dx={min_x:.3f}, dy={min_y:.3f}")
+            logger.info(f"  - Original extents: min_x={min_x:.3f}, min_y={min_y:.3f}, max_x={max_x:.3f}, max_y={max_y:.3f}")
+            logger.info(f"  - Buffered extents: min_x={self.dxf_buffered_extents[0]:.3f}, min_y={self.dxf_buffered_extents[1]:.3f}, max_x={self.dxf_buffered_extents[2]:.3f}, max_y={self.dxf_buffered_extents[3]:.3f}")
+            logger.info(f"  - Offset with buffer: dx={self.dxf_offset[0]:.3f}, dy={self.dxf_offset[1]:.3f}")
             self._draw_canvas()
         except Exception as e:
             logger.error(f"Failed to load DXF: {e}")
@@ -947,19 +1020,74 @@ class FabricCNCApp:
                 pts_ccw = pts
             # Transform all points to inches and (0,0) bottom left
             pts_t = [((x * scale) - dx, (y * scale) - dy) for x, y in pts_ccw]
+            
+            # Remove duplicate consecutive points and closing duplicates
+            pts_clean = [pts_t[0]]
+            for i in range(1, len(pts_t)):
+                x_prev, y_prev = pts_clean[-1]
+                x_curr, y_curr = pts_t[i]
+                # Skip if this point is the same as the previous point
+                if abs(x_curr - x_prev) > 1e-6 or abs(y_curr - y_prev) > 1e-6:
+                    # Also skip if this point is the same as the first point (closing duplicate)
+                    x_first, y_first = pts_t[0]
+                    if abs(x_curr - x_first) > 1e-6 or abs(y_curr - y_first) > 1e-6:
+                        pts_clean.append(pts_t[i])
+            
+            pts_t = pts_clean
+            
+            # Debug: Print original shape points
+            print(f"\n=== SHAPE DEBUG ===")
+            print(f"Original shape has {len(pts_ccw)} points:")
+            for i, (x, y) in enumerate(pts_ccw):
+                print(f"  Point {i}: ({x:.3f}, {y:.3f})")
+            print(f"Transformed shape has {len(pts_t)} points:")
+            for i, (x, y) in enumerate(pts_t):
+                print(f"  Point {i}: ({x:.3f}, {y:.3f})")
+            
             path = []
             angle_thresh = math.radians(30)
             n = len(pts_t)
             if n < 2:
                 continue
-            # Calculate angle - cutting wheel should be parallel to cutting direction
-            angle0 = math.atan2(pts_t[1][1] - pts_t[0][1], pts_t[1][0] - pts_t[0][0])
-            path.append((pts_t[0][0], pts_t[0][1], angle0, 1))  # Z up
-            path.append((pts_t[0][0], pts_t[0][1], angle0, 0))  # Z down
+            # Calculate absolute angles from vertical (home orientation)
+            angles = []
+            for i in range(n):
+                if i < n-1:
+                    # Calculate angle for segment from point i to point i+1
+                    x0, y0 = pts_t[i]
+                    x1, y1 = pts_t[i+1]
+                    # Calculate relative angle between points
+                    relative_angle = math.atan2(y1 - y0, x1 - x0)
+                    # Convert to absolute angle from vertical (home orientation)
+                    # Vertical is 0°, clockwise is positive, counter-clockwise is negative
+                    absolute_angle = -(math.degrees(relative_angle) - 90.0)
+                    # Normalize to -180 to +180 range
+                    while absolute_angle > 180:
+                        absolute_angle -= 360
+                    while absolute_angle < -180:
+                        absolute_angle += 360
+                    angles.append(math.radians(absolute_angle))
+                else:
+                    # For the last point, calculate angle from last point to first point
+                    x0, y0 = pts_t[i]
+                    x1, y1 = pts_t[0]  # Back to first point
+                    relative_angle = math.atan2(y1 - y0, x1 - x0)
+                    absolute_angle = -(math.degrees(relative_angle) - 90.0)
+                    while absolute_angle > 180:
+                        absolute_angle -= 360
+                    while absolute_angle < -180:
+                        absolute_angle += 360
+                    angles.append(math.radians(absolute_angle))
+            
+            # Start with first point
+            path.append((pts_t[0][0], pts_t[0][1], angles[0], 1))  # Z up
+            path.append((pts_t[0][0], pts_t[0][1], angles[0], 0))  # Z down
+            
             for i in range(1, n):
                 x0, y0 = pts_t[i-1]
                 x1, y1 = pts_t[i]
-                angle = math.atan2(y1 - y0, x1 - x0)
+                current_angle = angles[i]  # Angle for segment starting from this point
+                
                 is_corner = False
                 if 1 <= i < n-1:
                     x_prev, y_prev = pts_t[i-2] if i-2 >= 0 else pts_t[i-1]
@@ -975,11 +1103,43 @@ class FabricCNCApp:
                         theta = math.acos(cos_theta)
                         if theta > angle_thresh:
                             is_corner = True
+                
                 if is_corner:
-                    path.append((x0, y0, angle, 1))  # Z up at corner
-                    path.append((x0, y0, angle, 0))  # Z down at corner
-                path.append((x1, y1, angle, 0))  # Move/cut
-            path.append((pts_t[-1][0], pts_t[-1][1], angle, 1))  # Z up at end
+                    path.append((x0, y0, current_angle, 1))  # Z up at corner
+                    path.append((x0, y0, current_angle, 0))  # Z down at corner
+                
+                path.append((x1, y1, current_angle, 0))  # Move/cut
+            
+            # For closed shapes, add the final segment back to the start point
+            if closed and n >= 3:
+                x0, y0 = pts_t[-1]  # Last point
+                x1, y1 = pts_t[0]   # First point
+                final_angle = angles[-1]  # Angle for segment from last to first
+                
+                # Check if this is a corner
+                if n >= 3:
+                    x_prev, y_prev = pts_t[-2]  # Second to last point
+                    x_next, y_next = pts_t[0]   # First point
+                    v1 = (x0 - x_prev, y0 - y_prev)
+                    v2 = (x1 - x0, y1 - y0)
+                    len1 = math.hypot(*v1)
+                    len2 = math.hypot(*v2)
+                    if len1 > 1e-8 and len2 > 1e-8:
+                        dot = v1[0]*v2[0] + v1[1]*v2[1]
+                        cos_theta = dot / (len1 * len2)
+                        cos_theta = max(-1.0, min(1.0, cos_theta))
+                        theta = math.acos(cos_theta)
+                        if theta > angle_thresh:
+                            path.append((x0, y0, final_angle, 1))  # Z up at corner
+                            path.append((x0, y0, final_angle, 0))  # Z down at corner
+                
+                path.append((x1, y1, final_angle, 0))  # Move/cut back to start
+                
+                # End with first point (Z up) - this is the final position
+                path.append((pts_t[0][0], pts_t[0][1], angles[0], 1))  # Z up at end (point 0)
+            else:
+                # End with last point (Z up) for open shapes
+                path.append((pts_t[-1][0], pts_t[-1][1], angles[-1], 1))  # Z up at end
             toolpaths.append(path)
         self.toolpaths = toolpaths
         
@@ -1019,8 +1179,6 @@ class FabricCNCApp:
         print("=== END DEBUG INFO ===\n")
         
         self._draw_canvas()
-        self.preview_btn.configure(state="normal")
-        self.run_btn.configure(state="normal")
 
     def _preview_toolpath(self):
         if not hasattr(self, 'toolpaths') or not self.toolpaths:
@@ -1060,10 +1218,30 @@ class FabricCNCApp:
         if not hasattr(self, 'toolpaths') or not self.toolpaths:
             messagebox.showwarning("No Toolpath", "Generate a toolpath first.")
             return
-        self.import_btn.configure(state="disabled")
-        self.gen_toolpath_btn.configure(state="disabled")
-        self.preview_btn.configure(state="disabled")
-        self.run_btn.configure(state="disabled")
+            
+        # Debug: Print machine limits and first toolpath point
+        print(f"\n=== TOOLPATH EXECUTION DEBUG ===")
+        print(f"Machine limits: X=±{X_MAX_MM:.2f}mm, Y=±{Y_MAX_MM:.2f}mm")
+        
+        # Debug: Check sensor states before starting toolpath
+        if MOTOR_IMPORTS_AVAILABLE:
+            sensor_states = self.motor_ctrl.get_sensor_states()
+            print(f"\n=== SENSOR STATES BEFORE TOOLPATH ===")
+            for motor, state in sensor_states.items():
+                print(f"{motor}: raw={state['raw']}, debounced={state['debounced']}, last_trigger_time={state['last_trigger_time']:.3f}s, readings={state['readings']}")
+        
+        if self.toolpaths and self.toolpaths[0]:
+            first_point = self.toolpaths[0][0]
+            x, y, angle, z = first_point
+            x_mm = x * INCH_TO_MM
+            y_mm = y * INCH_TO_MM
+            print(f"First toolpath point: X={x:.3f}in ({x_mm:.2f}mm), Y={y:.3f}in ({y_mm:.2f}mm)")
+            if abs(x_mm) > X_MAX_MM or abs(y_mm) > Y_MAX_MM:
+                print(f"⚠️  WARNING: First point beyond machine limits!")
+                return
+            
+
+        
         self._running_toolpath = True
         self._current_toolpath_pos = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
         self._current_toolpath_idx = [0, 0]  # [shape_idx, step_idx]
@@ -1102,10 +1280,6 @@ class FabricCNCApp:
         shape_idx, step_idx = self._current_toolpath_idx
         if shape_idx >= len(self.toolpaths):
             self._running_toolpath = False
-            self.import_btn.configure(state="normal")
-            self.gen_toolpath_btn.configure(state="normal")
-            self.preview_btn.configure(state="normal")
-            self.run_btn.configure(state="normal")
             return
         path = self.toolpaths[shape_idx]
         if step_idx >= len(path):
@@ -1115,10 +1289,16 @@ class FabricCNCApp:
             return
         x, y, angle, z = path[step_idx]
         # Set toolpath position directly (no swap)
-        self._current_toolpath_pos['X'] = x * INCH_TO_MM
-        self._current_toolpath_pos['Y'] = y * INCH_TO_MM
+        x_mm = x * INCH_TO_MM
+        y_mm = y * INCH_TO_MM
+        self._current_toolpath_pos['X'] = x_mm
+        self._current_toolpath_pos['Y'] = y_mm
         self._current_toolpath_pos['Z'] = Z_DOWN_MM if z == 0 else Z_UP_MM
         self._current_toolpath_pos['ROT'] = math.degrees(angle)
+        
+        # Debug: print toolpath coordinates in both units
+        print(f"[DEBUG] Toolpath step {step_idx}: X={x:.3f}in ({x_mm:.2f}mm), Y={y:.3f}in ({y_mm:.2f}mm)")
+        
         if MOTOR_IMPORTS_AVAILABLE:
             self.motor_ctrl.move_to(
                 x=self._current_toolpath_pos['X'],
@@ -1129,6 +1309,10 @@ class FabricCNCApp:
         # Debug: print both toolpath and actual motor position
         actual_pos = self.motor_ctrl.get_position()
         print(f"[DEBUG] Toolpath pos: X={self._current_toolpath_pos['X']:.2f} Y={self._current_toolpath_pos['Y']:.2f} | Motor pos: X={actual_pos['X']:.2f} Y={actual_pos['Y']:.2f}")
+        
+        # Check if coordinates are within machine limits
+        if abs(x_mm) > X_MAX_MM or abs(y_mm) > Y_MAX_MM:
+            print(f"[WARNING] Coordinates beyond machine limits! X={x_mm:.2f}mm (limit: ±{X_MAX_MM:.2f}mm), Y={y_mm:.2f}mm (limit: ±{Y_MAX_MM:.2f}mm)")
         self._update_position_display()  # Force update after each move
         self._draw_canvas()
         # Next step
@@ -1152,7 +1336,7 @@ class FabricCNCApp:
 
     # --- Right Toolbar: Motor controls ---
     def _setup_right_toolbar(self):
-        ctk.CTkLabel(self.right_toolbar, text="Motor Controls", font=("Roboto", 14, "bold"), text_color=PRIMARY_COLOR).pack(pady=(20, 10))
+        ctk.CTkLabel(self.right_toolbar, text="Motor Controls", font=("Arial", 16, "bold"), text_color=PRIMARY_COLOR).pack(pady=(20, 10))
         
         # Jog controls (arrow key layout)
         jog_frame = ctk.CTkFrame(self.right_toolbar, fg_color=SURFACE, corner_radius=12)
@@ -1172,40 +1356,54 @@ class FabricCNCApp:
         # Bottom: Down arrow
         self._add_jog_button(jog_frame, "↓", lambda: self._jog('Y', -self.jog_speed)).grid(row=2, column=1, padx=2, pady=2)
         
-        # Z and ROT jogs below
-        zrot_frame = ctk.CTkFrame(self.right_toolbar, fg_color=SURFACE, corner_radius=12)
-        zrot_frame.pack(fill=ctk.X, padx=10, pady=(0, 8))
-        self._add_jog_button(zrot_frame, "Z+", lambda: self._jog('Z', +1)).grid(row=0, column=0, padx=2, pady=2)
-        self._add_jog_button(zrot_frame, "Z-", lambda: self._jog('Z', -1)).grid(row=0, column=1, padx=2, pady=2)
-        self._add_jog_button(zrot_frame, "ROT+", lambda: self._jog('ROT', +5)).grid(row=0, column=2, padx=2, pady=2)
-        self._add_jog_button(zrot_frame, "ROT-", lambda: self._jog('ROT', -5)).grid(row=0, column=3, padx=2, pady=2)
+        # Z and ROT controls section
+        zrot_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
+        zrot_section.pack(fill=ctk.X, padx=10, pady=(0, 8))
+        # Configure grid for centered layout
+        zrot_section.grid_columnconfigure(0, weight=1)
+        zrot_section.grid_columnconfigure(1, weight=1)
+        zrot_section.grid_columnconfigure(2, weight=1)
+        zrot_section.grid_columnconfigure(3, weight=1)
+        zrot_section.grid_rowconfigure(0, weight=1)
+        # Center the Z and ROT buttons
+        self._add_jog_button(zrot_section, "Z+", lambda: self._jog('Z', +1)).grid(row=0, column=0, padx=4, pady=4, sticky="nsew")
+        self._add_jog_button(zrot_section, "Z-", lambda: self._jog('Z', -1)).grid(row=0, column=1, padx=4, pady=4, sticky="nsew")
+        self._add_jog_button(zrot_section, "ROT+", lambda: self._jog('ROT', +5)).grid(row=0, column=2, padx=4, pady=4, sticky="nsew")
+        self._add_jog_button(zrot_section, "ROT-", lambda: self._jog('ROT', -5)).grid(row=0, column=3, padx=4, pady=4, sticky="nsew")
         
-        # Speed adjustment (slider + entry)
-        speed_frame = ctk.CTkFrame(self.right_toolbar, fg_color=SURFACE, corner_radius=12)
-        speed_frame.pack(fill=ctk.X, padx=10, pady=(0, 8))
-        ctk.CTkLabel(speed_frame, text="Jog Step (in)").pack(side=ctk.LEFT)
+        # Speed adjustment section
+        speed_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
+        speed_section.pack(fill=ctk.X, padx=10, pady=(0, 8))
+        ctk.CTkLabel(speed_section, text="Jog Step (in)", font=("Arial", 16, "bold")).pack(side=ctk.LEFT, padx=10, pady=10)
         self._jog_slider_scale = 0.01
-        speed_slider = ctk.CTkSlider(speed_frame, from_=1, to=200, number_of_steps=199, variable=None, width=120, command=lambda v: self._on_jog_slider(v))
+        speed_slider = ctk.CTkSlider(speed_section, from_=1, to=200, number_of_steps=199, variable=None, width=120, command=lambda v: self._on_jog_slider(v))
         speed_slider.pack(side=ctk.LEFT, padx=5)
-        speed_entry = ctk.CTkEntry(speed_frame, textvariable=self.jog_speed_var, width=50)
+        speed_entry = ctk.CTkEntry(speed_section, textvariable=self.jog_speed_var, width=50)
         speed_entry.pack(side=ctk.LEFT, padx=5)
         self.jog_speed_var.trace_add('write', lambda *a: self._update_jog_speed())
         
+        # Home controls section
+        home_section = ctk.CTkFrame(self.right_toolbar, fg_color="#f0f0f0", corner_radius=8)
+        home_section.pack(fill=ctk.X, padx=10, pady=8)
         # Home controls
-        home_frame = ctk.CTkFrame(self.right_toolbar, fg_color=SURFACE, corner_radius=12)
-        home_frame.pack(fill=ctk.X, padx=10, pady=8)
-        ctk.CTkButton(home_frame, text="Home X", command=lambda: self._home('X')).pack(fill=ctk.X, pady=2)
-        ctk.CTkButton(home_frame, text="Home Y", command=lambda: self._home('Y')).pack(fill=ctk.X, pady=2)
-        ctk.CTkButton(home_frame, text="Home Z", command=lambda: self._home('Z')).pack(fill=ctk.X, pady=2)
-        ctk.CTkButton(home_frame, text="Home ROT", command=lambda: self._home('ROT')).pack(fill=ctk.X, pady=2)
-        ctk.CTkButton(home_frame, text="Home All (Sync)", command=self._home_all).pack(fill=ctk.X, pady=2)
+        home_frame = ctk.CTkFrame(home_section, fg_color=SURFACE, corner_radius=12)
+        home_frame.pack(fill=ctk.X, padx=10, pady=10)
+        ctk.CTkButton(home_frame, text="Home X", command=lambda: self._home('X'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, pady=2)
+        ctk.CTkButton(home_frame, text="Home Y", command=lambda: self._home('Y'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, pady=2)
+        ctk.CTkButton(home_frame, text="Home Z", command=lambda: self._home('Z'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, pady=2)
+        ctk.CTkButton(home_frame, text="Home ROT", command=lambda: self._home('ROT'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, pady=2)
+        ctk.CTkButton(home_frame, text="Home All (Sync)", command=self._home_all, height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, pady=2)
         
-        # Coordinates display
-        self.coord_label = ctk.CTkLabel(self.right_toolbar, text="", font=("Consolas", 13, "bold"), text_color=ON_SURFACE)
+        # Coordinates display section
+        coord_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
+        coord_section.pack(fill=ctk.X, padx=10, pady=8)
+        self.coord_label = ctk.CTkLabel(coord_section, text="", font=("Consolas", 16, "bold"), text_color=ON_SURFACE)
         self.coord_label.pack(pady=10)
 
     def _add_jog_button(self, parent, text, cmd):
-        btn = ctk.CTkButton(parent, text=text, command=cmd, width=40, fg_color=PRIMARY_COLOR, text_color=ON_PRIMARY, hover_color=PRIMARY_VARIANT, corner_radius=8)
+        # Use larger font for arrow buttons
+        font_size = 20 if text in ["↑", "↓", "←", "→"] else 16
+        btn = ctk.CTkButton(parent, text=text, command=cmd, width=50, height=40, fg_color=PRIMARY_COLOR, text_color=ON_PRIMARY, hover_color=PRIMARY_VARIANT, corner_radius=8, font=("Arial", font_size, "bold"))
         return btn
 
     def _jog(self, axis, delta):
@@ -1216,20 +1414,24 @@ class FabricCNCApp:
     def _home(self, axis):
         success = self.motor_ctrl.home(axis)
         if success:
-            messagebox.showinfo("Homing Complete", f"{axis} axis homed successfully")
+            self.status_label.configure(text=f"{axis} axis homed", text_color="green")
         else:
-            messagebox.showerror("Homing Failed", f"Failed to home {axis} axis")
+            self.status_label.configure(text=f"Failed to home {axis}", text_color="red")
         self._draw_canvas()
         self._update_position_display()
+        # Clear status after 2 seconds
+        self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=ON_SURFACE))
 
     def _home_all(self):
         success = self.motor_ctrl.home_all_synchronous()
         if success:
-            messagebox.showinfo("Homing Complete", "All axes homed successfully")
+            self.status_label.configure(text="All axes homed", text_color="green")
         else:
-            messagebox.showerror("Homing Failed", "Failed to home one or more axes")
+            self.status_label.configure(text="Homing failed", text_color="red")
         self._draw_canvas()
         self._update_position_display()
+        # Clear status after 2 seconds
+        self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=ON_SURFACE))
 
     def _stop_movement(self):
         """Stop all movement and cancel any pending arrow key operations."""
@@ -1247,7 +1449,9 @@ class FabricCNCApp:
 
     def _estop(self):
         self.motor_ctrl.estop()
-        messagebox.showwarning("EMERGENCY STOP", "All motors stopped")
+        self.status_label.configure(text="EMERGENCY STOP", text_color="red")
+        # Clear status after 3 seconds
+        self.root.after(3000, lambda: self.status_label.configure(text="Ready", text_color=ON_SURFACE))
 
     def _update_position_display(self):
         pos = self.motor_ctrl.get_position()
@@ -1268,6 +1472,25 @@ class FabricCNCApp:
     def _on_jog_slider(self, value):
         # Convert int slider value to float inches
         self.jog_speed_var.set(int(value) * self._jog_slider_scale)
+
+    def _toggle_fullscreen(self):
+        """Toggle full screen mode."""
+        try:
+            current_state = self.root.attributes('-fullscreen')
+            self.root.attributes('-fullscreen', not current_state)
+        except:
+            try:
+                current_state = self.root.state()
+                if current_state == 'zoomed':
+                    self.root.state('normal')
+                else:
+                    self.root.state('zoomed')
+            except:
+                pass
+
+    def _close_app(self):
+        """Close the application."""
+        self._on_close()
 
     def _on_close(self):
         """Clean up resources before closing."""
