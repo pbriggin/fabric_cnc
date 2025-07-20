@@ -820,12 +820,12 @@ class FabricCNCApp:
                     r = e.dxf.radius
                     logger.info(f"Processing CIRCLE: center=({center.x}, {center.y}), radius={r}")
                     # Generate points around the circle circumference for proper bounding box
-                    # Use more segments for smoother circles - scale with radius
-                    base_segments = 64
+                    # Use many more segments for very smooth circles - scale with radius
+                    base_segments = 128
                     radius_inches = r * self.dxf_unit_scale
                     n = max(base_segments, int(base_segments * radius_inches))
                     # Ensure we don't create too many segments
-                    n = min(n, 256)
+                    n = min(n, 512)
                     for i in range(n):
                         angle = 2 * math.pi * i / n
                         x = center.x + r * math.cos(angle)
@@ -835,7 +835,7 @@ class FabricCNCApp:
                 elif t == 'SPLINE':
                     logger.info(f"Processing SPLINE")
                     # Flatten spline to points for bounding box calculation
-                    tolerance = 0.01  # Much finer than 0.1
+                    tolerance = 0.001  # Much finer than 0.01
                     pts = list(e.flattening(tolerance))
                     for pt in pts:
                         if len(pt) >= 2:
@@ -895,19 +895,19 @@ class FabricCNCApp:
                 xs = [p[0] for p in pts]
                 ys = [p[1] for p in pts]
             elif t == 'SPLINE':
-                tolerance = 0.01  # Much finer than 0.1
+                tolerance = 0.001  # Much finer than 0.01
                 pts = list(e.flattening(tolerance))
                 xs = [p[0] for p in pts]
                 ys = [p[1] for p in pts]
             elif t == 'ARC' or t == 'CIRCLE':
                 center = e.dxf.center
                 r = e.dxf.radius
-                # Use more segments for smoother circles - scale with radius
-                base_segments = 64
+                # Use many more segments for very smooth circles - scale with radius
+                base_segments = 128
                 radius_inches = r * scale
                 n = max(base_segments, int(base_segments * radius_inches))
                 # Ensure we don't create too many segments
-                n = min(n, 256)
+                n = min(n, 512)
                 if t == 'ARC':
                     start = math.radians(e.dxf.start_angle)
                     end = math.radians(e.dxf.end_angle)
@@ -959,8 +959,8 @@ class FabricCNCApp:
                 if getattr(e, 'is_closed', False) or (len(pts) > 2 and pts[0] == pts[-1]):
                     segments.append((pts[-1], pts[0]))
             elif t == 'SPLINE':
-                # Use finer tolerance for smoother splines - especially for circles
-                tolerance = 0.01  # Much finer than 0.1
+                # Use very fine tolerance for smooth splines - especially for circles
+                tolerance = 0.001  # Much finer than 0.01
                 pts = [(p[0], p[1]) for p in e.flattening(tolerance)]
                 logger.info(f"  SPLINE: flattened to {len(pts)} points with tolerance {tolerance}")
                 for i in range(1, len(pts)):
@@ -980,13 +980,13 @@ class FabricCNCApp:
             elif t == 'CIRCLE':
                 center = e.dxf.center
                 r = e.dxf.radius
-                # Use more segments for smoother circles - scale with radius
-                # For a 1-inch radius, use 64 segments. Scale up for larger circles
-                base_segments = 64
+                # Use many more segments for very smooth circles - scale with radius
+                # For a 1-inch radius, use 128 segments. Scale up for larger circles
+                base_segments = 128
                 radius_inches = r * self.dxf_unit_scale
                 n = max(base_segments, int(base_segments * radius_inches))
                 # Ensure we don't create too many segments
-                n = min(n, 256)
+                n = min(n, 512)
                 logger.info(f"  Circle: radius={r:.3f}, radius_inches={radius_inches:.3f}, segments={n}")
                 pts = [(center.x + r * math.cos(2 * math.pi * i / n),
                         center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
