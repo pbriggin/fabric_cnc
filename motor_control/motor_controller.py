@@ -381,6 +381,66 @@ class MotorController:
                 logger.warning(f"Error resetting motor pins: {e}")
             self._current_movement = None
 
+    def execute_continuous_toolpath(self, toolpath_points):
+        """
+        Execute a continuous toolpath without stopping between points.
+        toolpath_points: List of (x_mm, y_mm, rot_deg, z_mm) tuples
+        """
+        try:
+            # Set current movement and reset stop flag
+            self._current_movement = 'CONTINUOUS_TOOLPATH'
+            self._stop_requested = False
+            
+            logger.info(f"Starting continuous toolpath execution with {len(toolpath_points)} points")
+            
+            # Start from the first point
+            if not toolpath_points:
+                return
+            
+            current_x = toolpath_points[0][0]
+            current_y = toolpath_points[0][1]
+            current_rot = toolpath_points[0][2]
+            current_z = toolpath_points[0][3]
+            
+            # Move to start position
+            self.move_to(x=current_x, y=current_y, z=current_z, rot=current_rot)
+            
+            # Execute continuous motion through all points
+            for i in range(1, len(toolpath_points)):
+                if self._stop_requested:
+                    logger.info("Stop requested - halting continuous toolpath")
+                    break
+                
+                target_x, target_y, target_rot, target_z = toolpath_points[i]
+                
+                # Calculate deltas
+                delta_x = target_x - current_x
+                delta_y = target_y - current_y
+                delta_rot = target_rot - current_rot
+                delta_z = target_z - current_z
+                
+                # Execute coordinated movement to next point
+                self.move_coordinated(
+                    x_distance_mm=delta_x,
+                    y_distance_mm=delta_y,
+                    z_distance_mm=delta_z,
+                    rot_distance_mm=delta_rot
+                )
+                
+                # Update current position
+                current_x = target_x
+                current_y = target_y
+                current_rot = target_rot
+                current_z = target_z
+            
+            logger.info("Continuous toolpath execution completed")
+            
+        except Exception as e:
+            logger.error(f"Error during continuous toolpath execution: {e}")
+            raise
+        finally:
+            self._current_movement = None
+
     def move_coordinated(self, x_distance_mm=0, y_distance_mm=0, z_distance_mm=0, rot_distance_mm=0):
         """Move X and Y axes simultaneously in a coordinated manner."""
         try:

@@ -1446,22 +1446,25 @@ class FabricCNCApp:
             if abs(x_mm) > config.APP_CONFIG['X_MAX_MM'] or abs(y_mm) > config.APP_CONFIG['Y_MAX_MM']:
                 print(f"⚠️  WARNING: First point beyond machine limits!")
                 return
-            
-
         
-        self._running_toolpath = True
-        self._current_toolpath_pos = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
-        self._current_toolpath_idx = [0, 0]  # [shape_idx, step_idx]
-        self._toolpath_total_steps = sum(len(path) for path in self.toolpath)
-        self._toolpath_step_count = 0
+        # Convert toolpath to continuous execution format
+        toolpath_points = []
+        for shape_idx, path in enumerate(self.toolpath):
+            for step_idx, (x, y, angle, z) in enumerate(path):
+                x_mm = x * config.APP_CONFIG['INCH_TO_MM']
+                y_mm = y * config.APP_CONFIG['INCH_TO_MM']
+                rot_deg = math.degrees(angle)
+                z_mm = config.APP_CONFIG['Z_DOWN_MM'] if z == 0 else config.APP_CONFIG['Z_UP_MM']
+                toolpath_points.append((x_mm, y_mm, rot_deg, z_mm))
         
-        # Start with travel move to first point
-        if self.toolpath and self.toolpath[0]:
-            first_point = self.toolpath[0][0]
-            x, y, angle, z = first_point
-            self._travel_to_start(x * config.APP_CONFIG['INCH_TO_MM'], y * config.APP_CONFIG['INCH_TO_MM'])
-        else:
-            self._run_toolpath_step()
+        print(f"Converted toolpath to {len(toolpath_points)} continuous points")
+        
+        # Execute continuous toolpath
+        if MOTOR_IMPORTS_AVAILABLE:
+            self.motor_ctrl.execute_continuous_toolpath(toolpath_points)
+        
+        self._running_toolpath = False
+        print("Toolpath execution completed")
 
     def _travel_to_start(self, x_mm, y_mm):
         """Travel from home to the start position of the toolpath."""
