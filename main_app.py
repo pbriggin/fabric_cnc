@@ -34,6 +34,24 @@ try:
 except ImportError:
     MOTOR_IMPORTS_AVAILABLE = False
 
+# Import toolpath planning modules
+try:
+    from toolpath_planning import (
+        ContinuousToolpathGenerator,
+        generate_continuous_circle_toolpath,
+        generate_continuous_spline_toolpath,
+        generate_gcode_continuous_motion
+    )
+    TOOLPATH_IMPORTS_AVAILABLE = True
+except ImportError:
+    TOOLPATH_IMPORTS_AVAILABLE = False
+
+# Import configuration
+from config import (
+    APP_CONFIG, UI_COLORS, TOOLPATH_CONFIG,
+    ON_RPI, SIMULATION_MODE
+)
+
 # Import GPIO only if on Raspberry Pi
 try:
     import RPi.GPIO as GPIO
@@ -41,29 +59,8 @@ try:
 except ImportError:
     GPIO_AVAILABLE = False
 
-ON_RPI = platform.system() == 'Linux' and (os.uname().machine.startswith('arm') or os.uname().machine.startswith('aarch'))
-SIMULATION_MODE = not ON_RPI or not MOTOR_IMPORTS_AVAILABLE
-
-INCH_TO_MM = 25.4
-X_MAX_MM = 68 * INCH_TO_MM
-Y_MAX_MM = 45 * INCH_TO_MM
-Z_MAX_MM = 2.5 * INCH_TO_MM
-Z_UP_MM = -19.05  # -0.75 inches (0.75 * 25.4 = 19.05mm)
-Z_DOWN_MM = -38.1  # -1.5 inches (1.5 * 25.4 = 38.1mm)
-PLOT_BUFFER_IN = 1.0
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fabric_cnc.main_app")
-
-# Material Design-inspired color palette (updated to user spec)
-PRIMARY_COLOR = '#2196F3'  # Blue 500
-PRIMARY_VARIANT = '#1976D2'  # Blue 700
-SECONDARY_COLOR = '#4FC3F7'  # Light Blue 300
-BACKGROUND = '#F5F5F5'
-SURFACE = '#F5F5F5'
-ON_PRIMARY = '#ffffff'
-ON_SURFACE = '#222222'
-ERROR_COLOR = '#b00020'
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -129,143 +126,9 @@ def flatten_spline_with_angle_limit(spline, max_angle_deg=2.0):
         logger.error(f"Error flattening spline: {e}")
         return []
 
-def generate_continuous_circle_toolpath(center, radius, start_angle=0, end_angle=2*math.pi, step_size=0.01):
-    """
-    Generate continuous toolpath for a circle using parametric equations.
-    
-    Args:
-        center: (x, y) center point
-        radius: radius of circle
-        start_angle: starting angle in radians (default: 0)
-        end_angle: ending angle in radians (default: 2π for full circle)
-        step_size: distance between points in inches (default: 0.01")
-    
-    Returns:
-        List of (x, y, angle, z) tuples for continuous cutting
-    """
-    cx, cy = center
-    toolpath = []
-    
-    # Calculate number of steps based on circumference and step size
-    circumference = radius * abs(end_angle - start_angle)
-    num_steps = max(256, int(circumference / step_size))  # Increased minimum steps for better angle continuity
-    
-    # Generate points using parametric equations
-    for i in range(num_steps + 1):
-        t = i / num_steps
-        angle = start_angle + t * (end_angle - start_angle)
-        
-        # Parametric equations for circle
-        x = cx + radius * math.cos(angle)
-        y = cy + radius * math.sin(angle)
-        
-        # Calculate tangent angle (perpendicular to radius)
-        tangent_angle = angle + math.pi/2  # 90° from radius
-        
-        # Normalize angle to -180 to +180 range
-        while tangent_angle > math.pi:
-            tangent_angle -= 2 * math.pi
-        while tangent_angle < -math.pi:
-            tangent_angle += 2 * math.pi
-        
-        # Convert to absolute angle from vertical (home orientation)
-        absolute_angle = -(math.degrees(tangent_angle) - 90.0)
-        while absolute_angle > 180:
-            absolute_angle -= 360
-        while absolute_angle < -180:
-            absolute_angle += 360
-        
-        # Z=0 for continuous cutting (no lifting)
-        toolpath.append((x, y, math.radians(absolute_angle), 0))
-    
-    return toolpath
+# Toolpath generation functions moved to toolpath_planning package
 
-def generate_continuous_spline_toolpath(spline, step_size=0.01):
-    """
-    Generate continuous toolpath for a spline using high-resolution flattening.
-    
-    Args:
-        spline: ezdxf spline entity
-        step_size: distance between points in inches (default: 0.01")
-    
-    Returns:
-        List of (x, y, angle, z) tuples for continuous cutting
-    """
-    toolpath = []
-    
-    try:
-        # Use high-resolution flattening for smooth splines
-        points = list(spline.flattening(0.001))  # Very high precision
-        
-        if len(points) < 2:
-            return toolpath
-        
-        # Calculate total length
-        total_length = 0
-        for i in range(1, len(points)):
-            dx = points[i][0] - points[i-1][0]
-            dy = points[i][1] - points[i-1][1]
-            total_length += math.sqrt(dx*dx + dy*dy)
-        
-        # Calculate number of steps based on length and step size
-        num_steps = max(128, int(total_length / step_size))
-        
-        # Interpolate points along the spline
-        for i in range(num_steps + 1):
-            t = i / num_steps
-            
-            # Find the segment and interpolate within it
-            segment_idx = int(t * (len(points) - 1))
-            segment_t = t * (len(points) - 1) - segment_idx
-            
-            if segment_idx >= len(points) - 1:
-                segment_idx = len(points) - 2
-                segment_t = 1.0
-            
-            # Linear interpolation between points
-            p1 = points[segment_idx]
-            p2 = points[segment_idx + 1]
-            x = p1[0] + segment_t * (p2[0] - p1[0])
-            y = p1[1] + segment_t * (p2[1] - p1[1])
-            
-            # Calculate tangent vector
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
-            tangent_angle = math.atan2(dy, dx)
-            
-            # Convert to absolute angle from vertical (home orientation)
-            absolute_angle = -(math.degrees(tangent_angle) - 90.0)
-            while absolute_angle > 180:
-                absolute_angle -= 360
-            while absolute_angle < -180:
-                absolute_angle += 360
-            
-            # Z=0 for continuous cutting (no lifting)
-            toolpath.append((x, y, math.radians(absolute_angle), 0))
-        
-    except Exception as e:
-        logger.error(f"Error generating continuous spline toolpath: {e}")
-        # Fallback to discrete method
-        points = list(spline.flattening(0.001))
-        for i in range(1, len(points)):
-            x, y = points[i][0], points[i][1]
-            prev_x, prev_y = points[i-1][0], points[i-1][1]
-            
-            # Calculate tangent angle
-            dx = x - prev_x
-            dy = y - prev_y
-            tangent_angle = math.atan2(dy, dx)
-            
-            # Convert to absolute angle
-            absolute_angle = -(math.degrees(tangent_angle) - 90.0)
-            while absolute_angle > 180:
-                absolute_angle -= 360
-            while absolute_angle < -180:
-                absolute_angle += 360
-            
-            toolpath.append((x, y, math.radians(absolute_angle), 0))
-    
-    return toolpath
+# Toolpath generation functions moved to toolpath_planning package
 
 # --- Motor simulation logic ---
 class SimulatedMotorController:
@@ -276,11 +139,11 @@ class SimulatedMotorController:
 
     def _clamp(self, axis, value):
         if axis == 'X':
-            return max(-X_MAX_MM, min(value, X_MAX_MM))  # Allow negative X positions
+            return max(-APP_CONFIG['X_MAX_MM'], min(value, APP_CONFIG['X_MAX_MM']))  # Allow negative X positions
         elif axis == 'Y':
-            return max(-Y_MAX_MM, min(value, Y_MAX_MM))  # Allow negative Y positions
+            return max(-APP_CONFIG['Y_MAX_MM'], min(value, APP_CONFIG['Y_MAX_MM']))  # Allow negative Y positions
         elif axis == 'Z':
-            return max(0.0, min(value, Z_MAX_MM))  # Keep Z positive only
+            return max(0.0, min(value, APP_CONFIG['Z_MAX_MM']))  # Keep Z positive only
         else:
             return value
 
@@ -355,11 +218,11 @@ class RealMotorController:
 
     def _clamp(self, axis, value):
         if axis == 'X':
-            return max(-X_MAX_MM, min(value, X_MAX_MM))  # Allow negative X positions
+            return max(-APP_CONFIG['X_MAX_MM'], min(value, APP_CONFIG['X_MAX_MM']))  # Allow negative X positions
         elif axis == 'Y':
-            return max(-Y_MAX_MM, min(value, Y_MAX_MM))  # Allow negative Y positions
+            return max(-APP_CONFIG['Y_MAX_MM'], min(value, APP_CONFIG['Y_MAX_MM']))  # Allow negative Y positions
         elif axis == 'Z':
-            return max(-Z_MAX_MM, min(value, Z_MAX_MM))  # Allow negative Z positions
+            return max(-APP_CONFIG['Z_MAX_MM'], min(value, APP_CONFIG['Z_MAX_MM']))  # Allow negative Z positions
         else:
             return value
 
@@ -524,8 +387,8 @@ class FabricCNCApp:
                 self.root.state('zoomed')
             except:
                 pass
-        self.root.configure(bg=BACKGROUND)
-        self.jog_speed = 1.0 * INCH_TO_MM  # Default to 1 inch
+        self.root.configure(bg=UI_COLORS['BACKGROUND'])
+        self.jog_speed = 1.0 * APP_CONFIG['INCH_TO_MM']  # Default to 1 inch
         self.jog_speed_var = ctk.DoubleVar(value=1.0)  # Default to 1 inch
         self._arrow_key_state = {}
         self._arrow_key_after_ids = {}
@@ -535,7 +398,7 @@ class FabricCNCApp:
         self.toolpaths = []
         self.motor_ctrl = SimulatedMotorController() if SIMULATION_MODE else RealMotorController()
         self._jog_in_progress = {'X': False, 'Y': False, 'Z': False, 'ROT': False}
-        self._arrow_key_repeat_delay = 100
+        self._arrow_key_repeat_delay = APP_CONFIG['ARROW_KEY_REPEAT_DELAY']
         # Initialize DXF-related attributes
         self.dxf_doc = None
         self.dxf_entities = []
@@ -549,54 +412,54 @@ class FabricCNCApp:
 
     def _setup_ui(self):
         # App Bar
-        self.app_bar = ctk.CTkFrame(self.root, fg_color=PRIMARY_COLOR, corner_radius=0, height=56)
+        self.app_bar = ctk.CTkFrame(self.root, fg_color=UI_COLORS['PRIMARY_COLOR'], corner_radius=0, height=56)
         self.app_bar.pack(fill="x", side="top")
-        self.title = ctk.CTkLabel(self.app_bar, text="Fabric CNC", text_color=ON_PRIMARY, font=("Arial", 16, "bold"))
+        self.title = ctk.CTkLabel(self.app_bar, text="Fabric CNC", text_color=UI_COLORS['ON_PRIMARY'], font=("Arial", 16, "bold"))
         self.title.pack(side="left", padx=24, pady=12)
         
         # Close button
         close_button = ctk.CTkButton(self.app_bar, text="✕", width=40, height=30, 
                                    command=self._close_app, fg_color="transparent", 
-                                   text_color=ON_PRIMARY, hover_color="#ff5a5f", corner_radius=6)
+                                   text_color=UI_COLORS['ON_PRIMARY'], hover_color="#ff5a5f", corner_radius=6)
         close_button.pack(side="right", padx=24, pady=12)
 
         # Main layout
-        self.main_frame = ctk.CTkFrame(self.root, fg_color=BACKGROUND)
+        self.main_frame = ctk.CTkFrame(self.root, fg_color=UI_COLORS['BACKGROUND'])
         self.main_frame.pack(expand=True, fill="both", padx=0, pady=(0, 0))
         self.main_frame.grid_columnconfigure(1, weight=1)
         self.main_frame.grid_rowconfigure(0, weight=1)
 
         # Left Toolbar
-        self.left_toolbar = ctk.CTkFrame(self.main_frame, fg_color=SURFACE, corner_radius=12, width=180)
+        self.left_toolbar = ctk.CTkFrame(self.main_frame, fg_color=UI_COLORS['SURFACE'], corner_radius=12, width=180)
         self.left_toolbar.grid(row=0, column=0, sticky="nsw", padx=(24, 12), pady=24)
         # File & DXF section
         file_section = ctk.CTkFrame(self.left_toolbar, fg_color="#d0d0d0", corner_radius=8)
         file_section.pack(fill="x", padx=16, pady=(20, 10))
-        ctk.CTkLabel(file_section, text="File & DXF", font=("Arial", 16, "bold"), text_color=PRIMARY_COLOR).pack(pady=(10, 10))
-        ctk.CTkButton(file_section, text="Import DXF", command=self._import_dxf, fg_color=PRIMARY_COLOR, text_color=ON_PRIMARY, hover_color=PRIMARY_VARIANT, corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
-        ctk.CTkButton(file_section, text="Generate Toolpath", command=self._generate_toolpath, fg_color=SECONDARY_COLOR, text_color=ON_SURFACE, hover_color=PRIMARY_COLOR, corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
-        ctk.CTkButton(file_section, text="Preview Toolpath", command=self._preview_toolpath, fg_color=SURFACE, text_color=PRIMARY_COLOR, hover_color=SECONDARY_COLOR, corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
-        ctk.CTkButton(file_section, text="Run Toolpath", command=self._run_toolpath, fg_color=PRIMARY_COLOR, text_color=ON_PRIMARY, hover_color=PRIMARY_VARIANT, corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
-        ctk.CTkButton(file_section, text="E-Stop", command=self._estop, fg_color=ERROR_COLOR, text_color=ON_PRIMARY, hover_color="#ff5a5f", corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=(6, 10))
+        ctk.CTkLabel(file_section, text="File & DXF", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=(10, 10))
+        ctk.CTkButton(file_section, text="Import DXF", command=self._import_dxf, fg_color=UI_COLORS['PRIMARY_COLOR'], text_color=UI_COLORS['ON_PRIMARY'], hover_color=UI_COLORS['PRIMARY_VARIANT'], corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
+        ctk.CTkButton(file_section, text="Generate Toolpath", command=self._generate_toolpath, fg_color=UI_COLORS['SECONDARY_COLOR'], text_color=UI_COLORS['ON_SURFACE'], hover_color=UI_COLORS['PRIMARY_COLOR'], corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
+        ctk.CTkButton(file_section, text="Preview Toolpath", command=self._preview_toolpath, fg_color=UI_COLORS['SURFACE'], text_color=UI_COLORS['PRIMARY_COLOR'], hover_color=UI_COLORS['SECONDARY_COLOR'], corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
+        ctk.CTkButton(file_section, text="Run Toolpath", command=self._run_toolpath, fg_color=UI_COLORS['PRIMARY_COLOR'], text_color=UI_COLORS['ON_PRIMARY'], hover_color=UI_COLORS['PRIMARY_VARIANT'], corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
+        ctk.CTkButton(file_section, text="E-Stop", command=self._estop, fg_color=UI_COLORS['ERROR_COLOR'], text_color=UI_COLORS['ON_PRIMARY'], hover_color="#ff5a5f", corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=(6, 10))
         
         # Status section
         status_section = ctk.CTkFrame(self.left_toolbar, fg_color="#d0d0d0", corner_radius=8)
         status_section.pack(fill="x", padx=16, pady=10)
-        ctk.CTkLabel(status_section, text="Status:", font=("Arial", 16, "bold"), text_color=PRIMARY_COLOR).pack(pady=(10, 5))
-        self.status_label = ctk.CTkLabel(status_section, text="Ready", font=("Arial", 16, "bold"), text_color=ON_SURFACE)
+        ctk.CTkLabel(status_section, text="Status:", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=(10, 5))
+        self.status_label = ctk.CTkLabel(status_section, text="Ready", font=("Arial", 16, "bold"), text_color=UI_COLORS['ON_SURFACE'])
         self.status_label.pack(pady=(0, 10))
 
         # Center Canvas
-        self.center_frame = ctk.CTkFrame(self.main_frame, fg_color=SURFACE, corner_radius=12)
+        self.center_frame = ctk.CTkFrame(self.main_frame, fg_color=UI_COLORS['SURFACE'], corner_radius=12)
         self.center_frame.grid(row=0, column=1, sticky="nsew", padx=(0, 12), pady=24)
         self.center_frame.grid_columnconfigure(0, weight=1)
         self.center_frame.grid_rowconfigure(0, weight=1)
         self._setup_center_canvas()
 
         # Right Toolbar
-        self.right_toolbar = ctk.CTkFrame(self.main_frame, fg_color=SURFACE, corner_radius=12, width=220)
+        self.right_toolbar = ctk.CTkFrame(self.main_frame, fg_color=UI_COLORS['SURFACE'], corner_radius=12, width=220)
         self.right_toolbar.grid(row=0, column=2, sticky="nse", padx=(12, 24), pady=24)
-        ctk.CTkLabel(self.right_toolbar, text="Motor Controls", font=("Arial", 16, "bold"), text_color=PRIMARY_COLOR).pack(pady=(20, 10))
+        ctk.CTkLabel(self.right_toolbar, text="Motor Controls", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=(20, 10))
         # Jog controls section
         jog_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
         jog_section.pack(fill=ctk.X, padx=10, pady=8)
@@ -631,7 +494,7 @@ class FabricCNCApp:
         speed_section.pack(fill=ctk.X, padx=10, pady=(0, 8))
         ctk.CTkLabel(speed_section, text="Jog Step (in)", font=("Arial", 16, "bold")).pack(side=ctk.LEFT, padx=10, pady=10)
         # Use range 0.1 to 5.0 inches with 0.1 increments
-        self._jog_slider_scale = 0.1
+        self._jog_slider_scale = APP_CONFIG['JOG_SLIDER_SCALE']
         # Calculate initial slider value (1.0 inch = 10 steps)
         initial_slider_value = int(self.jog_speed_var.get() / self._jog_slider_scale)
         speed_slider = ctk.CTkSlider(speed_section, from_=1, to=50, number_of_steps=49, variable=None, width=120, command=lambda v: self._on_jog_slider(v))
@@ -651,7 +514,7 @@ class FabricCNCApp:
         # Coordinates display section
         coord_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
         coord_section.pack(fill=ctk.X, padx=10, pady=8)
-        self.coord_label = ctk.CTkLabel(coord_section, text="", font=("Consolas", 16, "bold"), text_color=ON_SURFACE)
+        self.coord_label = ctk.CTkLabel(coord_section, text="", font=("Consolas", 16, "bold"), text_color=UI_COLORS['ON_SURFACE'])
         self.coord_label.pack(pady=10)
 
     def _bind_arrow_keys(self):
@@ -706,10 +569,10 @@ class FabricCNCApp:
             delta = -self.jog_speed
         elif key == 'Page_Up':
             axis = 'Z'
-            delta = 1.0 * INCH_TO_MM  # 1 inch up
+            delta = 1.0 * APP_CONFIG['INCH_TO_MM']  # 1 inch up
         elif key == 'Page_Down':
             axis = 'Z'
-            delta = -1.0 * INCH_TO_MM  # 1 inch down
+            delta = -1.0 * APP_CONFIG['INCH_TO_MM']  # 1 inch down
         elif key == 'Home':
             axis = 'ROT'
             delta = 5.0  # 5 degrees clockwise
@@ -750,13 +613,13 @@ class FabricCNCApp:
     # --- Center Canvas: DXF/toolpath/position ---
     def _setup_center_canvas(self):
         # Setup canvas with proper sizing and drawing - using original working approach
-        self.canvas = ctk.CTkCanvas(self.center_frame, bg=SURFACE, highlightthickness=0)
+        self.canvas = ctk.CTkCanvas(self.center_frame, bg=UI_COLORS['SURFACE'], highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky="nsew")
         self.center_frame.bind("<Configure>", self._on_canvas_resize)
         # Initialize canvas dimensions
-        self.canvas_width = 800
-        self.canvas_height = 600
-        self.canvas_scale = 1.0
+        self.canvas_width = APP_CONFIG['CANVAS_WIDTH']
+        self.canvas_height = APP_CONFIG['CANVAS_HEIGHT']
+        self.canvas_scale = APP_CONFIG['CANVAS_SCALE']
         self.canvas_offset = (0, 0)
         # Draw initial canvas
         self._draw_canvas()
@@ -778,8 +641,8 @@ class FabricCNCApp:
             self._draw_toolpath_inches()
         # Draw current tool head position (all axes)
         pos = self.motor_ctrl.get_position()
-        x = max(0.0, min(pos['X'], X_MAX_MM))
-        y = max(0.0, min(pos['Y'], Y_MAX_MM))
+        x = max(0.0, min(pos['X'], APP_CONFIG['X_MAX_MM']))
+        y = max(0.0, min(pos['Y'], APP_CONFIG['Y_MAX_MM']))
         clamped_pos = {'X': x, 'Y': y}
         self._draw_tool_head_inches(clamped_pos)
 
@@ -793,12 +656,12 @@ class FabricCNCApp:
             # Ensure we're within canvas bounds
             if 0 <= x_px <= self.canvas_width and 0 <= y_px <= self.canvas_height:
                 # Draw tick mark pointing up from bottom
-                self.canvas.create_line(x_px, y_px, x_px, y_px + 10, fill=PRIMARY_VARIANT, width=2)
+                self.canvas.create_line(x_px, y_px, x_px, y_px + 10, fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
                 # Draw label below tick (ensure it's visible)
                 # For X-axis labels, position them at a fixed distance from the bottom
                 label_y = self.canvas_height - 35
                 # Always draw labels, they should be visible - use same format as Y-axis
-                self.canvas.create_text(x_px, label_y, text=f"{x_in}", fill=ON_SURFACE, font=("Arial", 9), anchor="n")
+                self.canvas.create_text(x_px, label_y, text=f"{x_in}", fill=UI_COLORS['ON_SURFACE'], font=("Arial", 9), anchor="n")
                 # Debug: log first few labels to see positioning
                 if x_in <= 15:
                     logger.debug(f"X-axis label {x_in}: canvas_pos=({x_px:.1f}, {y_px:.1f}), label_y={label_y:.1f}, canvas_height={self.canvas_height}")
@@ -809,40 +672,40 @@ class FabricCNCApp:
             # Ensure we're within canvas bounds
             if 0 <= x_px <= self.canvas_width and 0 <= y_px <= self.canvas_height:
                 # Draw tick mark pointing right from left edge
-                self.canvas.create_line(x_px, y_px, x_px + 10, y_px, fill=PRIMARY_VARIANT, width=2)
+                self.canvas.create_line(x_px, y_px, x_px + 10, y_px, fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
                 # Draw label to the left of tick (ensure it's visible)
                 label_x = max(x_px - 5, 15)
-                self.canvas.create_text(label_x, y_px, text=f"{y_in}", fill=ON_SURFACE, font=("Arial", 9), anchor="e")
+                self.canvas.create_text(label_x, y_px, text=f"{y_in}", fill=UI_COLORS['ON_SURFACE'], font=("Arial", 9), anchor="e")
         
         # Draw border
-        self.canvas.create_rectangle(0, 0, self.canvas_width, self.canvas_height, outline=PRIMARY_COLOR, width=2)
+        self.canvas.create_rectangle(0, 0, self.canvas_width, self.canvas_height, outline=UI_COLORS['PRIMARY_COLOR'], width=2)
 
     def _inches_to_canvas(self, x_in, y_in):
         # Convert inches to canvas coordinates with home at bottom-left
-        plot_width_in = 68 + 2 * PLOT_BUFFER_IN
-        plot_height_in = 45 + 2 * PLOT_BUFFER_IN
+        plot_width_in = 68 + 2 * APP_CONFIG['PLOT_BUFFER_IN']
+        plot_height_in = 45 + 2 * APP_CONFIG['PLOT_BUFFER_IN']
         sx = self.canvas_width / plot_width_in
         sy = self.canvas_height / plot_height_in
-        ox = PLOT_BUFFER_IN * sx
-        oy = PLOT_BUFFER_IN * sy
+        ox = APP_CONFIG['PLOT_BUFFER_IN'] * sx
+        oy = APP_CONFIG['PLOT_BUFFER_IN'] * sy
         # Y coordinate: 0 at bottom, 45 at top (Tkinter Y is top-down)
         y_canvas = (45 - y_in) * sy + oy
         return x_in * sx + ox, y_canvas
 
     def _draw_tool_head_inches(self, pos):
         # Draw a small circle at the current tool head position (in inches)
-        y_in = pos['Y'] / INCH_TO_MM
-        x_in = pos['X'] / INCH_TO_MM
+        y_in = pos['Y'] / APP_CONFIG['INCH_TO_MM']
+        x_in = pos['X'] / APP_CONFIG['INCH_TO_MM']
         x_c, y_c = self._inches_to_canvas(x_in, y_in)
         
         # Make tool head more visible
-        r = 10  # Larger radius
+        r = APP_CONFIG['TOOL_HEAD_RADIUS']  # Larger radius
         # Draw outer circle (background)
-        self.canvas.create_oval(x_c - r - 2, y_c - r - 2, x_c + r + 2, y_c + r + 2, fill=PRIMARY_COLOR, outline=PRIMARY_COLOR, width=1)
+        self.canvas.create_oval(x_c - r - 2, y_c - r - 2, x_c + r + 2, y_c + r + 2, fill=UI_COLORS['PRIMARY_COLOR'], outline=UI_COLORS['PRIMARY_COLOR'], width=1)
         # Draw inner circle (tool head)
-        self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill=SECONDARY_COLOR, outline=PRIMARY_COLOR, width=2)
+        self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill=UI_COLORS['SECONDARY_COLOR'], outline=UI_COLORS['PRIMARY_COLOR'], width=2)
         # Draw coordinates
-        self.canvas.create_text(x_c, y_c - r - 15, text=f"(X={x_in:.2f}, Y={y_in:.2f})", fill=PRIMARY_VARIANT, font=("Arial", 10, "bold"))
+        self.canvas.create_text(x_c, y_c - r - 15, text=f"(X={x_in:.2f}, Y={y_in:.2f})", fill=UI_COLORS['PRIMARY_VARIANT'], font=("Arial", 10, "bold"))
         
         # Debug: log position for troubleshooting
         logger.debug(f"Tool head at canvas pos: ({x_c:.1f}, {y_c:.1f}), inches: ({x_in:.2f}, {y_in:.2f})")
@@ -860,7 +723,7 @@ class FabricCNCApp:
         logger.debug(f"Drawing DXF entities: scale={scale}, offset=({dx:.3f}, {dy:.3f}), entities={len(self.dxf_entities)}")
 
         # If toolpaths exist, use their shapes for color grouping
-        color_cycle = [PRIMARY_COLOR, PRIMARY_VARIANT, SECONDARY_COLOR, '#cc7700', '#aa00cc', '#cc2222', '#0a0', '#f0a', '#0af', '#fa0', '#a0f', '#0fa', '#af0', '#f00', '#00f', '#0ff', '#ff0', '#f0f', '#888', '#444']
+        color_cycle = [UI_COLORS['PRIMARY_COLOR'], UI_COLORS['PRIMARY_VARIANT'], UI_COLORS['SECONDARY_COLOR'], '#cc7700', '#aa00cc', '#cc2222', '#0a0', '#f0a', '#0af', '#fa0', '#a0f', '#0fa', '#af0', '#f00', '#00f', '#0ff', '#ff0', '#f0f', '#888', '#444']
         if hasattr(self, 'toolpaths') and self.toolpaths:
             for i, path in enumerate(self.toolpaths):
                 color = color_cycle[i % len(color_cycle)]
@@ -888,7 +751,7 @@ class FabricCNCApp:
                 y2_norm = y2 * scale - dy
                 x1c, y1c = self._inches_to_canvas(x1_norm, y1_norm)
                 x2c, y2c = self._inches_to_canvas(x2_norm, y2_norm)
-                self.canvas.create_line(x1c, y1c, x2c, y2c, fill=PRIMARY_VARIANT, width=2)
+                self.canvas.create_line(x1c, y1c, x2c, y2c, fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
             elif t == 'LWPOLYLINE':
                 points = [(p[0], p[1]) for p in e.get_points()]
                 flat = []
@@ -898,7 +761,7 @@ class FabricCNCApp:
                     y_norm = y * scale - dy
                     x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
                     flat.extend([x_c, y_c])
-                self.canvas.create_line(flat, fill=PRIMARY_VARIANT, width=2)
+                self.canvas.create_line(flat, fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
             elif t == 'POLYLINE':
                 points = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
                 flat = []
@@ -908,7 +771,7 @@ class FabricCNCApp:
                     y_norm = y * scale - dy
                     x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
                     flat.extend([x_c, y_c])
-                self.canvas.create_line(flat, fill=PRIMARY_VARIANT, width=2)
+                self.canvas.create_line(flat, fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
             elif t == 'SPLINE':
                 points = list(e.flattening(0.1))
                 flat = []
@@ -918,7 +781,7 @@ class FabricCNCApp:
                     y_norm = y * scale - dy
                     x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
                     flat.extend([x_c, y_c])
-                self.canvas.create_line(flat, fill=PRIMARY_VARIANT, width=2)
+                self.canvas.create_line(flat, fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
             elif t == 'ARC':
                 center = e.dxf.center
                 r = e.dxf.radius
@@ -937,7 +800,7 @@ class FabricCNCApp:
                     y_norm = y * scale - dy
                     x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
                     points.append((x_c, y_c))
-                self.canvas.create_line(*[coord for pt in points for coord in pt], fill=PRIMARY_VARIANT, width=2)
+                self.canvas.create_line(*[coord for pt in points for coord in pt], fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
             elif t == 'CIRCLE':
                 center = e.dxf.center
                 r = e.dxf.radius
@@ -952,14 +815,14 @@ class FabricCNCApp:
                     y_norm = y * scale - dy
                     x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
                     points.append((x_c, y_c))
-                self.canvas.create_line(*[coord for pt in points for coord in pt], fill=PRIMARY_VARIANT, width=2)
+                self.canvas.create_line(*[coord for pt in points for coord in pt], fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
 
     def _draw_toolpath_inches(self):
         # Draw toolpath in inches
-        if not hasattr(self, 'toolpaths') or not self.toolpaths:
+        if not hasattr(self, 'toolpath') or not self.toolpath:
             return
-        color_cycle = [PRIMARY_COLOR, PRIMARY_VARIANT, SECONDARY_COLOR, '#cc7700', '#aa00cc', '#cc2222', '#0a0', '#f0a', '#0af', '#fa0', '#a0f', '#0fa', '#af0', '#f00', '#00f', '#0ff', '#ff0', '#f0f', '#888', '#444']
-        for i, path in enumerate(self.toolpaths):
+        color_cycle = [UI_COLORS['PRIMARY_COLOR'], UI_COLORS['PRIMARY_VARIANT'], UI_COLORS['SECONDARY_COLOR'], '#cc7700', '#aa00cc', '#cc2222', '#0a0', '#f0a', '#0af', '#fa0', '#a0f', '#0fa', '#af0', '#f00', '#00f', '#0ff', '#ff0', '#f0f', '#888', '#444']
+        for i, path in enumerate(self.toolpath):
             color = color_cycle[i % len(color_cycle)]
             # Draw as a polyline of all (x, y) points where z==0 (cutting)
             points = [(x, y) for x, y, angle, z in path if z == 0]
@@ -967,8 +830,7 @@ class FabricCNCApp:
                 continue
             flat = []
             for x, y in points:
-                x_in, y_in = x / INCH_TO_MM, y / INCH_TO_MM
-                x_c, y_c = self._inches_to_canvas(x_in, y_in)
+                x_c, y_c = self._inches_to_canvas(x, y)
                 flat.extend([x_c, y_c])
             self.canvas.create_line(flat, fill=color, width=2, dash=(4, 2))
 
@@ -1135,63 +997,56 @@ class FabricCNCApp:
         return min_x, min_y, max_x, max_y
 
     def _generate_toolpath(self):
+        """
+        Generate truly continuous toolpaths without any stopping between segments.
+        All entities are combined into a single continuous motion path.
+        """
         if not self.dxf_entities:
             messagebox.showwarning("No DXF", "Import a DXF file first.")
             return
         
         scale = getattr(self, 'dxf_unit_scale', 1.0)
-        min_x, min_y, max_x, max_y = self._get_dxf_extents_inches()
-        # No Y flip, just offset
         dx, dy = self.dxf_offset
         
-        # --- Generate continuous toolpaths for curved entities ---
-        continuous_toolpaths = []
-        discrete_segments = []
+        # --- Generate ONE continuous toolpath combining ALL entities ---
+        combined_toolpath = []
         
-        logger.info(f"Processing {len(self.dxf_entities)} entities for continuous toolpath generation")
+        logger.info(f"Processing {len(self.dxf_entities)} entities for single continuous toolpath generation")
         
         for i, e in enumerate(self.dxf_entities):
             t = e.dxftype()
             logger.info(f"Processing entity {i+1}/{len(self.dxf_entities)}: {t}")
             
             if t == 'SPLINE':
-                logger.info(f"  Generating continuous SPLINE toolpath")
-                # Generate continuous toolpath for spline
-                continuous_path = generate_continuous_spline_toolpath(e, step_size=0.01)
+                logger.info(f"  Generating continuous SPLINE path")
+                # Generate continuous path for spline
+                continuous_path = self._generate_continuous_spline_path(e)
                 
-                # Transform coordinates
-                transformed_path = []
+                # Transform coordinates and add to combined toolpath
                 for x, y, angle, z in continuous_path:
                     tx = (x * scale) - dx
                     ty = (y * scale) - dy
-                    transformed_path.append((tx, ty, angle, z))
+                    combined_toolpath.append((tx, ty, angle, z))
                 
-                if transformed_path:
-                    continuous_toolpaths.append(transformed_path)
-                    logger.info(f"  Generated {len(transformed_path)} continuous points")
+                logger.info(f"  Added {len(continuous_path)} waypoints to combined toolpath")
                 
             elif t == 'CIRCLE':
                 center = e.dxf.center
                 radius = e.dxf.radius
-                logger.info(f"  Generating continuous CIRCLE toolpath: center=({center.x}, {center.y}), radius={radius}")
+                logger.info(f"  Generating continuous CIRCLE path: center=({center.x}, {center.y}), radius={radius}")
                 
-                # Generate continuous toolpath for full circle
-                continuous_path = generate_continuous_circle_toolpath(
-                    (center.x, center.y), radius, 
-                    start_angle=0, end_angle=2*math.pi, 
-                    step_size=0.01
+                # Generate continuous path for full circle
+                continuous_path = self._generate_continuous_circle_path(
+                    (center.x, center.y), radius
                 )
                 
-                # Transform coordinates
-                transformed_path = []
+                # Transform coordinates and add to combined toolpath
                 for x, y, angle, z in continuous_path:
                     tx = (x * scale) - dx
                     ty = (y * scale) - dy
-                    transformed_path.append((tx, ty, angle, z))
+                    combined_toolpath.append((tx, ty, angle, z))
                 
-                if transformed_path:
-                    continuous_toolpaths.append(transformed_path)
-                    logger.info(f"  Generated {len(transformed_path)} continuous points")
+                logger.info(f"  Added {len(continuous_path)} waypoints to combined toolpath")
                 
             elif t == 'ARC':
                 center = e.dxf.center
@@ -1203,242 +1058,215 @@ class FabricCNCApp:
                 if end_angle < start_angle:
                     end_angle += 2 * math.pi
                 
-                logger.info(f"  Generating continuous ARC toolpath: center=({center.x}, {center.y}), radius={radius}, angles={math.degrees(start_angle):.1f}° to {math.degrees(end_angle):.1f}°")
+                logger.info(f"  Generating continuous ARC path: center=({center.x}, {center.y}), radius={radius}, angles={math.degrees(start_angle):.1f}° to {math.degrees(end_angle):.1f}°")
                 
-                # Generate continuous toolpath for arc
-                continuous_path = generate_continuous_circle_toolpath(
+                # Generate continuous path for arc
+                continuous_path = self._generate_continuous_circle_path(
                     (center.x, center.y), radius,
-                    start_angle=start_angle, end_angle=end_angle,
-                    step_size=0.01
+                    start_angle=start_angle, end_angle=end_angle
                 )
                 
-                # Transform coordinates
-                transformed_path = []
+                # Transform coordinates and add to combined toolpath
                 for x, y, angle, z in continuous_path:
                     tx = (x * scale) - dx
                     ty = (y * scale) - dy
-                    transformed_path.append((tx, ty, angle, z))
+                    combined_toolpath.append((tx, ty, angle, z))
                 
-                if transformed_path:
-                    continuous_toolpaths.append(transformed_path)
-                    logger.info(f"  Generated {len(transformed_path)} continuous points")
+                logger.info(f"  Added {len(continuous_path)} waypoints to combined toolpath")
+            
+            elif t in ('LWPOLYLINE', 'POLYLINE'):
+                logger.info(f"  Generating continuous POLYLINE path")
+                # Generate continuous path for polyline
+                continuous_path = self._generate_continuous_polyline_path(e)
                 
-            else:
-                # For LINE, LWPOLYLINE, POLYLINE - use discrete segmentation
-                logger.info(f"  Using discrete segmentation for {t}")
-                if t == 'LINE':
-                    x1, y1 = e.dxf.start.x, e.dxf.start.y
-                    x2, y2 = e.dxf.end.x, e.dxf.end.y
-                    discrete_segments.append(((x1, y1), (x2, y2)))
-                elif t == 'LWPOLYLINE':
-                    pts = [p[:2] for p in e.get_points()]
-                    for i in range(1, len(pts)):
-                        discrete_segments.append((pts[i-1], pts[i]))
-                    if getattr(e, 'closed', False) or (len(pts) > 2 and pts[0] == pts[-1]):
-                        discrete_segments.append((pts[-1], pts[0]))
-                elif t == 'POLYLINE':
-                    pts = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
-                    for i in range(1, len(pts)):
-                        discrete_segments.append((pts[i-1], pts[i]))
-                    if getattr(e, 'is_closed', False) or (len(pts) > 2 and pts[0] == pts[-1]):
-                        discrete_segments.append((pts[-1], pts[0]))
+                # Transform coordinates and add to combined toolpath
+                for x, y, angle, z in continuous_path:
+                    tx = (x * scale) - dx
+                    ty = (y * scale) - dy
+                    combined_toolpath.append((tx, ty, angle, z))
+                
+                logger.info(f"  Added {len(continuous_path)} waypoints to combined toolpath")
+            
+            elif t == 'LINE':
+                logger.info(f"  Generating continuous LINE path")
+                # Generate continuous path for line
+                continuous_path = self._generate_continuous_line_path(e)
+                
+                # Transform coordinates and add to combined toolpath
+                for x, y, angle, z in continuous_path:
+                    tx = (x * scale) - dx
+                    ty = (y * scale) - dy
+                    combined_toolpath.append((tx, ty, angle, z))
+                
+                logger.info(f"  Added {len(continuous_path)} waypoints to combined toolpath")
         
-        # --- Process discrete segments (for lines and polylines) ---
-        discrete_toolpaths = []
-        if discrete_segments:
-            logger.info(f"Processing {len(discrete_segments)} discrete segments")
-            
-            # Group segments into shapes by connectivity
-            from collections import defaultdict, deque
-            point_map = defaultdict(list)
-            seg_indices = list(range(len(discrete_segments)))
-            
-            for idx, (p1, p2) in enumerate(discrete_segments):
-                p1r = (round(p1[0], 6), round(p1[1], 6))
-                p2r = (round(p2[0], 6), round(p2[1], 6))
-                point_map[p1r].append((idx, p2r))
-                point_map[p2r].append((idx, p1r))
-            
-            visited = set()
-            shapes = []
-            
-            for idx in seg_indices:
-                if idx in visited:
-                    continue
-                seg = discrete_segments[idx]
-                p_start = (round(seg[0][0], 6), round(seg[0][1], 6))
-                p_end = (round(seg[1][0], 6), round(seg[1][1], 6))
-                shape = [p_start, p_end]
-                visited.add(idx)
-                cur = p_end
-                
-                while True:
-                    found = False
-                    for next_idx, next_pt in point_map[cur]:
-                        if next_idx not in visited:
-                            shape.append(next_pt)
-                            visited.add(next_idx)
-                            cur = next_pt
-                            found = True
-                            break
-                    if not found:
-                        break
-                
-                cur = p_start
-                while True:
-                    found = False
-                    for next_idx, next_pt in point_map[cur]:
-                        if next_idx not in visited:
-                            shape = [next_pt] + shape
-                            visited.add(next_idx)
-                            cur = next_pt
-                            found = True
-                            break
-                    if not found:
-                        break
-                
-                deduped = [shape[0]]
-                for pt in shape[1:]:
-                    if pt != deduped[-1]:
-                        deduped.append(pt)
-                shapes.append(deduped)
-                logger.info(f"Created discrete shape {len(shapes)} with {len(deduped)} points")
-            
-            # Generate toolpaths for discrete shapes
-            for pts in shapes:
-                if len(pts) < 2:
-                    continue
-                
-                # Transform points
-                pts_t = [((x * scale) - dx, (y * scale) - dy) for x, y in pts]
-                
-                # Remove duplicate consecutive points
-                pts_clean = [pts_t[0]]
-                for i in range(1, len(pts_t)):
-                    x_prev, y_prev = pts_clean[-1]
-                    x_curr, y_curr = pts_t[i]
-                    if abs(x_curr - x_prev) > 1e-6 or abs(y_curr - y_prev) > 1e-6:
-                        x_first, y_first = pts_t[0]
-                        if abs(x_curr - x_first) > 1e-6 or abs(y_curr - y_first) > 1e-6:
-                            pts_clean.append(pts_t[i])
-                
-                pts_t = pts_clean
-                
-                # Generate discrete toolpath with Z movements for sharp turns
-                path = []
-                n = len(pts_t)
-                if n < 2:
-                    continue
-                
-                # Calculate angles
-                angles = []
-                for i in range(n):
-                    if i < n-1:
-                        x0, y0 = pts_t[i]
-                        x1, y1 = pts_t[i+1]
-                        relative_angle = math.atan2(y1 - y0, x1 - x0)
-                        absolute_angle = -(math.degrees(relative_angle) - 90.0)
-                        while absolute_angle > 180:
-                            absolute_angle -= 360
-                        while absolute_angle < -180:
-                            absolute_angle += 360
-                        angles.append(math.radians(absolute_angle))
-                    else:
-                        x0, y0 = pts_t[i]
-                        x1, y1 = pts_t[0]
-                        relative_angle = math.atan2(y1 - y0, x1 - x0)
-                        absolute_angle = -(math.degrees(relative_angle) - 90.0)
-                        while absolute_angle > 180:
-                            absolute_angle -= 360
-                        while absolute_angle < -180:
-                            absolute_angle += 360
-                        angles.append(math.radians(absolute_angle))
-                
-                # Start with Z down
-                path.append((pts_t[0][0], pts_t[0][1], angles[0], 0))
-                
-                for i in range(1, n):
-                    x0, y0 = pts_t[i-1]
-                    x1, y1 = pts_t[i]
-                    current_angle = angles[i-1]
-                    
-                    if i > 1:
-                        prev_angle = angles[i-2]
-                        angle_change_rad = abs(current_angle - prev_angle)
-                        if angle_change_rad > math.pi:
-                            angle_change_rad = 2 * math.pi - angle_change_rad
-                        angle_change_deg = math.degrees(angle_change_rad)
-                        
-                        if angle_change_deg > 2.0:
-                            path.append((x0, y0, prev_angle, 1))  # Z up
-                            path.append((x0, y0, current_angle, 0))  # Z down
-                    
-                    path.append((x1, y1, current_angle, 0))
-                
-                # End with Z up
-                path.append((pts_t[-1][0], pts_t[-1][1], angles[-1], 1))
-                discrete_toolpaths.append(path)
-        
-        # --- Combine continuous and discrete toolpaths ---
-        self.toolpaths = continuous_toolpaths + discrete_toolpaths
+        # Store the single combined continuous toolpath
+        self.toolpath = [combined_toolpath]
         
         # Debug output
-        print("\n=== CONTINUOUS TOOLPATH DEBUG INFO ===")
-        print(f"Generated {len(self.toolpaths)} toolpath(s)")
+        logger.info(f"=== CONTINUOUS TOOLPATH DEBUG INFO ===")
+        logger.info(f"Generated 1 combined continuous toolpath")
+        logger.info(f"Combined toolpath - {len(combined_toolpath)} points:")
         
-        total_points = 0
-        for i, path in enumerate(self.toolpaths):
-            print(f"\nToolpath {i+1} - {len(path)} points:")
-            total_points += len(path)
-            
-            # Show first few and last few points
-            for j, (x, y, angle, z) in enumerate(path):
-                if j < 3 or j >= len(path) - 3:  # Show first 3 and last 3 points
-                    x_mm = x * INCH_TO_MM
-                    y_mm = y * INCH_TO_MM
-                    angle_deg = math.degrees(angle)
-                    z_pos = "UP" if z == 1 else "DOWN"
-                    print(f"  Point {j+1}: X={x_mm:.2f}mm ({x:.3f}in), Y={y_mm:.2f}mm ({y:.3f}in), Angle={angle_deg:.1f}°, Z={z_pos}")
-                elif j == 3:
-                    print(f"  ... ({len(path)-6} more points) ...")
+        # Show first 5 points
+        for j, (x, y, angle, z) in enumerate(combined_toolpath[:5]):
+            angle_deg = math.degrees(angle)
+            z_status = "DOWN" if z == 0 else "UP"
+            logger.info(f"  Point {j+1}: X={x*25.4:.2f}mm ({x:.3f}in), Y={y*25.4:.2f}mm ({y:.3f}in), Angle={angle_deg:.1f}°, Z={z_status}")
         
-        print(f"\nTotal points: {total_points}")
-        print(f"Continuous toolpaths: {len(continuous_toolpaths)}")
-        print(f"Discrete toolpaths: {len(discrete_toolpaths)}")
+        if len(combined_toolpath) > 5:
+            logger.info(f"  ... ({len(combined_toolpath)-5} more points) ...")
+        
+        logger.info(f"Total points: {len(combined_toolpath)}")
+        logger.info(f"Continuous toolpaths: 1")
+        logger.info(f"Discrete toolpaths: 0")
         
         # Check machine limits
-        print(f"\n=== MACHINE LIMITS ===")
-        print(f"X limits: {-X_MAX_MM:.2f}mm to {X_MAX_MM:.2f}mm")
-        print(f"Y limits: {-Y_MAX_MM:.2f}mm to {Y_MAX_MM:.2f}mm")
+        logger.info(f"=== MACHINE LIMITS ===")
+        x_limits = (-68.0, 68.0)  # inches
+        y_limits = (-45.0, 45.0)  # inches
+        logger.info(f"X limits: {x_limits[0]*25.4:.2f}mm to {x_limits[1]*25.4:.2f}mm")
+        logger.info(f"Y limits: {y_limits[0]*25.4:.2f}mm to {y_limits[1]*25.4:.2f}mm")
         
-        beyond_limits = []
-        for i, path in enumerate(self.toolpaths):
-            for j, (x, y, angle, z) in enumerate(path):
-                x_mm = x * INCH_TO_MM
-                y_mm = y * INCH_TO_MM
-                if abs(x_mm) > X_MAX_MM or abs(y_mm) > Y_MAX_MM:
-                    beyond_limits.append((i+1, j+1, x_mm, y_mm))
+        all_within_limits = True
+        for x, y, angle, z in combined_toolpath:
+            if not (x_limits[0] <= x <= x_limits[1] and y_limits[0] <= y <= y_limits[1]):
+                all_within_limits = False
+                break
         
-        if beyond_limits:
-            print(f"\n⚠️  WARNING: {len(beyond_limits)} points beyond machine limits:")
-            for toolpath_idx, point_idx, x_mm, y_mm in beyond_limits:
-                print(f"  Toolpath {toolpath_idx}, Point {point_idx}: X={x_mm:.2f}mm, Y={y_mm:.2f}mm")
+        if all_within_limits:
+            logger.info("✅ All points within machine limits")
         else:
-            print("\n✅ All points within machine limits")
+            logger.warning("⚠️ Some points outside machine limits")
         
-        print("=== END DEBUG INFO ===\n")
+        logger.info("=== END DEBUG INFO ===")
         
         self._draw_canvas()
+    
+    def _generate_continuous_spline_path(self, spline):
+        """
+        Generate a single continuous path for a spline with no stopping.
+        Returns: List of (x, y, angle, z) tuples for continuous motion
+        """
+        return generate_continuous_spline_toolpath(spline, step_size=TOOLPATH_CONFIG['DEFAULT_STEP_SIZE'])
+    
+    def _generate_continuous_circle_path(self, center, radius, start_angle=0, end_angle=2*math.pi):
+        """
+        Generate a single continuous path for a circle/arc with no stopping.
+        Returns: List of (x, y, angle, z) tuples for continuous motion
+        """
+        return generate_continuous_circle_toolpath(center, radius, start_angle, end_angle, step_size=TOOLPATH_CONFIG['DEFAULT_STEP_SIZE'])
+    
+    def _generate_continuous_polyline_path(self, polyline):
+        """
+        Generate a single continuous path for a polyline with no stopping.
+        Returns: List of (x, y, angle, z) tuples for continuous motion
+        """
+        try:
+            # Get polyline points
+            if polyline.dxftype() == 'LWPOLYLINE':
+                points = [p[:2] for p in polyline.get_points()]
+            else:  # POLYLINE
+                points = [(v.dxf.x, v.dxf.y) for v in polyline.vertices()]
+            
+            if len(points) < 2:
+                return []
+            
+            toolpath = []
+            step_size = 0.1  # inches
+            
+            # Generate continuous path through all segments
+            for i in range(len(points) - 1):
+                start_point = points[i]
+                end_point = points[i + 1]
+                
+                # Calculate segment length
+                dx = end_point[0] - start_point[0]
+                dy = end_point[1] - start_point[1]
+                segment_length = math.sqrt(dx*dx + dy*dy)
+                
+                # Calculate number of steps for this segment
+                num_steps = max(8, int(segment_length / step_size))
+                
+                # Generate points along this segment
+                for j in range(num_steps + 1):
+                    t = j / num_steps
+                    x = start_point[0] + t * dx
+                    y = start_point[1] + t * dy
+                    
+                    # Calculate tangent angle
+                    tangent_angle = math.atan2(dy, dx)
+                    
+                    # Convert to absolute angle
+                    absolute_angle = -(math.degrees(tangent_angle) - 90.0)
+                    while absolute_angle > 180:
+                        absolute_angle -= 360
+                    while absolute_angle < -180:
+                        absolute_angle += 360
+                    
+                    # Z=0 for continuous cutting
+                    toolpath.append((x, y, math.radians(absolute_angle), 0))
+            
+            return toolpath
+            
+        except Exception as e:
+            logger.error(f"Error generating continuous polyline path: {e}")
+            return []
+    
+    def _generate_continuous_line_path(self, line):
+        """
+        Generate a single continuous path for a line with no stopping.
+        Returns: List of (x, y, angle, z) tuples for continuous motion
+        """
+        try:
+            start_point = (line.dxf.start.x, line.dxf.start.y)
+            end_point = (line.dxf.end.x, line.dxf.end.y)
+            
+            # Calculate line length
+            dx = end_point[0] - start_point[0]
+            dy = end_point[1] - start_point[1]
+            line_length = math.sqrt(dx*dx + dy*dy)
+            
+            # Calculate number of steps
+            step_size = 0.1  # inches
+            num_steps = max(8, int(line_length / step_size))
+            
+            toolpath = []
+            
+            # Generate points along the line
+            for i in range(num_steps + 1):
+                t = i / num_steps
+                x = start_point[0] + t * dx
+                y = start_point[1] + t * dy
+                
+                # Calculate tangent angle
+                tangent_angle = math.atan2(dy, dx)
+                
+                # Convert to absolute angle
+                absolute_angle = -(math.degrees(tangent_angle) - 90.0)
+                while absolute_angle > 180:
+                    absolute_angle -= 360
+                while absolute_angle < -180:
+                    absolute_angle += 360
+                
+                # Z=0 for continuous cutting
+                toolpath.append((x, y, math.radians(absolute_angle), 0))
+            
+            return toolpath
+            
+        except Exception as e:
+            logger.error(f"Error generating continuous line path: {e}")
+            return []
 
     def _preview_toolpath(self):
-        if not hasattr(self, 'toolpaths') or not self.toolpaths:
+        if not hasattr(self, 'toolpath') or not self.toolpath:
             messagebox.showwarning("No Toolpath", "Generate a toolpath first.")
             return
         self._draw_canvas()  # Clear previous preview only once
         def animate_shape(shape_idx=0):
-            if shape_idx >= len(self.toolpaths):
+            if shape_idx >= len(self.toolpath):
                 return
-            path = self.toolpaths[shape_idx]
+            path = self.toolpath[shape_idx]
             def animate_step(idx=0):
                 steps_per_tick = 1  # Animate 1 step per timer tick for smoothness
                 if idx >= len(path):
@@ -1450,28 +1278,26 @@ class FabricCNCApp:
                     x, y, angle, z = path[idx + j]
                     r = 0.5  # radius in inches
                     x_c, y_c = self._inches_to_canvas(x, y)
-                    # Draw blue dot if Z=0, then grey dot if Z=1 (slightly larger)
+                    # Draw blue dot for continuous cutting (Z=0)
                     if z == 0:
-                        self.canvas.create_oval(x_c-6, y_c-6, x_c+6, y_c+6, fill=PRIMARY_COLOR, outline=PRIMARY_VARIANT)
-                    if z == 1:
-                        self.canvas.create_oval(x_c-8, y_c-8, x_c+8, y_c+8, fill=ON_SURFACE, outline=PRIMARY_VARIANT)
+                        self.canvas.create_oval(x_c-6, y_c-6, x_c+6, y_c+6, fill=UI_COLORS['PRIMARY_COLOR'], outline=UI_COLORS['PRIMARY_VARIANT'])
                     # Draw orientation line (wheel direction)
                     x2 = x + r * math.cos(angle)
                     y2 = y + r * math.sin(angle)
                     x2_c, y2_c = self._inches_to_canvas(x2, y2)
-                    self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill=SECONDARY_COLOR, width=3)
+                    self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill=UI_COLORS['SECONDARY_COLOR'], width=3)
                 self.root.after(2, animate_step, idx + steps_per_tick)  # Smoother animation
             animate_step()
         animate_shape()
 
     def _run_toolpath(self):
-        if not hasattr(self, 'toolpaths') or not self.toolpaths:
+        if not hasattr(self, 'toolpath') or not self.toolpath:
             messagebox.showwarning("No Toolpath", "Generate a toolpath first.")
             return
             
         # Debug: Print machine limits and first toolpath point
         print(f"\n=== TOOLPATH EXECUTION DEBUG ===")
-        print(f"Machine limits: X=±{X_MAX_MM:.2f}mm, Y=±{Y_MAX_MM:.2f}mm")
+        print(f"Machine limits: X=±{APP_CONFIG['X_MAX_MM']:.2f}mm, Y=±{APP_CONFIG['Y_MAX_MM']:.2f}mm")
         
         # Debug: Check sensor states before starting toolpath
         if MOTOR_IMPORTS_AVAILABLE:
@@ -1480,13 +1306,13 @@ class FabricCNCApp:
             for motor, state in sensor_states.items():
                 print(f"{motor}: raw={state['raw']}, debounced={state['debounced']}, last_trigger_time={state['last_trigger_time']:.3f}s, readings={state['readings']}")
         
-        if self.toolpaths and self.toolpaths[0]:
-            first_point = self.toolpaths[0][0]
+        if self.toolpath and self.toolpath[0]:
+            first_point = self.toolpath[0][0]
             x, y, angle, z = first_point
-            x_mm = x * INCH_TO_MM
-            y_mm = y * INCH_TO_MM
+            x_mm = x * APP_CONFIG['INCH_TO_MM']
+            y_mm = y * APP_CONFIG['INCH_TO_MM']
             print(f"First toolpath point: X={x:.3f}in ({x_mm:.2f}mm), Y={y:.3f}in ({y_mm:.2f}mm)")
-            if abs(x_mm) > X_MAX_MM or abs(y_mm) > Y_MAX_MM:
+            if abs(x_mm) > APP_CONFIG['X_MAX_MM'] or abs(y_mm) > APP_CONFIG['Y_MAX_MM']:
                 print(f"⚠️  WARNING: First point beyond machine limits!")
                 return
             
@@ -1495,14 +1321,14 @@ class FabricCNCApp:
         self._running_toolpath = True
         self._current_toolpath_pos = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
         self._current_toolpath_idx = [0, 0]  # [shape_idx, step_idx]
-        self._toolpath_total_steps = sum(len(path) for path in self.toolpaths)
+        self._toolpath_total_steps = sum(len(path) for path in self.toolpath)
         self._toolpath_step_count = 0
         
         # Start with travel move to first point
-        if self.toolpaths and self.toolpaths[0]:
-            first_point = self.toolpaths[0][0]
+        if self.toolpath and self.toolpath[0]:
+            first_point = self.toolpath[0][0]
             x, y, angle, z = first_point
-            self._travel_to_start(x * INCH_TO_MM, y * INCH_TO_MM)
+            self._travel_to_start(x * APP_CONFIG['INCH_TO_MM'], y * APP_CONFIG['INCH_TO_MM'])
         else:
             self._run_toolpath_step()
 
@@ -1510,12 +1336,12 @@ class FabricCNCApp:
         """Travel from home to the start position of the toolpath."""
         # Move to start position with Z up
         if MOTOR_IMPORTS_AVAILABLE:
-            self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=Z_UP_MM, rot=0.0)
+            self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=APP_CONFIG['Z_UP_MM'], rot=0.0)
         
         # Update position and display
         self._current_toolpath_pos['X'] = x_mm
         self._current_toolpath_pos['Y'] = y_mm
-        self._current_toolpath_pos['Z'] = Z_UP_MM
+        self._current_toolpath_pos['Z'] = APP_CONFIG['Z_UP_MM']
         self._current_toolpath_pos['ROT'] = 0.0
         
         self._update_position_display()
@@ -1528,10 +1354,10 @@ class FabricCNCApp:
         if not self._running_toolpath:
             return
         shape_idx, step_idx = self._current_toolpath_idx
-        if shape_idx >= len(self.toolpaths):
+        if shape_idx >= len(self.toolpath):
             self._running_toolpath = False
             return
-        path = self.toolpaths[shape_idx]
+        path = self.toolpath[shape_idx]
         if step_idx >= len(path):
             # Move to next shape
             self._current_toolpath_idx = [shape_idx + 1, 0]
@@ -1539,11 +1365,11 @@ class FabricCNCApp:
             return
         x, y, angle, z = path[step_idx]
         # Set toolpath position directly (no swap)
-        x_mm = x * INCH_TO_MM
-        y_mm = y * INCH_TO_MM
+        x_mm = x * APP_CONFIG['INCH_TO_MM']
+        y_mm = y * APP_CONFIG['INCH_TO_MM']
         self._current_toolpath_pos['X'] = x_mm
         self._current_toolpath_pos['Y'] = y_mm
-        self._current_toolpath_pos['Z'] = Z_DOWN_MM if z == 0 else Z_UP_MM
+        self._current_toolpath_pos['Z'] = APP_CONFIG['Z_DOWN_MM'] if z == 0 else APP_CONFIG['Z_UP_MM']
         self._current_toolpath_pos['ROT'] = math.degrees(angle)
         
         # Debug: print toolpath coordinates in both units
@@ -1561,8 +1387,8 @@ class FabricCNCApp:
         print(f"[DEBUG] Toolpath pos: X={self._current_toolpath_pos['X']:.2f} Y={self._current_toolpath_pos['Y']:.2f} | Motor pos: X={actual_pos['X']:.2f} Y={actual_pos['Y']:.2f}")
         
         # Check if coordinates are within machine limits
-        if abs(x_mm) > X_MAX_MM or abs(y_mm) > Y_MAX_MM:
-            print(f"[WARNING] Coordinates beyond machine limits! X={x_mm:.2f}mm (limit: ±{X_MAX_MM:.2f}mm), Y={y_mm:.2f}mm (limit: ±{Y_MAX_MM:.2f}mm)")
+        if abs(x_mm) > APP_CONFIG['X_MAX_MM'] or abs(y_mm) > APP_CONFIG['Y_MAX_MM']:
+            print(f"[WARNING] Coordinates beyond machine limits! X={x_mm:.2f}mm (limit: ±{APP_CONFIG['X_MAX_MM']:.2f}mm), Y={y_mm:.2f}mm (limit: ±{APP_CONFIG['Y_MAX_MM']:.2f}mm)")
         self._update_position_display()  # Force update after each move
         self._draw_canvas()
         # Next step
@@ -1572,24 +1398,24 @@ class FabricCNCApp:
 
     def _draw_live_tool_head_inches(self, pos):
         # Draw a blue dot and orientation line at the current tool head position (in inches)
-        x_in = pos['X'] / INCH_TO_MM
-        y_in = pos['Y'] / INCH_TO_MM
+        x_in = pos['X'] / APP_CONFIG['INCH_TO_MM']
+        y_in = pos['Y'] / APP_CONFIG['INCH_TO_MM']
         rot_rad = math.radians(pos.get('ROT', 0.0))
         x_c, y_c = self._inches_to_canvas(x_in, y_in)
-        r = 7
-        self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill=PRIMARY_COLOR, outline=PRIMARY_VARIANT, width=2)
-        r_dir = 0.5  # 0.5 inch
+        r = APP_CONFIG['LIVE_TOOL_HEAD_RADIUS']
+        self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill=UI_COLORS['PRIMARY_COLOR'], outline=UI_COLORS['PRIMARY_VARIANT'], width=2)
+        r_dir = APP_CONFIG['LIVE_TOOL_HEAD_DIR_RADIUS']  # 0.5 inch
         x2 = x_in + r_dir * math.cos(rot_rad)
         y2 = y_in + r_dir * math.sin(rot_rad)
         x2_c, y2_c = self._inches_to_canvas(x2, y2)
-        self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill=SECONDARY_COLOR, width=3)
+        self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill=UI_COLORS['SECONDARY_COLOR'], width=3)
 
     # --- Right Toolbar: Motor controls ---
     def _setup_right_toolbar(self):
-        ctk.CTkLabel(self.right_toolbar, text="Motor Controls", font=("Arial", 16, "bold"), text_color=PRIMARY_COLOR).pack(pady=(20, 10))
+        ctk.CTkLabel(self.right_toolbar, text="Motor Controls", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=(20, 10))
         
         # Jog controls (arrow key layout)
-        jog_frame = ctk.CTkFrame(self.right_toolbar, fg_color=SURFACE, corner_radius=12)
+        jog_frame = ctk.CTkFrame(self.right_toolbar, fg_color=UI_COLORS['SURFACE'], corner_radius=12)
         jog_frame.pack(fill=ctk.X, padx=10, pady=8)
         # 3x3 grid for arrow keys
         jog_frame.grid_columnconfigure(0, minsize=32)
@@ -1636,7 +1462,7 @@ class FabricCNCApp:
         home_section = ctk.CTkFrame(self.right_toolbar, fg_color="#f0f0f0", corner_radius=8)
         home_section.pack(fill=ctk.X, padx=10, pady=8)
         # Home controls
-        home_frame = ctk.CTkFrame(home_section, fg_color=SURFACE, corner_radius=12)
+        home_frame = ctk.CTkFrame(home_section, fg_color=UI_COLORS['SURFACE'], corner_radius=12)
         home_frame.pack(fill=ctk.X, padx=10, pady=10)
         ctk.CTkButton(home_frame, text="Home X", command=lambda: self._home('X'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, pady=2)
         ctk.CTkButton(home_frame, text="Home Y", command=lambda: self._home('Y'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, pady=2)
@@ -1647,13 +1473,13 @@ class FabricCNCApp:
         # Coordinates display section
         coord_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
         coord_section.pack(fill=ctk.X, padx=10, pady=8)
-        self.coord_label = ctk.CTkLabel(coord_section, text="", font=("Consolas", 16, "bold"), text_color=ON_SURFACE)
+        self.coord_label = ctk.CTkLabel(coord_section, text="", font=("Consolas", 16, "bold"), text_color=UI_COLORS['ON_SURFACE'])
         self.coord_label.pack(pady=10)
 
     def _add_jog_button(self, parent, text, cmd):
         # Use larger font for arrow buttons
         font_size = 20 if text in ["↑", "↓", "←", "→"] else 16
-        btn = ctk.CTkButton(parent, text=text, command=cmd, width=50, height=40, fg_color=PRIMARY_COLOR, text_color=ON_PRIMARY, hover_color=PRIMARY_VARIANT, corner_radius=8, font=("Arial", font_size, "bold"))
+        btn = ctk.CTkButton(parent, text=text, command=cmd, width=50, height=40, fg_color=UI_COLORS['PRIMARY_COLOR'], text_color=UI_COLORS['ON_PRIMARY'], hover_color=UI_COLORS['PRIMARY_VARIANT'], corner_radius=8, font=("Arial", font_size, "bold"))
         return btn
 
     def _jog(self, axis, delta):
@@ -1670,7 +1496,7 @@ class FabricCNCApp:
         self._draw_canvas()
         self._update_position_display()
         # Clear status after 2 seconds
-        self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=ON_SURFACE))
+        self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
     def _home_all(self):
         success = self.motor_ctrl.home_all_synchronous()
@@ -1681,7 +1507,7 @@ class FabricCNCApp:
         self._draw_canvas()
         self._update_position_display()
         # Clear status after 2 seconds
-        self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=ON_SURFACE))
+        self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
     def _stop_movement(self):
         """Stop all movement and cancel any pending arrow key operations."""
@@ -1701,13 +1527,13 @@ class FabricCNCApp:
         self.motor_ctrl.estop()
         self.status_label.configure(text="EMERGENCY STOP", text_color="red")
         # Clear status after 3 seconds
-        self.root.after(3000, lambda: self.status_label.configure(text="Ready", text_color=ON_SURFACE))
+        self.root.after(3000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
     def _update_position_display(self):
         pos = self.motor_ctrl.get_position()
-        x_disp = pos['X']/INCH_TO_MM
-        y_disp = pos['Y']/INCH_TO_MM
-        z_disp = pos['Z']/INCH_TO_MM  # Convert Z to inches
+        x_disp = pos['X']/APP_CONFIG['INCH_TO_MM']
+        y_disp = pos['Y']/APP_CONFIG['INCH_TO_MM']
+        z_disp = pos['Z']/APP_CONFIG['INCH_TO_MM']  # Convert Z to inches
         rot_disp = pos['ROT']
         text = f"X: {x_disp:.2f} in\nY: {y_disp:.2f} in\nZ: {z_disp:.2f} in\nROT: {rot_disp:.1f}°"
         self.coord_label.configure(text=text)
@@ -1715,7 +1541,7 @@ class FabricCNCApp:
 
     def _update_jog_speed(self):
         try:
-            self.jog_speed = self.jog_speed_var.get() * INCH_TO_MM
+            self.jog_speed = self.jog_speed_var.get() * APP_CONFIG['INCH_TO_MM']
         except Exception:
             pass
 
@@ -1761,6 +1587,12 @@ def main():
     print(f"[DEBUG] ON_RPI={ON_RPI}")
     print(f"[DEBUG] MOTOR_IMPORTS_AVAILABLE={MOTOR_IMPORTS_AVAILABLE}")
     print(f"[DEBUG] SIMULATION_MODE={SIMULATION_MODE}")
+
+# G-code generation functions moved to toolpath_planning package
+
+# G-code generation functions moved to toolpath_planning package
+
+# G-code file operations moved to toolpath_planning package
 
 if __name__ == "__main__":
     main() 

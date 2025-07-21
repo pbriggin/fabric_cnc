@@ -8,6 +8,7 @@ Provides motor configurations, work area settings, and motion parameters.
 import json
 import logging
 import os
+import platform
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
@@ -190,6 +191,9 @@ class Config:
             
         logger.info("Configuration validation successful")
 
+# System detection
+ON_RPI = platform.system() == 'Linux' and (os.uname().machine.startswith('arm') or os.uname().machine.startswith('aarch'))
+
 # Create global configuration instance
 config = Config()
 
@@ -203,6 +207,9 @@ DEFAULT_ACCEL_MM_S2 = config.motion.default_accel_mm_s2
 LIFT_HEIGHT_MM = config.motion.lift_height_mm
 USE_SIMULATION_MODE = config.simulation_mode
 STEP_PULSE_DURATION = config.step_pulse_duration
+
+# Simulation mode detection
+SIMULATION_MODE = not ON_RPI or config.simulation_mode
 
 # Motor configuration - Updated to match tested pin assignments
 MOTOR_CONFIG = {
@@ -282,4 +289,53 @@ GUI_CONFIG = {
     'UPDATE_RATE': 100,  # ms between updates
     'MOVE_INCREMENT': 10,  # mm per button press
     'HOMING_BUTTON_COLOR': '#FFA500'  # Orange color for homing button
+}
+
+# Application configuration
+APP_CONFIG = {
+    'INCH_TO_MM': 25.4,
+    'X_MAX_MM': 68 * 25.4,  # 68 inches
+    'Y_MAX_MM': 45 * 25.4,  # 45 inches
+    'Z_MAX_MM': 2.5 * 25.4,  # 2.5 inches
+    'Z_UP_MM': -19.05,  # -0.75 inches
+    'Z_DOWN_MM': -38.1,  # -1.5 inches
+    'PLOT_BUFFER_IN': 1.0,
+    'ANGLE_CHANGE_THRESHOLD_DEG': 2.0,
+    'STEP_SIZE_INCHES': 0.1,
+    'ARROW_KEY_REPEAT_DELAY': 100,
+    'JOG_SLIDER_SCALE': 0.1,
+    'CANVAS_WIDTH': 800,
+    'CANVAS_HEIGHT': 600,
+    'CANVAS_SCALE': 1.0,
+    'TOOL_HEAD_RADIUS': 10,
+    'LIVE_TOOL_HEAD_RADIUS': 7,
+    'LIVE_TOOL_HEAD_DIR_RADIUS': 0.5,
+    'ANIMATION_STEPS_PER_TICK': 1,
+    'ANIMATION_TOOL_RADIUS': 0.5,
+}
+
+# UI Color scheme
+UI_COLORS = {
+    'PRIMARY_COLOR': '#2196F3',  # Blue 500
+    'PRIMARY_VARIANT': '#1976D2',  # Blue 700
+    'SECONDARY_COLOR': '#4FC3F7',  # Light Blue 300
+    'BACKGROUND': '#F5F5F5',
+    'SURFACE': '#F5F5F5',
+    'ON_PRIMARY': '#ffffff',
+    'ON_SURFACE': '#222222',
+    'ERROR_COLOR': '#b00020',
+}
+
+# Toolpath configuration
+TOOLPATH_CONFIG = {
+    'DEFAULT_FEED_RATE': 100,
+    'DEFAULT_Z_UP': 5,
+    'DEFAULT_Z_DOWN': -1,
+    'DEFAULT_STEP_SIZE': 0.1,
+    'SPLINE_FLATTENING_PRECISION': 0.005,
+    'CIRCLE_STEPS_MIN': 32,
+    'CIRCLE_STEPS_MAX': 256,
+    'SPLINE_STEPS_MIN': 64,
+    'SPLINE_STEPS_MAX': 512,
+    'MAX_ANGLE_STEP_RADIANS': 0.026179,  # 1.5 degrees
 } 
