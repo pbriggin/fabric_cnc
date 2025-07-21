@@ -424,7 +424,7 @@ class FabricCNCApp:
         # Close button
         close_button = ctk.CTkButton(self.app_bar, text="✕", width=40, height=30, 
                                    command=self._close_app, fg_color="transparent", 
-                                   text_color=UI_COLORS['ON_PRIMARY'], hover_color="#ff5a5f", corner_radius=6)
+                                   text_color=UI_COLORS['ON_PRIMARY'], hover_color=UI_COLORS['BUTTON_DANGER'], corner_radius=6)
         close_button.pack(side="right", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
 
         # Main container using grid for three-column layout
@@ -451,17 +451,15 @@ class FabricCNCApp:
         
         # File buttons with consistent padding
         file_buttons = [
-            ("Import DXF", self._import_dxf, UI_COLORS['PRIMARY_COLOR'], UI_COLORS['ON_PRIMARY'], UI_COLORS['PRIMARY_VARIANT']),
-            ("Generate Toolpath", self._generate_toolpath, UI_COLORS['SECONDARY_COLOR'], UI_COLORS['ON_SURFACE'], UI_COLORS['PRIMARY_COLOR']),
-            ("Preview Toolpath", self._preview_toolpath, UI_COLORS['SURFACE'], UI_COLORS['PRIMARY_COLOR'], UI_COLORS['SECONDARY_COLOR']),
-            ("Run Toolpath", self._run_toolpath, UI_COLORS['PRIMARY_COLOR'], UI_COLORS['ON_PRIMARY'], UI_COLORS['PRIMARY_VARIANT']),
-            ("E-Stop", self._estop, UI_COLORS['ERROR_COLOR'], UI_COLORS['ON_PRIMARY'], "#ff5a5f")
+            ("Import DXF", self._import_dxf, "primary"),
+            ("Generate Toolpath", self._generate_toolpath, "secondary"),
+            ("Preview Toolpath", self._preview_toolpath, "secondary"),
+            ("Run Toolpath", self._run_toolpath, "success"),
+            ("E-Stop", self._estop, "danger")
         ]
         
-        for text, command, bg_color, text_color, hover_color in file_buttons:
-            btn = ctk.CTkButton(file_section, text=text, command=command, 
-                              fg_color=bg_color, text_color=text_color, hover_color=hover_color, 
-                              corner_radius=8, height=40, font=("Arial", 16, "bold"))
+        for text, command, button_type in file_buttons:
+            btn = self._create_stylish_button(file_section, text, command, button_type)
             btn.pack(fill="x", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
         
         # Status section - fills width but wraps height around text
@@ -550,14 +548,14 @@ class FabricCNCApp:
         home_section.grid(row=1, column=0, sticky="ew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
         
         home_buttons = [
-            ("Home X", lambda: self._home('X')),
-            ("Home Y", lambda: self._home('Y')),
-            ("Home Z", lambda: self._home('Z')),
-            ("Home All", self._home_all)
+            ("Home X", lambda: self._home('X'), "primary"),
+            ("Home Y", lambda: self._home('Y'), "primary"),
+            ("Home Z", lambda: self._home('Z'), "primary"),
+            ("Home All", self._home_all, "success")
         ]
         
-        for i, (text, command) in enumerate(home_buttons):
-            btn = ctk.CTkButton(home_section, text=text, command=command, height=35, font=("Arial", 16, "bold"))
+        for i, (text, command, button_type) in enumerate(home_buttons):
+            btn = self._create_stylish_button(home_section, text, command, button_type, height=35)
             btn.pack(fill=ctk.X, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
         
         # Coordinates display section - expands to fill remaining space
@@ -1448,15 +1446,43 @@ class FabricCNCApp:
 
 
     def _add_jog_button(self, parent, text, cmd):
-        # Use larger font for arrow buttons
-        font_size = 20 if text in ["↑", "↓", "←", "→"] else 16
-        btn = ctk.CTkButton(parent, text=text, command=cmd, width=50, height=40, fg_color=UI_COLORS['PRIMARY_COLOR'], text_color=UI_COLORS['ON_PRIMARY'], hover_color=UI_COLORS['PRIMARY_VARIANT'], corner_radius=8, font=("Arial", font_size, "bold"))
+        # Consistent font with rest of project
+        btn = ctk.CTkButton(parent, text=text, command=cmd, width=50, height=40, fg_color=UI_COLORS['BUTTON_PRIMARY'], text_color=UI_COLORS['BUTTON_TEXT'], hover_color=UI_COLORS['BUTTON_PRIMARY_HOVER'], corner_radius=8, font=("Arial", 16, "bold"))
         return btn
 
     def _add_compact_jog_button(self, parent, text, cmd):
-        # Compact version for the minimal right toolbar - consistent with app styling
-        font_size = 16 if text in ["↑", "↓", "←", "→"] else 12
-        btn = ctk.CTkButton(parent, text=text, command=cmd, width=35, height=30, fg_color=UI_COLORS['PRIMARY_COLOR'], text_color=UI_COLORS['ON_PRIMARY'], hover_color=UI_COLORS['PRIMARY_VARIANT'], corner_radius=8, font=("Arial", font_size, "bold"))
+        # Compact version with consistent font styling
+        btn = ctk.CTkButton(parent, text=text, command=cmd, width=35, height=30, fg_color=UI_COLORS['BUTTON_PRIMARY'], text_color=UI_COLORS['BUTTON_TEXT'], hover_color=UI_COLORS['BUTTON_PRIMARY_HOVER'], corner_radius=8, font=("Arial", 16, "bold"))
+        return btn
+
+    def _create_stylish_button(self, parent, text, command, button_type="primary", **kwargs):
+        """Create a stylish button with consistent styling and modern appearance."""
+        # Define button colors based on type
+        button_colors = {
+            "primary": (UI_COLORS['BUTTON_PRIMARY'], UI_COLORS['BUTTON_PRIMARY_HOVER']),
+            "secondary": (UI_COLORS['BUTTON_SECONDARY'], UI_COLORS['BUTTON_SECONDARY_HOVER']),
+            "success": (UI_COLORS['BUTTON_SUCCESS'], UI_COLORS['BUTTON_SUCCESS_HOVER']),
+            "warning": (UI_COLORS['BUTTON_WARNING'], UI_COLORS['BUTTON_WARNING_HOVER']),
+            "danger": (UI_COLORS['BUTTON_DANGER'], UI_COLORS['BUTTON_DANGER_HOVER']),
+        }
+        
+        bg_color, hover_color = button_colors.get(button_type, button_colors["primary"])
+        
+        # Default styling
+        default_kwargs = {
+            'fg_color': bg_color,
+            'text_color': UI_COLORS['BUTTON_TEXT'],
+            'hover_color': hover_color,
+            'corner_radius': 10,  # Slightly more rounded for modern look
+            'font': ("Arial", 16, "bold"),
+            'border_width': 0,  # No border for clean look
+            'height': 40,
+        }
+        
+        # Update with any custom kwargs
+        default_kwargs.update(kwargs)
+        
+        btn = ctk.CTkButton(parent, text=text, command=command, **default_kwargs)
         return btn
 
     def _jog(self, axis, delta):

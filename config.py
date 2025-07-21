@@ -325,6 +325,19 @@ UI_COLORS = {
     'ON_PRIMARY': '#ffffff',
     'ON_SURFACE': '#222222',
     'ERROR_COLOR': '#b00020',
+    # Modern button styling
+    'BUTTON_PRIMARY': '#3B82F6',  # Modern blue
+    'BUTTON_PRIMARY_HOVER': '#2563EB',  # Darker blue on hover
+    'BUTTON_SECONDARY': '#6B7280',  # Modern gray
+    'BUTTON_SECONDARY_HOVER': '#4B5563',  # Darker gray on hover
+    'BUTTON_SUCCESS': '#10B981',  # Modern green
+    'BUTTON_SUCCESS_HOVER': '#059669',  # Darker green on hover
+    'BUTTON_WARNING': '#F59E0B',  # Modern orange
+    'BUTTON_WARNING_HOVER': '#D97706',  # Darker orange on hover
+    'BUTTON_DANGER': '#EF4444',  # Modern red
+    'BUTTON_DANGER_HOVER': '#DC2626',  # Darker red on hover
+    'BUTTON_TEXT': '#FFFFFF',  # White text on buttons
+    'BUTTON_SHADOW': '#E5E7EB',  # Light shadow color
 }
 
 # UI Padding constants for consistent spacing
