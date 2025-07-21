@@ -195,9 +195,13 @@ class ContinuousToolpathGenerator:
             x = cx + radius * math.cos(angle)
             y = cy + radius * math.sin(angle)
             
-            # Calculate tangent angle (perpendicular to radius)
-            tangent_angle = angle + math.pi/2  # 90° from radius
-            absolute_angle = self._convert_to_absolute_angle(tangent_angle)
+            # Calculate cutting blade orientation (tangent to circle)
+            # For circles, the cutting blade should be tangent to the circle
+            # The angle parameter is the angle around the circle
+            # The cutting blade should be perpendicular to the radius (tangent to circle)
+            cutting_angle = angle + math.pi/2  # 90° from radius = tangent to circle
+            # Convert to machine coordinate system (vertical = 0°)
+            absolute_angle = cutting_angle
             
             # Z=0 for continuous cutting (no lifting)
             toolpath.append((x, y, absolute_angle, 0))

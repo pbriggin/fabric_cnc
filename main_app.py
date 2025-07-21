@@ -952,7 +952,8 @@ class FabricCNCApp:
             for x, y in points:
                 x_c, y_c = self._inches_to_canvas(x, y)
                 flat.extend([x_c, y_c])
-            self.canvas.create_line(flat, fill=color, width=2, dash=(4, 2))
+            # Use solid line instead of dashed for clearer visualization
+            self.canvas.create_line(flat, fill=color, width=3)
 
     # --- DXF Import/Toolpath ---
     def _import_dxf(self):
@@ -1133,8 +1134,49 @@ class FabricCNCApp:
         
         logger.info(f"Processing {len(self.dxf_entities)} entities for single continuous toolpath generation")
         
+        # DEBUG: Log all entity types to identify what's being processed
+        entity_types = {}
+        for e in self.dxf_entities:
+            t = e.dxftype()
+            entity_types[t] = entity_types.get(t, 0) + 1
+        logger.info(f"Entity types found: {entity_types}")
+        
+        # Check if we have multiple splines that might form a circle
+        splines = [e for e in self.dxf_entities if e.dxftype() == 'SPLINE']
+        if len(splines) >= 2:
+            logger.info(f"Found {len(splines)} splines - checking if they form a circle")
+            # Try to detect if splines form a circle and combine them
+            circle_center, circle_radius = self._detect_circle_from_splines(splines)
+            if circle_center and circle_radius:
+                logger.info(f"Detected circle from splines: center=({circle_center[0]:.3f}, {circle_center[1]:.3f}), radius={circle_radius:.3f}")
+                # Generate continuous path for detected circle
+                continuous_path = self._generate_continuous_circle_path(
+                    circle_center, circle_radius
+                )
+                
+                # Transform coordinates and add to combined toolpath
+                for x, y, angle, z in continuous_path:
+                    tx = (x * scale) - dx
+                    ty = (y * scale) - dy
+                    combined_toolpath.append((tx, ty, angle, z))
+                
+                logger.info(f"Added {len(continuous_path)} waypoints from detected circle")
+                
+                # Skip processing individual splines since we've combined them
+                processed_splines = True
+            else:
+                processed_splines = False
+        else:
+            processed_splines = False
+        
         for i, e in enumerate(self.dxf_entities):
             t = e.dxftype()
+            
+            # Skip splines if we've already processed them as a circle
+            if t == 'SPLINE' and processed_splines:
+                logger.info(f"Skipping SPLINE {i+1} (already processed as circle)")
+                continue
+                
             logger.info(f"Processing entity {i+1}/{len(self.dxf_entities)}: {t}")
             
             if t == 'SPLINE':
@@ -1208,7 +1250,9 @@ class FabricCNCApp:
                 logger.info(f"  Added {len(continuous_path)} waypoints to combined toolpath")
             
             elif t == 'LINE':
-                logger.info(f"  Generating continuous LINE path")
+                start_point = (e.dxf.start.x, e.dxf.start.y)
+                end_point = (e.dxf.end.x, e.dxf.end.y)
+                logger.info(f"  Generating continuous LINE path: from ({start_point[0]:.3f}, {start_point[1]:.3f}) to ({end_point[0]:.3f}, {end_point[1]:.3f})")
                 # Generate continuous path for line
                 continuous_path = self._generate_continuous_line_path(e)
                 
@@ -1263,6 +1307,56 @@ class FabricCNCApp:
         
         self._draw_canvas()
     
+    def _detect_circle_from_splines(self, splines):
+        """
+        Detect if multiple splines form a circle and return center and radius.
+        Returns (center, radius) if detected, (None, None) otherwise.
+        """
+        try:
+            # Collect all points from all splines
+            all_points = []
+            for spline in splines:
+                try:
+                    points = list(spline.flattening(0.1))
+                    for point in points:
+                        if len(point) >= 2:
+                            all_points.append((point[0], point[1]))
+                except:
+                    continue
+            
+            if len(all_points) < 10:
+                return None, None
+            
+            # Calculate bounding box
+            x_coords = [p[0] for p in all_points]
+            y_coords = [p[1] for p in all_points]
+            min_x, max_x = min(x_coords), max(x_coords)
+            min_y, max_y = min(y_coords), max(y_coords)
+            
+            # Estimate center
+            center_x = (min_x + max_x) / 2
+            center_y = (min_y + max_y) / 2
+            
+            # Calculate average radius
+            radii = []
+            for x, y in all_points:
+                radius = math.sqrt((x - center_x)**2 + (y - center_y)**2)
+                radii.append(radius)
+            
+            avg_radius = sum(radii) / len(radii)
+            
+            # Check if points form a reasonable circle (radius variation < 10%)
+            radius_variation = max(radii) - min(radii)
+            if radius_variation / avg_radius < 0.1:  # Less than 10% variation
+                logger.info(f"Detected circle from splines: center=({center_x:.3f}, {center_y:.3f}), radius={avg_radius:.3f}")
+                return (center_x, center_y), avg_radius
+            
+            return None, None
+            
+        except Exception as e:
+            logger.error(f"Error detecting circle from splines: {e}")
+            return None, None
+
     def _generate_continuous_spline_path(self, spline):
         """
         Generate a single continuous path for a spline with ultra-smooth motion.
@@ -1314,7 +1408,8 @@ class FabricCNCApp:
                     # Draw blue dot for continuous cutting (Z=0)
                     if z == 0:
                         self.canvas.create_oval(x_c-6, y_c-6, x_c+6, y_c+6, fill=UI_COLORS['PRIMARY_COLOR'], outline=UI_COLORS['PRIMARY_VARIANT'])
-                    # Draw orientation line (wheel direction)
+                    # Draw orientation line (cutting blade orientation)
+                    # The angle from toolpath is already the correct cutting blade orientation
                     x2 = x + r * math.cos(angle)
                     y2 = y + r * math.sin(angle)
                     x2_c, y2_c = self._inches_to_canvas(x2, y2)
