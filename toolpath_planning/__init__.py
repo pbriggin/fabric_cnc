@@ -1,25 +1,31 @@
 #!/usr/bin/env python3
 """
 Toolpath Planning Package for Fabric CNC
-Provides DXF processing, toolpath generation, and G-code generation functionality.
+Provides motion planning, G-code generation, and toolpath optimization for the redesigned system.
 """
 
-from .continuous_toolpath_generator import ContinuousToolpathGenerator
-from .generate_gcode import (
-    generate_continuous_circle_toolpath,
-    generate_continuous_spline_toolpath,
-    generate_continuous_polyline_toolpath,
-    generate_continuous_line_toolpath,
-    generate_gcode_continuous_motion,
-    process_dxf_file
+from .motion_planner import (
+    MotionPlanner,
+    ToolpathOptimizer,
+    ToolpathPoint,
+    ToolpathSegment,
+    ToolpathType
+)
+
+from .gcode_generator import (
+    GCodeGenerator,
+    GCodeSettings
 )
 
 __all__ = [
-    'ContinuousToolpathGenerator',
-    'generate_continuous_circle_toolpath',
-    'generate_continuous_spline_toolpath',
-    'generate_continuous_polyline_toolpath',
-    'generate_continuous_line_toolpath',
-    'generate_gcode_continuous_motion',
-    'process_dxf_file'
+    # Motion planning
+    'MotionPlanner',
+    'ToolpathOptimizer',
+    'ToolpathPoint',
+    'ToolpathSegment',
+    'ToolpathType',
+    
+    # G-code generation
+    'GCodeGenerator',
+    'GCodeSettings'
 ] 

@@ -1,0 +1,16 @@
+# Core dependencies for the redesigned Fabric CNC system
+PyYAML>=6.0
+pigpio>=1.78
+
+# Optional dependencies for development and testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+black>=22.0.0
+flake8>=5.0.0
+mypy>=1.0.0
+
+# For DXF processing (if needed in future)
+ezdxf>=1.0.0
+
+# For GUI development (if needed in future)
+tkinter  # Usually included with Python 
