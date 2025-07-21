@@ -1410,9 +1410,9 @@ class FabricCNCApp:
                     if z == 0:
                         self.canvas.create_oval(x_c-6, y_c-6, x_c+6, y_c+6, fill=UI_COLORS['PRIMARY_COLOR'], outline=UI_COLORS['PRIMARY_VARIANT'])
                     # Draw orientation line (cutting blade orientation)
-                    # Invert angle to match motor controller's inverted direction (same as execution)
-                    # Also flip angle for Y-axis coordinate system transformation
-                    display_angle = -angle + math.pi/2  # Invert for motor + flip for Y-axis
+                    # Motor controller handles direction inversion, so use original angle
+                    # Only flip angle for Y-axis coordinate system transformation
+                    display_angle = angle + math.pi/2  # Original angle + flip for Y-axis
                     x2 = x + r * math.cos(display_angle)
                     y2 = y + r * math.sin(display_angle)
                     x2_c, y2_c = self._inches_to_canvas(x2, y2)
@@ -1501,8 +1501,8 @@ class FabricCNCApp:
         self._current_toolpath_pos['X'] = x_mm
         self._current_toolpath_pos['Y'] = y_mm
         self._current_toolpath_pos['Z'] = config.APP_CONFIG['Z_DOWN_MM'] if z == 0 else config.APP_CONFIG['Z_UP_MM']
-        # Invert rotation angle to match motor controller's inverted direction
-        self._current_toolpath_pos['ROT'] = -math.degrees(angle)
+        # Use rotation angle directly - motor controller handles direction inversion
+        self._current_toolpath_pos['ROT'] = math.degrees(angle)
         
         # Debug: print toolpath coordinates in both units
         print(f"[DEBUG] Toolpath step {step_idx}: X={x:.3f}in ({x_mm:.2f}mm), Y={y:.3f}in ({y_mm:.2f}mm)")
