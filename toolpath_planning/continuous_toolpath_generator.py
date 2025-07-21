@@ -199,9 +199,9 @@ class ContinuousToolpathGenerator:
             # For circles, the cutting blade should be tangent to the circle
             # The angle parameter is the angle around the circle (counterclockwise)
             # For counterclockwise circle motion, cutting blade should rotate clockwise to stay tangent
-            cutting_angle = angle - math.pi/2  # -90° from radius = tangent to circle (correct direction)
-            # Convert to machine coordinate system (vertical = 0°)
-            absolute_angle = cutting_angle
+            tangent_angle = angle - math.pi/2  # -90° from radius = tangent to circle (correct direction)
+            # Convert to machine coordinate system (vertical = 0°) using same conversion as other entities
+            absolute_angle = self._convert_to_absolute_angle(tangent_angle)
             
             # Z=0 for continuous cutting (no lifting)
             toolpath.append((x, y, absolute_angle, 0))

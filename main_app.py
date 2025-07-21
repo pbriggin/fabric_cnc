@@ -551,6 +551,7 @@ class FabricCNCApp:
             ("Home X", lambda: self._home('X'), "primary"),
             ("Home Y", lambda: self._home('Y'), "primary"),
             ("Home Z", lambda: self._home('Z'), "primary"),
+            ("Home Rot", lambda: self._home('ROT'), "primary"),
             ("Home All", self._home_all, "success")
         ]
         
