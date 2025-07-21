@@ -298,7 +298,7 @@ APP_CONFIG = {
     'Y_MAX_MM': 45 * 25.4,  # 45 inches
     'Z_MAX_MM': 2.5 * 25.4,  # 2.5 inches
     'Z_UP_MM': -19.05,  # -0.75 inches
-    'Z_DOWN_MM': -38.1,  # -1.5 inches
+    'Z_DOWN_MM': -19.05,  # Same as hover height for testing
     'PLOT_BUFFER_IN': 1.0,
     'ANGLE_CHANGE_THRESHOLD_DEG': 2.0,
     'STEP_SIZE_INCHES': 0.1,
