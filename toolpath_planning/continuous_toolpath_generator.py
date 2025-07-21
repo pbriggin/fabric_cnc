@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-Continuous Toolpath Generator - Complete Re-architecture
-Generates true continuous motion without any stopping between segments.
+Continuous Toolpath Generator - Enhanced for Ultra-Smooth Motion
+Generates truly continuous motion without any stopping between segments.
+Optimized for smooth curves, splines, and complex shapes.
 """
 
 import math
 import logging
 import sys
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Callable
+import numpy as np
 
 try:
     import ezdxf
     from ezdxf import readfile
+    from ezdxf.math import Vec3, BSpline
 except ImportError:
     print("Error: ezdxf not found. Install with: pip install ezdxf")
     sys.exit(1)
@@ -24,40 +27,114 @@ logger = logging.getLogger(__name__)
 class ContinuousToolpathGenerator:
     """
     Generates truly continuous toolpaths without any segmentation or stopping.
-    Each entity becomes a single continuous motion path.
+    Each entity becomes a single continuous motion path with ultra-smooth curves.
     """
     
-    def __init__(self, feed_rate=100, z_up=5, z_down=-1, step_size=0.1):
+    def __init__(self, feed_rate=100, z_up=5, z_down=-1, step_size=0.05, 
+                 max_angle_step_deg=1.0, spline_precision=0.001):
         self.feed_rate = feed_rate
         self.z_up = z_up
         self.z_down = z_down
-        self.step_size = step_size
+        self.step_size = step_size  # Reduced for smoother motion
+        self.max_angle_step_rad = math.radians(max_angle_step_deg)
+        self.spline_precision = spline_precision
+    
+    def _calculate_tangent_angle(self, p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
+        """
+        Calculate the tangent angle between two points.
+        Returns angle in radians, normalized to -π to π.
+        """
+        dx = p2[0] - p1[0]
+        dy = p2[1] - p1[1]
+        angle = math.atan2(dy, dx)
+        
+        # Normalize to -π to π
+        while angle > math.pi:
+            angle -= 2 * math.pi
+        while angle < -math.pi:
+            angle += 2 * math.pi
+            
+        return angle
+    
+    def _convert_to_absolute_angle(self, tangent_angle: float) -> float:
+        """
+        Convert tangent angle to absolute angle from vertical (home orientation).
+        Returns angle in radians, normalized to -π to π.
+        """
+        # Convert to degrees, adjust for home orientation (vertical = 0°)
+        absolute_angle_deg = -(math.degrees(tangent_angle) - 90.0)
+        
+        # Normalize to -180° to +180°
+        while absolute_angle_deg > 180:
+            absolute_angle_deg -= 360
+        while absolute_angle_deg < -180:
+            absolute_angle_deg += 360
+            
+        return math.radians(absolute_angle_deg)
     
     def generate_continuous_spline_path(self, spline) -> List[Tuple[float, float, float, float]]:
         """
-        Generate a single continuous path for a spline with no stopping.
+        Generate a single continuous path for a spline with ultra-smooth motion.
+        Uses adaptive step sizing based on curvature for optimal smoothness.
         Returns: List of (x, y, angle, z) tuples for continuous motion
         """
         try:
-            # Use high-resolution flattening for smooth curves
-            points = list(spline.flattening(0.005))  # High precision
+            # Use high-resolution flattening for maximum smoothness
+            points = list(spline.flattening(self.spline_precision))
             
             if len(points) < 2:
                 return []
             
-            # Calculate total length for adaptive step sizing
-            total_length = 0
-            for i in range(1, len(points)):
-                dx = points[i][0] - points[i-1][0]
-                dy = points[i][1] - points[i-1][1]
-                total_length += math.sqrt(dx*dx + dy*dy)
-            
-            # Adaptive step sizing based on curvature
-            num_steps = max(64, min(512, int(total_length / self.step_size)))
-            
+            # Calculate curvature-based adaptive step sizing
             toolpath = []
             
-            # Generate continuous waypoints along the spline
+            # For splines, we need to ensure smooth angle transitions
+            # Use more points for higher curvature regions
+            total_length = 0
+            curvatures = []
+            
+            # Calculate total length and estimate curvature at each point
+            for i in range(len(points)):
+                if i > 0:
+                    dx = points[i][0] - points[i-1][0]
+                    dy = points[i][1] - points[i-1][1]
+                    segment_length = math.sqrt(dx*dx + dy*dy)
+                    total_length += segment_length
+                
+                # Estimate curvature using three points
+                if i > 0 and i < len(points) - 1:
+                    p1 = points[i-1]
+                    p2 = points[i]
+                    p3 = points[i+1]
+                    
+                    # Calculate angle change
+                    angle1 = self._calculate_tangent_angle(p1, p2)
+                    angle2 = self._calculate_tangent_angle(p2, p3)
+                    angle_diff = abs(angle2 - angle1)
+                    
+                    # Normalize angle difference
+                    while angle_diff > math.pi:
+                        angle_diff = 2 * math.pi - angle_diff
+                    
+                    curvatures.append(angle_diff)
+                else:
+                    curvatures.append(0)
+            
+            # Adaptive step sizing based on curvature
+            max_curvature = max(curvatures) if curvatures else 0
+            base_steps = max(128, min(1024, int(total_length / self.step_size)))
+            
+            if max_curvature > 0:
+                # Increase steps in high-curvature regions
+                curvature_factor = min(3.0, max_curvature / (math.pi / 6))  # Cap at 3x
+                num_steps = int(base_steps * curvature_factor)
+            else:
+                num_steps = base_steps
+            
+            logger.info(f"Spline: {len(points)} points, {total_length:.3f} length, "
+                       f"max curvature: {math.degrees(max_curvature):.2f}°, {num_steps} steps")
+            
+            # Generate smooth waypoints along the spline
             for i in range(num_steps + 1):
                 t = i / num_steps
                 
@@ -75,20 +152,12 @@ class ContinuousToolpathGenerator:
                 x = p1[0] + segment_t * (p2[0] - p1[0])
                 y = p1[1] + segment_t * (p2[1] - p1[1])
                 
-                # Calculate tangent vector for tool orientation
-                dx = p2[0] - p1[0]
-                dy = p2[1] - p1[1]
-                tangent_angle = math.atan2(dy, dx)
-                
-                # Convert to absolute angle from vertical (home orientation)
-                absolute_angle = -(math.degrees(tangent_angle) - 90.0)
-                while absolute_angle > 180:
-                    absolute_angle -= 360
-                while absolute_angle < -180:
-                    absolute_angle += 360
+                # Calculate tangent angle
+                tangent_angle = self._calculate_tangent_angle(p1, p2)
+                absolute_angle = self._convert_to_absolute_angle(tangent_angle)
                 
                 # Z=0 for continuous cutting (no lifting)
-                toolpath.append((x, y, math.radians(absolute_angle), 0))
+                toolpath.append((x, y, absolute_angle, 0))
             
             return toolpath
             
@@ -98,22 +167,24 @@ class ContinuousToolpathGenerator:
     
     def generate_continuous_circle_path(self, center, radius, start_angle=0, end_angle=2*math.pi) -> List[Tuple[float, float, float, float]]:
         """
-        Generate a single continuous path for a circle/arc with no stopping.
+        Generate a single continuous path for a circle/arc with ultra-smooth motion.
+        Uses angle-based step sizing for perfect circular motion.
         Returns: List of (x, y, angle, z) tuples for continuous motion
         """
         cx, cy = center
         toolpath = []
         
         # Use angle-based step sizing for perfect smoothness
-        max_angle_step = math.radians(1.0)  # 1 degree steps for ultra-smooth motion
-        
         # Calculate total angle to cover
         total_angle = abs(end_angle - start_angle)
         if end_angle < start_angle:
             total_angle = 2*math.pi - total_angle
         
-        # Calculate number of steps based on angle
-        num_steps = max(64, min(512, int(total_angle / max_angle_step)))
+        # Calculate number of steps based on angle change threshold
+        num_steps = max(64, min(512, int(total_angle / self.max_angle_step_rad)))
+        
+        logger.info(f"Circle: radius={radius:.3f}, angles={math.degrees(start_angle):.1f}° to "
+                   f"{math.degrees(end_angle):.1f}°, {num_steps} steps")
         
         # Generate continuous waypoints using parametric equations
         for i in range(num_steps + 1):
@@ -126,28 +197,16 @@ class ContinuousToolpathGenerator:
             
             # Calculate tangent angle (perpendicular to radius)
             tangent_angle = angle + math.pi/2  # 90° from radius
-            
-            # Normalize angle to -180 to +180 range
-            while tangent_angle > math.pi:
-                tangent_angle -= 2 * math.pi
-            while tangent_angle < -math.pi:
-                tangent_angle += 2 * math.pi
-            
-            # Convert to absolute angle from vertical (home orientation)
-            absolute_angle = -(math.degrees(tangent_angle) - 90.0)
-            while absolute_angle > 180:
-                absolute_angle -= 360
-            while absolute_angle < -180:
-                absolute_angle += 360
+            absolute_angle = self._convert_to_absolute_angle(tangent_angle)
             
             # Z=0 for continuous cutting (no lifting)
-            toolpath.append((x, y, math.radians(absolute_angle), 0))
+            toolpath.append((x, y, absolute_angle, 0))
         
         return toolpath
     
     def generate_continuous_polyline_path(self, polyline) -> List[Tuple[float, float, float, float]]:
         """
-        Generate a single continuous path for a polyline with no stopping.
+        Generate a single continuous path for a polyline with smooth transitions.
         Returns: List of (x, y, angle, z) tuples for continuous motion
         """
         try:
@@ -173,7 +232,7 @@ class ContinuousToolpathGenerator:
                 segment_length = math.sqrt(dx*dx + dy*dy)
                 
                 # Calculate number of steps for this segment
-                num_steps = max(8, int(segment_length / self.step_size))
+                num_steps = max(16, int(segment_length / self.step_size))
                 
                 # Generate points along this segment
                 for j in range(num_steps + 1):
@@ -182,22 +241,54 @@ class ContinuousToolpathGenerator:
                     y = start_point[1] + t * dy
                     
                     # Calculate tangent angle
-                    tangent_angle = math.atan2(dy, dx)
-                    
-                    # Convert to absolute angle
-                    absolute_angle = -(math.degrees(tangent_angle) - 90.0)
-                    while absolute_angle > 180:
-                        absolute_angle -= 360
-                    while absolute_angle < -180:
-                        absolute_angle += 360
+                    tangent_angle = self._calculate_tangent_angle(start_point, end_point)
+                    absolute_angle = self._convert_to_absolute_angle(tangent_angle)
                     
                     # Z=0 for continuous cutting
-                    toolpath.append((x, y, math.radians(absolute_angle), 0))
+                    toolpath.append((x, y, absolute_angle, 0))
             
             return toolpath
             
         except Exception as e:
             logger.error(f"Error generating continuous polyline path: {e}")
+            return []
+    
+    def generate_continuous_line_path(self, line) -> List[Tuple[float, float, float, float]]:
+        """
+        Generate a single continuous path for a line with smooth motion.
+        Returns: List of (x, y, angle, z) tuples for continuous motion
+        """
+        try:
+            start_point = (line.dxf.start.x, line.dxf.start.y)
+            end_point = (line.dxf.end.x, line.dxf.end.y)
+            
+            # Calculate line length
+            dx = end_point[0] - start_point[0]
+            dy = end_point[1] - start_point[1]
+            line_length = math.sqrt(dx*dx + dy*dy)
+            
+            # Calculate number of steps
+            num_steps = max(16, int(line_length / self.step_size))
+            
+            toolpath = []
+            
+            # Generate points along the line
+            for i in range(num_steps + 1):
+                t = i / num_steps
+                x = start_point[0] + t * dx
+                y = start_point[1] + t * dy
+                
+                # Calculate tangent angle
+                tangent_angle = self._calculate_tangent_angle(start_point, end_point)
+                absolute_angle = self._convert_to_absolute_angle(tangent_angle)
+                
+                # Z=0 for continuous cutting
+                toolpath.append((x, y, absolute_angle, 0))
+            
+            return toolpath
+            
+        except Exception as e:
+            logger.error(f"Error generating continuous line path: {e}")
             return []
     
     def generate_gcode_continuous(self, toolpaths: List[List[Tuple[float, float, float, float]]]) -> List[str]:
@@ -208,7 +299,7 @@ class ContinuousToolpathGenerator:
         gcode = []
         
         # Initialize
-        gcode.append("; Continuous Motion G-code - No Stopping Between Segments")
+        gcode.append("; Continuous Motion G-code - Ultra-Smooth Motion")
         gcode.append(f"; Feed rate: {self.feed_rate} mm/min")
         gcode.append("G21 ; Set units to mm")
         gcode.append("G90 ; Absolute positioning")

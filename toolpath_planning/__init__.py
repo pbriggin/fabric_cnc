@@ -8,6 +8,8 @@ from .continuous_toolpath_generator import ContinuousToolpathGenerator
 from .generate_gcode import (
     generate_continuous_circle_toolpath,
     generate_continuous_spline_toolpath,
+    generate_continuous_polyline_toolpath,
+    generate_continuous_line_toolpath,
     generate_gcode_continuous_motion,
     process_dxf_file
 )
@@ -15,7 +17,9 @@ from .generate_gcode import (
 __all__ = [
     'ContinuousToolpathGenerator',
     'generate_continuous_circle_toolpath',
-    'generate_continuous_spline_toolpath', 
+    'generate_continuous_spline_toolpath',
+    'generate_continuous_polyline_toolpath',
+    'generate_continuous_line_toolpath',
     'generate_gcode_continuous_motion',
     'process_dxf_file'
 ] 

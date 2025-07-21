@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Standalone G-code generator for continuous motion CNC cutting.
-Processes DXF files and generates G-code with smooth continuous motion.
+Enhanced G-code generator for continuous motion CNC cutting.
+Processes DXF files and generates G-code with ultra-smooth continuous motion.
 """
 
 import math
@@ -18,6 +18,9 @@ try:
 except ImportError:
     print("Error: ezdxf not found. Install with: pip install ezdxf")
     sys.exit(1)
+
+# Import the improved continuous toolpath generator
+from .continuous_toolpath_generator import ContinuousToolpathGenerator
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -42,240 +45,80 @@ def calculate_angle_between_points(p1, p2, p3):
     
     return angle_deg
 
-def generate_continuous_circle_toolpath(center, radius, start_angle=0, end_angle=2*math.pi, step_size=0.1):
+def generate_continuous_circle_toolpath(center, radius, start_angle=0, end_angle=2*math.pi, step_size=0.05):
     """
-    Generate smooth continuous toolpath for a circle like a 3D printer.
+    Generate smooth continuous toolpath for a circle using the improved generator.
     
     Args:
         center: (x, y) center point
         radius: radius of circle
         start_angle: starting angle in radians (default: 0)
         end_angle: ending angle in radians (default: 2π for full circle)
-        step_size: distance between points in inches (default: 0.1" for smooth motion)
+        step_size: distance between points in inches (default: 0.05" for ultra-smooth motion)
     
     Returns:
         List of (x, y, angle, z) tuples for continuous cutting
     """
-    cx, cy = center
-    toolpath = []
-    
-    # For circles, use angle-based step sizing to ensure smooth motion
-    # Calculate angle step to keep angle changes under 2 degrees
-    max_angle_step = math.radians(1.5)  # 1.5 degrees for safety margin
-    
-    # Calculate total angle to cover
-    total_angle = abs(end_angle - start_angle)
-    if end_angle < start_angle:
-        total_angle = 2*math.pi - total_angle
-    
-    # Calculate number of steps based on angle
-    num_steps = max(32, min(256, int(total_angle / max_angle_step)))
-    
-    # Generate smooth waypoints using parametric equations
-    for i in range(num_steps + 1):
-        t = i / num_steps
-        angle = start_angle + t * (end_angle - start_angle)
-        
-        # Parametric equations for circle
-        x = cx + radius * math.cos(angle)
-        y = cy + radius * math.sin(angle)
-        
-        # Calculate tangent angle (perpendicular to radius)
-        tangent_angle = angle + math.pi/2  # 90° from radius
-        
-        # Normalize angle to -180 to +180 range
-        while tangent_angle > math.pi:
-            tangent_angle -= 2 * math.pi
-        while tangent_angle < -math.pi:
-            tangent_angle += 2 * math.pi
-        
-        # Convert to absolute angle from vertical (home orientation)
-        absolute_angle = -(math.degrees(tangent_angle) - 90.0)
-        while absolute_angle > 180:
-            absolute_angle -= 360
-        while absolute_angle < -180:
-            absolute_angle += 360
-        
-        # Z=0 for continuous cutting (no lifting)
-        toolpath.append((x, y, math.radians(absolute_angle), 0))
-    
-    return toolpath
+    generator = ContinuousToolpathGenerator(step_size=step_size)
+    return generator.generate_continuous_circle_path(center, radius, start_angle, end_angle)
 
-def generate_continuous_spline_toolpath(spline, step_size=0.1):
+def generate_continuous_spline_toolpath(spline, step_size=0.05):
     """
-    Generate smooth continuous toolpath for a spline like a 3D printer.
+    Generate smooth continuous toolpath for a spline using the improved generator.
     
     Args:
         spline: ezdxf spline entity
-        step_size: distance between points in inches (default: 0.1" for smooth motion)
+        step_size: distance between points in inches (default: 0.05" for ultra-smooth motion)
     
     Returns:
         List of (x, y, angle, z) tuples for continuous cutting
     """
-    toolpath = []
+    generator = ContinuousToolpathGenerator(step_size=step_size)
+    return generator.generate_continuous_spline_path(spline)
+
+def generate_continuous_polyline_toolpath(polyline, step_size=0.05):
+    """
+    Generate smooth continuous toolpath for a polyline using the improved generator.
     
-    try:
-        # Use moderate-resolution flattening for smooth motion
-        points = list(spline.flattening(0.01))  # Moderate precision for smooth motion
-        
-        if len(points) < 2:
-            return toolpath
-        
-        # Calculate total length
-        total_length = 0
-        for i in range(1, len(points)):
-            dx = points[i][0] - points[i-1][0]
-            dy = points[i][1] - points[i-1][1]
-            total_length += math.sqrt(dx*dx + dy*dy)
-        
-        # Calculate number of steps based on length and step size
-        num_steps = max(32, min(128, int(total_length / step_size)))  # Reasonable point density
-        
-        # Generate smooth waypoints along the spline
-        for i in range(num_steps + 1):
-            t = i / num_steps
-            
-            # Find the segment and interpolate within it
-            segment_idx = int(t * (len(points) - 1))
-            segment_t = t * (len(points) - 1) - segment_idx
-            
-            if segment_idx >= len(points) - 1:
-                segment_idx = len(points) - 2
-                segment_t = 1.0
-            
-            # Linear interpolation between points
-            p1 = points[segment_idx]
-            p2 = points[segment_idx + 1]
-            x = p1[0] + segment_t * (p2[0] - p1[0])
-            y = p1[1] + segment_t * (p2[1] - p1[1])
-            
-            # Calculate tangent vector
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
-            tangent_angle = math.atan2(dy, dx)
-            
-            # Convert to absolute angle from vertical (home orientation)
-            absolute_angle = -(math.degrees(tangent_angle) - 90.0)
-            while absolute_angle > 180:
-                absolute_angle -= 360
-            while absolute_angle < -180:
-                absolute_angle += 360
-            
-            # Z=0 for continuous cutting (no lifting)
-            toolpath.append((x, y, math.radians(absolute_angle), 0))
-        
-    except Exception as e:
-        logger.error(f"Error generating continuous spline toolpath: {e}")
-        # Fallback to discrete method with reasonable density
-        points = list(spline.flattening(0.01))
-        for i in range(0, len(points), max(1, len(points) // 64)):  # Limit to ~64 points
-            if i < len(points):
-                x, y = points[i][0], points[i][1]
-                
-                # Calculate tangent angle from next point
-                if i + 1 < len(points):
-                    next_x, next_y = points[i + 1][0], points[i + 1][1]
-                    dx = next_x - x
-                    dy = next_y - y
-                else:
-                    # Use previous point for last point
-                    prev_x, prev_y = points[i - 1][0], points[i - 1][1]
-                    dx = x - prev_x
-                    dy = y - prev_y
-                
-                tangent_angle = math.atan2(dy, dx)
-                
-                # Convert to absolute angle
-                absolute_angle = -(math.degrees(tangent_angle) - 90.0)
-                while absolute_angle > 180:
-                    absolute_angle -= 360
-                while absolute_angle < -180:
-                    absolute_angle += 360
-                
-                toolpath.append((x, y, math.radians(absolute_angle), 0))
+    Args:
+        polyline: ezdxf polyline entity
+        step_size: distance between points in inches (default: 0.05" for ultra-smooth motion)
     
-    return toolpath
+    Returns:
+        List of (x, y, angle, z) tuples for continuous cutting
+    """
+    generator = ContinuousToolpathGenerator(step_size=step_size)
+    return generator.generate_continuous_polyline_path(polyline)
+
+def generate_continuous_line_toolpath(line, step_size=0.05):
+    """
+    Generate smooth continuous toolpath for a line using the improved generator.
+    
+    Args:
+        line: ezdxf line entity
+        step_size: distance between points in inches (default: 0.05" for ultra-smooth motion)
+    
+    Returns:
+        List of (x, y, angle, z) tuples for continuous cutting
+    """
+    generator = ContinuousToolpathGenerator(step_size=step_size)
+    return generator.generate_continuous_line_path(line)
 
 def generate_gcode_continuous_motion(toolpaths, feed_rate=100, z_up=5, z_down=-1):
     """
-    Generate G-code for continuous motion like a 3D printer.
+    Generate G-code for continuous motion using the improved generator.
     
     Args:
-        toolpaths: List of toolpath segments
+        toolpaths: List of toolpath lists, each containing (x, y, angle, z) tuples
         feed_rate: Feed rate in mm/min
         z_up: Z height when tool is up (mm)
-        z_down: Z depth when cutting (mm)
+        z_down: Z height when tool is down (mm)
     
     Returns:
         List of G-code commands
     """
-    gcode = []
-    
-    # Initialize
-    gcode.append("; Continuous Motion G-code Generated")
-    gcode.append("; Feed rate: {} mm/min".format(feed_rate))
-    gcode.append("G21 ; Set units to mm")
-    gcode.append("G90 ; Absolute positioning")
-    gcode.append("G28 ; Home all axes")
-    gcode.append("G0 Z{} ; Move to safe Z height".format(z_up))
-    
-    current_x = 0
-    current_y = 0
-    current_z = z_up
-    
-    for i, toolpath in enumerate(toolpaths):
-        gcode.append("; Toolpath {}".format(i + 1))
-        
-        if not toolpath:
-            continue
-        
-        # Move to start position
-        start_x, start_y, start_angle, start_z = toolpath[0]
-        gcode.append("G0 X{:.3f} Y{:.3f} ; Move to start".format(start_x, start_y))
-        
-        # Lower Z for cutting
-        if start_z == 0:  # Continuous cutting
-            gcode.append("G1 Z{} F{} ; Lower for cutting".format(z_down, feed_rate))
-            current_z = z_down
-        else:  # Z up
-            gcode.append("G1 Z{} F{} ; Move to Z height".format(z_up, feed_rate))
-            current_z = z_up
-        
-        # Generate continuous motion commands
-        for j, (x, y, angle, z) in enumerate(toolpath):
-            if j == 0:
-                continue  # Skip first point (already positioned)
-            
-            # Check if we need to change Z
-            if z == 0 and current_z != z_down:
-                gcode.append("G1 Z{} F{} ; Lower for cutting".format(z_down, feed_rate))
-                current_z = z_down
-            elif z != 0 and current_z != z_up:
-                gcode.append("G1 Z{} F{} ; Raise tool".format(z_up, feed_rate))
-                current_z = z_up
-            
-            # Generate motion command
-            if current_z == z_down:
-                # Cutting motion - use G1 for linear interpolation
-                gcode.append("G1 X{:.3f} Y{:.3f} F{} ; Continuous cutting".format(x, y, feed_rate))
-            else:
-                # Rapid motion - use G0 for rapid positioning
-                gcode.append("G0 X{:.3f} Y{:.3f} ; Rapid move".format(x, y))
-            
-            current_x = x
-            current_y = y
-        
-        # Raise tool at end of toolpath
-        if current_z != z_up:
-            gcode.append("G1 Z{} F{} ; Raise tool".format(z_up, feed_rate))
-            current_z = z_up
-    
-    # Final commands
-    gcode.append("G0 X0 Y0 ; Return to origin")
-    gcode.append("G28 ; Home all axes")
-    gcode.append("M2 ; End program")
-    
-    return gcode
+    generator = ContinuousToolpathGenerator(feed_rate, z_up, z_down)
+    return generator.generate_gcode_continuous(toolpaths)
 
 def process_dxf_file(dxf_path, output_path=None, feed_rate=100, z_up=5, z_down=-1):
     """
@@ -286,7 +129,7 @@ def process_dxf_file(dxf_path, output_path=None, feed_rate=100, z_up=5, z_down=-
         output_path: Path to output G-code file (optional)
         feed_rate: Feed rate in mm/min
         z_up: Z height when tool is up (mm)
-        z_down: Z depth when cutting (mm)
+        z_down: Z height when tool is down (mm)
     
     Returns:
         List of G-code commands
@@ -369,7 +212,7 @@ def process_dxf_file(dxf_path, output_path=None, feed_rate=100, z_up=5, z_down=-
             
             if t == 'SPLINE':
                 # Generate continuous toolpath for spline
-                continuous_path = generate_continuous_spline_toolpath(e, step_size=0.1)
+                continuous_path = generate_continuous_spline_toolpath(e, step_size=0.05)
                 
                 # Transform coordinates
                 transformed_path = []
@@ -390,7 +233,7 @@ def process_dxf_file(dxf_path, output_path=None, feed_rate=100, z_up=5, z_down=-
                 continuous_path = generate_continuous_circle_toolpath(
                     (center.x, center.y), radius, 
                     start_angle=0, end_angle=2*math.pi, 
-                    step_size=0.1
+                    step_size=0.05
                 )
                 
                 # Transform coordinates
@@ -418,7 +261,7 @@ def process_dxf_file(dxf_path, output_path=None, feed_rate=100, z_up=5, z_down=-
                 continuous_path = generate_continuous_circle_toolpath(
                     (center.x, center.y), radius,
                     start_angle=start_angle, end_angle=end_angle,
-                    step_size=0.1
+                    step_size=0.05
                 )
                 
                 # Transform coordinates

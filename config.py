@@ -312,6 +312,7 @@ APP_CONFIG = {
     'LIVE_TOOL_HEAD_DIR_RADIUS': 0.5,
     'ANIMATION_STEPS_PER_TICK': 1,
     'ANIMATION_TOOL_RADIUS': 0.5,
+    'PLOT_BUFFER_PX': 50,  # Buffer around the plot in pixels
 }
 
 # UI Color scheme
@@ -324,6 +325,19 @@ UI_COLORS = {
     'ON_PRIMARY': '#ffffff',
     'ON_SURFACE': '#222222',
     'ERROR_COLOR': '#b00020',
+}
+
+# UI Padding constants for consistent spacing
+UI_PADDING = {
+    'SMALL': 10,
+    'MEDIUM': 12,
+    'LARGE': 16,
+    'XLARGE': 20,
+    'XXLARGE': 24,
+    'SECTION_SPACING': 16,
+    'BUTTON_SPACING': 8,
+    'FRAME_PADDING': 16,
+    'CANVAS_PADDING': 20
 }
 
 # Toolpath configuration

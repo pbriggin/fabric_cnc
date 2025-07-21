@@ -40,6 +40,8 @@ try:
         ContinuousToolpathGenerator,
         generate_continuous_circle_toolpath,
         generate_continuous_spline_toolpath,
+        generate_continuous_polyline_toolpath,
+        generate_continuous_line_toolpath,
         generate_gcode_continuous_motion
     )
     TOOLPATH_IMPORTS_AVAILABLE = True
@@ -47,8 +49,9 @@ except ImportError:
     TOOLPATH_IMPORTS_AVAILABLE = False
 
 # Import configuration
+import config
 from config import (
-    APP_CONFIG, UI_COLORS, TOOLPATH_CONFIG,
+    UI_COLORS, TOOLPATH_CONFIG, UI_PADDING,
     ON_RPI, SIMULATION_MODE
 )
 
@@ -139,11 +142,11 @@ class SimulatedMotorController:
 
     def _clamp(self, axis, value):
         if axis == 'X':
-            return max(-APP_CONFIG['X_MAX_MM'], min(value, APP_CONFIG['X_MAX_MM']))  # Allow negative X positions
+            return max(-config.APP_CONFIG['X_MAX_MM'], min(value, config.APP_CONFIG['X_MAX_MM']))  # Allow negative X positions
         elif axis == 'Y':
-            return max(-APP_CONFIG['Y_MAX_MM'], min(value, APP_CONFIG['Y_MAX_MM']))  # Allow negative Y positions
+            return max(-config.APP_CONFIG['Y_MAX_MM'], min(value, config.APP_CONFIG['Y_MAX_MM']))  # Allow negative Y positions
         elif axis == 'Z':
-            return max(0.0, min(value, APP_CONFIG['Z_MAX_MM']))  # Keep Z positive only
+            return max(0.0, min(value, config.APP_CONFIG['Z_MAX_MM']))  # Keep Z positive only
         else:
             return value
 
@@ -218,11 +221,11 @@ class RealMotorController:
 
     def _clamp(self, axis, value):
         if axis == 'X':
-            return max(-APP_CONFIG['X_MAX_MM'], min(value, APP_CONFIG['X_MAX_MM']))  # Allow negative X positions
+            return max(-config.APP_CONFIG['X_MAX_MM'], min(value, config.APP_CONFIG['X_MAX_MM']))  # Allow negative X positions
         elif axis == 'Y':
-            return max(-APP_CONFIG['Y_MAX_MM'], min(value, APP_CONFIG['Y_MAX_MM']))  # Allow negative Y positions
+            return max(-config.APP_CONFIG['Y_MAX_MM'], min(value, config.APP_CONFIG['Y_MAX_MM']))  # Allow negative Y positions
         elif axis == 'Z':
-            return max(-APP_CONFIG['Z_MAX_MM'], min(value, APP_CONFIG['Z_MAX_MM']))  # Allow negative Z positions
+            return max(-config.APP_CONFIG['Z_MAX_MM'], min(value, config.APP_CONFIG['Z_MAX_MM']))  # Allow negative Z positions
         else:
             return value
 
@@ -388,8 +391,9 @@ class FabricCNCApp:
             except:
                 pass
         self.root.configure(bg=UI_COLORS['BACKGROUND'])
-        self.jog_speed = 1.0 * APP_CONFIG['INCH_TO_MM']  # Default to 1 inch
+        self.jog_speed = 1.0 * config.APP_CONFIG['INCH_TO_MM']  # Default to 1 inch
         self.jog_speed_var = ctk.DoubleVar(value=1.0)  # Default to 1 inch
+        self._jog_slider_scale = 0.1  # Scale factor for slider (0.1 inch increments)
         self._arrow_key_state = {}
         self._arrow_key_after_ids = {}
         self._current_toolpath_idx = [0, 0]
@@ -398,7 +402,7 @@ class FabricCNCApp:
         self.toolpaths = []
         self.motor_ctrl = SimulatedMotorController() if SIMULATION_MODE else RealMotorController()
         self._jog_in_progress = {'X': False, 'Y': False, 'Z': False, 'ROT': False}
-        self._arrow_key_repeat_delay = APP_CONFIG['ARROW_KEY_REPEAT_DELAY']
+        self._arrow_key_repeat_delay = config.APP_CONFIG['ARROW_KEY_REPEAT_DELAY']
         # Initialize DXF-related attributes
         self.dxf_doc = None
         self.dxf_entities = []
@@ -415,107 +419,153 @@ class FabricCNCApp:
         self.app_bar = ctk.CTkFrame(self.root, fg_color=UI_COLORS['PRIMARY_COLOR'], corner_radius=0, height=56)
         self.app_bar.pack(fill="x", side="top")
         self.title = ctk.CTkLabel(self.app_bar, text="Fabric CNC", text_color=UI_COLORS['ON_PRIMARY'], font=("Arial", 16, "bold"))
-        self.title.pack(side="left", padx=24, pady=12)
+        self.title.pack(side="left", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
         
         # Close button
         close_button = ctk.CTkButton(self.app_bar, text="✕", width=40, height=30, 
                                    command=self._close_app, fg_color="transparent", 
                                    text_color=UI_COLORS['ON_PRIMARY'], hover_color="#ff5a5f", corner_radius=6)
-        close_button.pack(side="right", padx=24, pady=12)
+        close_button.pack(side="right", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
 
-        # Main layout
-        self.main_frame = ctk.CTkFrame(self.root, fg_color=UI_COLORS['BACKGROUND'])
-        self.main_frame.pack(expand=True, fill="both", padx=0, pady=(0, 0))
-        self.main_frame.grid_columnconfigure(1, weight=1)
-        self.main_frame.grid_rowconfigure(0, weight=1)
-
-        # Left Toolbar
-        self.left_toolbar = ctk.CTkFrame(self.main_frame, fg_color=UI_COLORS['SURFACE'], corner_radius=12, width=180)
-        self.left_toolbar.grid(row=0, column=0, sticky="nsw", padx=(24, 12), pady=24)
-        # File & DXF section
-        file_section = ctk.CTkFrame(self.left_toolbar, fg_color="#d0d0d0", corner_radius=8)
-        file_section.pack(fill="x", padx=16, pady=(20, 10))
-        ctk.CTkLabel(file_section, text="File & DXF", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=(10, 10))
-        ctk.CTkButton(file_section, text="Import DXF", command=self._import_dxf, fg_color=UI_COLORS['PRIMARY_COLOR'], text_color=UI_COLORS['ON_PRIMARY'], hover_color=UI_COLORS['PRIMARY_VARIANT'], corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
-        ctk.CTkButton(file_section, text="Generate Toolpath", command=self._generate_toolpath, fg_color=UI_COLORS['SECONDARY_COLOR'], text_color=UI_COLORS['ON_SURFACE'], hover_color=UI_COLORS['PRIMARY_COLOR'], corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
-        ctk.CTkButton(file_section, text="Preview Toolpath", command=self._preview_toolpath, fg_color=UI_COLORS['SURFACE'], text_color=UI_COLORS['PRIMARY_COLOR'], hover_color=UI_COLORS['SECONDARY_COLOR'], corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
-        ctk.CTkButton(file_section, text="Run Toolpath", command=self._run_toolpath, fg_color=UI_COLORS['PRIMARY_COLOR'], text_color=UI_COLORS['ON_PRIMARY'], hover_color=UI_COLORS['PRIMARY_VARIANT'], corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=6)
-        ctk.CTkButton(file_section, text="E-Stop", command=self._estop, fg_color=UI_COLORS['ERROR_COLOR'], text_color=UI_COLORS['ON_PRIMARY'], hover_color="#ff5a5f", corner_radius=8, height=40, font=("Arial", 16, "bold")).pack(fill="x", padx=10, pady=(6, 10))
+        # Main container using grid for three-column layout
+        self.main_container = ctk.CTkFrame(self.root, fg_color=UI_COLORS['BACKGROUND'])
+        self.main_container.pack(expand=True, fill="both", padx=0, pady=0)
         
-        # Status section
-        status_section = ctk.CTkFrame(self.left_toolbar, fg_color="#d0d0d0", corner_radius=8)
-        status_section.pack(fill="x", padx=16, pady=10)
-        ctk.CTkLabel(status_section, text="Status:", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=(10, 5))
+        # Configure grid weights - middle column gets all available space
+        self.main_container.grid_columnconfigure(0, weight=0, minsize=175)  # Left column - compact width
+        self.main_container.grid_columnconfigure(1, weight=1)  # Middle column - takes all available space
+        self.main_container.grid_columnconfigure(2, weight=0, minsize=175)  # Right column - same compact width
+        self.main_container.grid_rowconfigure(0, weight=1)  # Single row takes full height
+        
+        # === LEFT COLUMN: DXF & Toolpath Controls ===
+        self.left_column = ctk.CTkFrame(self.main_container, fg_color=UI_COLORS['SURFACE'], corner_radius=12)
+        self.left_column.grid(row=0, column=0, sticky="nsew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
+        
+        # Configure left column - no expansion needed since status wraps around text
+        
+        # File & DXF section
+        file_section = ctk.CTkFrame(self.left_column, fg_color="#d0d0d0", corner_radius=8)
+        file_section.grid(row=0, column=0, sticky="ew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
+        
+        ctk.CTkLabel(file_section, text="File & DXF", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=UI_PADDING['SMALL'])
+        
+        # File buttons with consistent padding
+        file_buttons = [
+            ("Import DXF", self._import_dxf, UI_COLORS['PRIMARY_COLOR'], UI_COLORS['ON_PRIMARY'], UI_COLORS['PRIMARY_VARIANT']),
+            ("Generate Toolpath", self._generate_toolpath, UI_COLORS['SECONDARY_COLOR'], UI_COLORS['ON_SURFACE'], UI_COLORS['PRIMARY_COLOR']),
+            ("Preview Toolpath", self._preview_toolpath, UI_COLORS['SURFACE'], UI_COLORS['PRIMARY_COLOR'], UI_COLORS['SECONDARY_COLOR']),
+            ("Run Toolpath", self._run_toolpath, UI_COLORS['PRIMARY_COLOR'], UI_COLORS['ON_PRIMARY'], UI_COLORS['PRIMARY_VARIANT']),
+            ("E-Stop", self._estop, UI_COLORS['ERROR_COLOR'], UI_COLORS['ON_PRIMARY'], "#ff5a5f")
+        ]
+        
+        for text, command, bg_color, text_color, hover_color in file_buttons:
+            btn = ctk.CTkButton(file_section, text=text, command=command, 
+                              fg_color=bg_color, text_color=text_color, hover_color=hover_color, 
+                              corner_radius=8, height=40, font=("Arial", 16, "bold"))
+            btn.pack(fill="x", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
+        
+        # Status section - fills width but wraps height around text
+        status_section = ctk.CTkFrame(self.left_column, fg_color="#d0d0d0", corner_radius=8)
+        status_section.grid(row=1, column=0, sticky="ew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
+        
+        ctk.CTkLabel(status_section, text="Status:", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=UI_PADDING['SMALL'])
         self.status_label = ctk.CTkLabel(status_section, text="Ready", font=("Arial", 16, "bold"), text_color=UI_COLORS['ON_SURFACE'])
-        self.status_label.pack(pady=(0, 10))
+        self.status_label.pack(pady=UI_PADDING['SMALL'])
 
-        # Center Canvas
-        self.center_frame = ctk.CTkFrame(self.main_frame, fg_color=UI_COLORS['SURFACE'], corner_radius=12)
-        self.center_frame.grid(row=0, column=1, sticky="nsew", padx=(0, 12), pady=24)
-        self.center_frame.grid_columnconfigure(0, weight=1)
-        self.center_frame.grid_rowconfigure(0, weight=1)
-        self._setup_center_canvas()
+        # === MIDDLE COLUMN: Plot Canvas ===
+        self.center_column = ctk.CTkFrame(self.main_container, fg_color="#E0E0E0", corner_radius=12)
+        self.center_column.grid(row=0, column=1, sticky="nsew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
+        
+        # Configure center column to expand in both directions
+        self.center_column.grid_rowconfigure(0, weight=1)
+        self.center_column.grid_columnconfigure(0, weight=1)
+        
+        # Setup canvas in center column
+        self.canvas = ctk.CTkCanvas(self.center_column, bg=UI_COLORS['SURFACE'], highlightthickness=0)
+        self.canvas.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+        
+        # Bind canvas resize
+        self.center_column.bind("<Configure>", self._on_canvas_resize)
+        
+        # Initialize canvas dimensions
+        self.canvas_width = 800  # Default, will be updated by resize
+        self.canvas_height = 600  # Default, will be updated by resize
+        self.canvas_scale = 1.0
+        self.canvas_offset = (0, 0)
+        
+        # Draw initial canvas
+        self._draw_canvas()
 
-        # Right Toolbar
-        self.right_toolbar = ctk.CTkFrame(self.main_frame, fg_color=UI_COLORS['SURFACE'], corner_radius=12, width=220)
-        self.right_toolbar.grid(row=0, column=2, sticky="nse", padx=(12, 24), pady=24)
-        ctk.CTkLabel(self.right_toolbar, text="Motor Controls", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=(20, 10))
-        # Jog controls section
-        jog_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
-        jog_section.pack(fill=ctk.X, padx=10, pady=8)
-        # Configure grid for centered layout
-        jog_section.grid_columnconfigure(0, weight=1)
-        jog_section.grid_columnconfigure(1, weight=1)
-        jog_section.grid_columnconfigure(2, weight=1)
-        jog_section.grid_rowconfigure(0, weight=1)
-        jog_section.grid_rowconfigure(1, weight=1)
-        jog_section.grid_rowconfigure(2, weight=1)
-        # Center the arrow buttons
-        self._add_jog_button(jog_section, "↑", lambda: self._jog('Y', +self.jog_speed)).grid(row=0, column=1, padx=4, pady=4, sticky="nsew")
-        self._add_jog_button(jog_section, "←", lambda: self._jog('X', -self.jog_speed)).grid(row=1, column=0, padx=4, pady=4, sticky="nsew")
-        self._add_jog_button(jog_section, "→", lambda: self._jog('X', +self.jog_speed)).grid(row=1, column=2, padx=4, pady=4, sticky="nsew")
-        self._add_jog_button(jog_section, "↓", lambda: self._jog('Y', -self.jog_speed)).grid(row=2, column=1, padx=4, pady=4, sticky="nsew")
-        # Z and ROT controls section
-        zrot_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
-        zrot_section.pack(fill=ctk.X, padx=10, pady=(0, 8))
-        # Configure grid for centered layout
-        zrot_section.grid_columnconfigure(0, weight=1)
-        zrot_section.grid_columnconfigure(1, weight=1)
-        zrot_section.grid_columnconfigure(2, weight=1)
-        zrot_section.grid_columnconfigure(3, weight=1)
-        zrot_section.grid_rowconfigure(0, weight=1)
-        # Center the Z and ROT buttons
-        self._add_jog_button(zrot_section, "Z+", lambda: self._jog('Z', +1)).grid(row=0, column=0, padx=4, pady=4, sticky="nsew")
-        self._add_jog_button(zrot_section, "Z-", lambda: self._jog('Z', -1)).grid(row=0, column=1, padx=4, pady=4, sticky="nsew")
-        self._add_jog_button(zrot_section, "ROT+", lambda: self._jog('ROT', +5)).grid(row=0, column=2, padx=4, pady=4, sticky="nsew")
-        self._add_jog_button(zrot_section, "ROT-", lambda: self._jog('ROT', -5)).grid(row=0, column=3, padx=4, pady=4, sticky="nsew")
-        # Speed adjustment section
-        speed_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
-        speed_section.pack(fill=ctk.X, padx=10, pady=(0, 8))
-        ctk.CTkLabel(speed_section, text="Jog Step (in)", font=("Arial", 16, "bold")).pack(side=ctk.LEFT, padx=10, pady=10)
-        # Use range 0.1 to 5.0 inches with 0.1 increments
-        self._jog_slider_scale = APP_CONFIG['JOG_SLIDER_SCALE']
-        # Calculate initial slider value (1.0 inch = 10 steps)
-        initial_slider_value = int(self.jog_speed_var.get() / self._jog_slider_scale)
-        speed_slider = ctk.CTkSlider(speed_section, from_=1, to=50, number_of_steps=49, variable=None, width=120, command=lambda v: self._on_jog_slider(v))
-        speed_slider.set(initial_slider_value)
-        speed_slider.pack(side=ctk.LEFT, padx=5)
-        speed_entry = ctk.CTkEntry(speed_section, textvariable=self.jog_speed_var, width=50)
-        speed_entry.pack(side=ctk.LEFT, padx=5)
-        self.jog_speed_var.trace_add('write', lambda *a: self._update_jog_speed())
+        # === RIGHT COLUMN: Motor Controls ===
+        self.right_column = ctk.CTkFrame(self.main_container, fg_color=UI_COLORS['SURFACE'], corner_radius=12)
+        self.right_column.grid(row=0, column=2, sticky="nsew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
+        
+        # Configure right column to expand vertically
+        self.right_column.grid_rowconfigure(4, weight=1)  # Coordinates section expands
+        
+        # Title
+        # Unified motor controls section
+        motor_section = ctk.CTkFrame(self.right_column, fg_color="#d0d0d0", corner_radius=8)
+        motor_section.grid(row=0, column=0, sticky="ew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
+        
+        # Motor Controls label inside the box
+        ctk.CTkLabel(motor_section, text="Motor Controls", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).grid(row=0, column=0, columnspan=2, pady=UI_PADDING['SMALL'])
+        
+        # 8-row layout: label (1 row) + arrows (3 rows) + Z/ROT (2 rows) + jog speed (2 rows)
+        motor_section.grid_columnconfigure(0, weight=1)
+        motor_section.grid_columnconfigure(1, weight=1)
+        motor_section.grid_rowconfigure(1, weight=1)  # Up arrow row
+        motor_section.grid_rowconfigure(2, weight=1)  # Left/Right arrows row
+        motor_section.grid_rowconfigure(3, weight=1)  # Down arrow row
+        motor_section.grid_rowconfigure(4, weight=1)  # Z controls row
+        motor_section.grid_rowconfigure(5, weight=1)  # ROT controls row
+        motor_section.grid_rowconfigure(6, weight=1)  # Jog speed label row
+        motor_section.grid_rowconfigure(7, weight=1)  # Jog speed slider row
+        motor_section.grid_rowconfigure(8, weight=1)  # Jog speed value display row
+        
+        # Arrow buttons - stacked layout with equal widths
+        self._add_compact_jog_button(motor_section, "↑", lambda: self._jog('Y', +self.jog_speed)).grid(row=1, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "←", lambda: self._jog('X', -self.jog_speed)).grid(row=2, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "→", lambda: self._jog('X', +self.jog_speed)).grid(row=2, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "↓", lambda: self._jog('Y', -self.jog_speed)).grid(row=3, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        
+        # Z and ROT controls
+        self._add_compact_jog_button(motor_section, "Z+", lambda: self._jog('Z', +1)).grid(row=4, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "Z-", lambda: self._jog('Z', -1)).grid(row=4, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "R+", lambda: self._jog('ROT', +5)).grid(row=5, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "R-", lambda: self._jog('ROT', -5)).grid(row=5, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        
+        # Jog speed slider
+        ctk.CTkLabel(motor_section, text="Jog Speed:", font=("Arial", 12, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).grid(row=6, column=0, columnspan=2, pady=(UI_PADDING['SMALL'], 0))
+        jog_slider = ctk.CTkSlider(motor_section, from_=1, to=50, number_of_steps=49, command=self._on_jog_slider)
+        jog_slider.grid(row=7, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="ew")
+        jog_slider.set(10)  # Set to 1.0 inch (10 * 0.1)
+        
+        # Jog speed value display
+        self.jog_speed_label = ctk.CTkLabel(motor_section, text="1.0 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
+        self.jog_speed_label.grid(row=8, column=0, columnspan=2, pady=(0, UI_PADDING['SMALL']))
+        
         # Home controls section
-        home_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
-        home_section.pack(fill=ctk.X, padx=10, pady=8)
-        ctk.CTkButton(home_section, text="Home X", command=lambda: self._home('X'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, padx=10, pady=2)
-        ctk.CTkButton(home_section, text="Home Y", command=lambda: self._home('Y'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, padx=10, pady=2)
-        ctk.CTkButton(home_section, text="Home Z", command=lambda: self._home('Z'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, padx=10, pady=2)
-        ctk.CTkButton(home_section, text="Home ROT", command=lambda: self._home('ROT'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, padx=10, pady=2)
-        ctk.CTkButton(home_section, text="Home All (Sync)", command=self._home_all, height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, padx=10, pady=2)
-        # Coordinates display section
-        coord_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
-        coord_section.pack(fill=ctk.X, padx=10, pady=8)
+        home_section = ctk.CTkFrame(self.right_column, fg_color="#d0d0d0", corner_radius=8)
+        home_section.grid(row=1, column=0, sticky="ew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
+        
+        home_buttons = [
+            ("Home X", lambda: self._home('X')),
+            ("Home Y", lambda: self._home('Y')),
+            ("Home Z", lambda: self._home('Z')),
+            ("Home All", self._home_all)
+        ]
+        
+        for i, (text, command) in enumerate(home_buttons):
+            btn = ctk.CTkButton(home_section, text=text, command=command, height=35, font=("Arial", 16, "bold"))
+            btn.pack(fill=ctk.X, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
+        
+        # Coordinates display section - expands to fill remaining space
+        coord_section = ctk.CTkFrame(self.right_column, fg_color="#d0d0d0", corner_radius=8)
+        coord_section.grid(row=2, column=0, sticky="nsew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
+        
         self.coord_label = ctk.CTkLabel(coord_section, text="", font=("Consolas", 16, "bold"), text_color=UI_COLORS['ON_SURFACE'])
-        self.coord_label.pack(pady=10)
+        self.coord_label.pack(pady=UI_PADDING['SMALL'])
 
     def _bind_arrow_keys(self):
         self.root.bind('<KeyPress-Left>', lambda e: self._on_arrow_press('Left'))
@@ -569,10 +619,10 @@ class FabricCNCApp:
             delta = -self.jog_speed
         elif key == 'Page_Up':
             axis = 'Z'
-            delta = 1.0 * APP_CONFIG['INCH_TO_MM']  # 1 inch up
+            delta = 1.0 * config.APP_CONFIG['INCH_TO_MM']  # 1 inch up
         elif key == 'Page_Down':
             axis = 'Z'
-            delta = -1.0 * APP_CONFIG['INCH_TO_MM']  # 1 inch down
+            delta = -1.0 * config.APP_CONFIG['INCH_TO_MM']  # 1 inch down
         elif key == 'Home':
             axis = 'ROT'
             delta = 5.0  # 5 degrees clockwise
@@ -610,19 +660,7 @@ class FabricCNCApp:
 
 
 
-    # --- Center Canvas: DXF/toolpath/position ---
-    def _setup_center_canvas(self):
-        # Setup canvas with proper sizing and drawing - using original working approach
-        self.canvas = ctk.CTkCanvas(self.center_frame, bg=UI_COLORS['SURFACE'], highlightthickness=0)
-        self.canvas.grid(row=0, column=0, sticky="nsew")
-        self.center_frame.bind("<Configure>", self._on_canvas_resize)
-        # Initialize canvas dimensions
-        self.canvas_width = APP_CONFIG['CANVAS_WIDTH']
-        self.canvas_height = APP_CONFIG['CANVAS_HEIGHT']
-        self.canvas_scale = APP_CONFIG['CANVAS_SCALE']
-        self.canvas_offset = (0, 0)
-        # Draw initial canvas
-        self._draw_canvas()
+
 
     def _on_canvas_resize(self, event):
         self.canvas_width = event.width
@@ -641,65 +679,149 @@ class FabricCNCApp:
             self._draw_toolpath_inches()
         # Draw current tool head position (all axes)
         pos = self.motor_ctrl.get_position()
-        x = max(0.0, min(pos['X'], APP_CONFIG['X_MAX_MM']))
-        y = max(0.0, min(pos['Y'], APP_CONFIG['Y_MAX_MM']))
+        x = max(0.0, min(pos['X'], config.APP_CONFIG['X_MAX_MM']))
+        y = max(0.0, min(pos['Y'], config.APP_CONFIG['Y_MAX_MM']))
         clamped_pos = {'X': x, 'Y': y}
         self._draw_tool_head_inches(clamped_pos)
 
+    def _reload_config_and_redraw(self):
+        """Reload configuration and redraw the canvas to reflect changes."""
+        # Reload the config module
+        import importlib
+        importlib.reload(config)
+        
+        # Update the global APP_CONFIG reference
+        global APP_CONFIG
+        APP_CONFIG = config.APP_CONFIG
+        
+        # Redraw the canvas with new settings
+        self._draw_canvas()
+
     def _draw_axes_in_inches(self):
-        # Draw X and Y axes with inch ticks and labels, with buffer
+        # Draw full-height canvas with gridlines and numbers
+        # Use 5-inch spacing for gridlines and numbers
         inch_tick = 5
         
-        # Draw X-axis ticks (horizontal axis at bottom)
-        for x_in in range(0, 69, inch_tick):
+        # Configure plot dimensions from config file
+        plot_width_in = config.APP_CONFIG['X_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
+        plot_height_in = config.APP_CONFIG['Y_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
+        
+        # Get buffer from config file
+        buffer_px = config.APP_CONFIG['PLOT_BUFFER_PX']
+        
+        # Calculate scale to make plot fit within canvas with buffer
+        # Account for buffer on all sides
+        available_height_px = self.canvas_height - (2 * buffer_px)
+        available_width_px = self.canvas_width - (2 * buffer_px)
+        
+        # Calculate scales for both dimensions
+        scale_y = available_height_px / plot_height_in
+        scale_x = available_width_px / plot_width_in
+        
+        # Use the smaller scale to maintain aspect ratio
+        scale = min(scale_x, scale_y)
+        
+        # Calculate offsets - center the plot with buffer
+        ox = (self.canvas_width - plot_width_in * scale) / 2
+        oy = (self.canvas_height - plot_height_in * scale) / 2
+        
+        # Draw plot area border
+        plot_left = ox
+        plot_top = oy
+        plot_right = ox + plot_width_in * scale
+        plot_bottom = oy + plot_height_in * scale
+        self.canvas.create_rectangle(plot_left, plot_top, plot_right, plot_bottom, 
+                                   outline=UI_COLORS['PRIMARY_COLOR'], width=2)
+        
+        # Draw light gridlines every 5 inches
+        for x_in in range(0, int(plot_width_in) + 1, inch_tick):
             x_px, y_px = self._inches_to_canvas(x_in, 0)
-            # Ensure we're within canvas bounds
-            if 0 <= x_px <= self.canvas_width and 0 <= y_px <= self.canvas_height:
-                # Draw tick mark pointing up from bottom
-                self.canvas.create_line(x_px, y_px, x_px, y_px + 10, fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
-                # Draw label below tick (ensure it's visible)
-                # For X-axis labels, position them at a fixed distance from the bottom
-                label_y = self.canvas_height - 35
-                # Always draw labels, they should be visible - use same format as Y-axis
-                self.canvas.create_text(x_px, label_y, text=f"{x_in}", fill=UI_COLORS['ON_SURFACE'], font=("Arial", 9), anchor="n")
-                # Debug: log first few labels to see positioning
-                if x_in <= 15:
-                    logger.debug(f"X-axis label {x_in}: canvas_pos=({x_px:.1f}, {y_px:.1f}), label_y={label_y:.1f}, canvas_height={self.canvas_height}")
+            # Draw vertical gridline
+            self.canvas.create_line(x_px, plot_top, x_px, plot_bottom, 
+                                   fill="#E0E0E0", width=1)
         
-        # Draw Y-axis ticks (vertical axis on left)
-        for y_in in range(0, 46, inch_tick):
+        for y_in in range(0, int(plot_height_in) + 1, inch_tick):
             x_px, y_px = self._inches_to_canvas(0, y_in)
-            # Ensure we're within canvas bounds
-            if 0 <= x_px <= self.canvas_width and 0 <= y_px <= self.canvas_height:
-                # Draw tick mark pointing right from left edge
-                self.canvas.create_line(x_px, y_px, x_px + 10, y_px, fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
-                # Draw label to the left of tick (ensure it's visible)
-                label_x = max(x_px - 5, 15)
-                self.canvas.create_text(label_x, y_px, text=f"{y_in}", fill=UI_COLORS['ON_SURFACE'], font=("Arial", 9), anchor="e")
+            # Draw horizontal gridline
+            self.canvas.create_line(plot_left, y_px, plot_right, y_px, 
+                                   fill="#E0E0E0", width=1)
         
-        # Draw border
-        self.canvas.create_rectangle(0, 0, self.canvas_width, self.canvas_height, outline=UI_COLORS['PRIMARY_COLOR'], width=2)
+        # Draw tick marks on the axes
+        tick_length = 8  # Length of tick marks in pixels
+        
+        # X-axis tick marks (bottom of plot)
+        for x_in in range(0, int(plot_width_in) + 1, inch_tick):
+            x_px, y_px = self._inches_to_canvas(x_in, 0)
+            # Draw tick mark pointing down from the plot bottom
+            self.canvas.create_line(x_px, plot_bottom, x_px, plot_bottom + tick_length, 
+                                   fill="#000000", width=2)
+        
+        # Y-axis tick marks (left side of plot)
+        for y_in in range(0, int(plot_height_in) + 1, inch_tick):
+            x_px, y_px = self._inches_to_canvas(0, y_in)
+            # Draw tick mark pointing left from the plot left edge
+            self.canvas.create_line(plot_left, y_px, plot_left - tick_length, y_px, 
+                                   fill="#000000", width=2)
+        
+        # Draw X-axis numbers (just below the plot area) - no boxes
+        for x_in in range(0, int(plot_width_in) + 1, inch_tick):
+            x_px, y_px = self._inches_to_canvas(x_in, 0)
+            # Draw number just below the plot area
+            label_y = plot_bottom + 15
+            if label_y < self.canvas_height - 10:
+                # Draw text directly - no background box
+                self.canvas.create_text(x_px, label_y, text=f"{x_in}", 
+                                      fill="#000000", font=("Arial", 10, "bold"), anchor="n")
+        
+        # Draw Y-axis numbers (just to the left of the plot area) - no boxes
+        for y_in in range(0, int(plot_height_in) + 1, inch_tick):
+            x_px, y_px = self._inches_to_canvas(0, y_in)
+            # Draw number just to the left of the plot area
+            label_x = plot_left - 15
+            if label_x > 10:
+                # Draw text directly - no background box
+                self.canvas.create_text(label_x, y_px, text=f"{y_in}", 
+                                      fill="#000000", font=("Arial", 10, "bold"), anchor="e")
 
     def _inches_to_canvas(self, x_in, y_in):
         # Convert inches to canvas coordinates with home at bottom-left
-        plot_width_in = 68 + 2 * APP_CONFIG['PLOT_BUFFER_IN']
-        plot_height_in = 45 + 2 * APP_CONFIG['PLOT_BUFFER_IN']
-        sx = self.canvas_width / plot_width_in
-        sy = self.canvas_height / plot_height_in
-        ox = APP_CONFIG['PLOT_BUFFER_IN'] * sx
-        oy = APP_CONFIG['PLOT_BUFFER_IN'] * sy
-        # Y coordinate: 0 at bottom, 45 at top (Tkinter Y is top-down)
-        y_canvas = (45 - y_in) * sy + oy
-        return x_in * sx + ox, y_canvas
+        # Configure plot dimensions from config file
+        plot_width_in = config.APP_CONFIG['X_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
+        plot_height_in = config.APP_CONFIG['Y_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
+        
+        # Get buffer from config file
+        buffer_px = config.APP_CONFIG['PLOT_BUFFER_PX']
+        
+        # Calculate scale to make plot fit within canvas with buffer
+        # Account for buffer on all sides
+        available_height_px = self.canvas_height - (2 * buffer_px)
+        available_width_px = self.canvas_width - (2 * buffer_px)
+        
+        # Calculate scales for both dimensions
+        scale_y = available_height_px / plot_height_in
+        scale_x = available_width_px / plot_width_in
+        
+        # Use the smaller scale to maintain aspect ratio
+        scale = min(scale_x, scale_y)
+        
+        # Calculate offsets - center the plot with buffer
+        ox = (self.canvas_width - plot_width_in * scale) / 2
+        oy = (self.canvas_height - plot_height_in * scale) / 2
+        
+        # Y coordinate: 0 at bottom, plot_height_in at top (Tkinter Y is top-down)
+        y_canvas = (plot_height_in - y_in) * scale + oy
+        x_canvas = x_in * scale + ox
+        
+        return x_canvas, y_canvas
 
     def _draw_tool_head_inches(self, pos):
         # Draw a small circle at the current tool head position (in inches)
-        y_in = pos['Y'] / APP_CONFIG['INCH_TO_MM']
-        x_in = pos['X'] / APP_CONFIG['INCH_TO_MM']
+        y_in = pos['Y'] / config.APP_CONFIG['INCH_TO_MM']
+        x_in = pos['X'] / config.APP_CONFIG['INCH_TO_MM']
         x_c, y_c = self._inches_to_canvas(x_in, y_in)
         
         # Make tool head more visible
-        r = APP_CONFIG['TOOL_HEAD_RADIUS']  # Larger radius
+        r = config.APP_CONFIG['TOOL_HEAD_RADIUS']  # Larger radius
         # Draw outer circle (background)
         self.canvas.create_oval(x_c - r - 2, y_c - r - 2, x_c + r + 2, y_c + r + 2, fill=UI_COLORS['PRIMARY_COLOR'], outline=UI_COLORS['PRIMARY_COLOR'], width=1)
         # Draw inner circle (tool head)
@@ -1145,118 +1267,31 @@ class FabricCNCApp:
     
     def _generate_continuous_spline_path(self, spline):
         """
-        Generate a single continuous path for a spline with no stopping.
+        Generate a single continuous path for a spline with ultra-smooth motion.
         Returns: List of (x, y, angle, z) tuples for continuous motion
         """
-        return generate_continuous_spline_toolpath(spline, step_size=TOOLPATH_CONFIG['DEFAULT_STEP_SIZE'])
+        return generate_continuous_spline_toolpath(spline, step_size=0.05)
     
     def _generate_continuous_circle_path(self, center, radius, start_angle=0, end_angle=2*math.pi):
         """
-        Generate a single continuous path for a circle/arc with no stopping.
+        Generate a single continuous path for a circle/arc with ultra-smooth motion.
         Returns: List of (x, y, angle, z) tuples for continuous motion
         """
-        return generate_continuous_circle_toolpath(center, radius, start_angle, end_angle, step_size=TOOLPATH_CONFIG['DEFAULT_STEP_SIZE'])
+        return generate_continuous_circle_toolpath(center, radius, start_angle, end_angle, step_size=0.05)
     
     def _generate_continuous_polyline_path(self, polyline):
         """
-        Generate a single continuous path for a polyline with no stopping.
+        Generate a single continuous path for a polyline with smooth transitions.
         Returns: List of (x, y, angle, z) tuples for continuous motion
         """
-        try:
-            # Get polyline points
-            if polyline.dxftype() == 'LWPOLYLINE':
-                points = [p[:2] for p in polyline.get_points()]
-            else:  # POLYLINE
-                points = [(v.dxf.x, v.dxf.y) for v in polyline.vertices()]
-            
-            if len(points) < 2:
-                return []
-            
-            toolpath = []
-            step_size = 0.1  # inches
-            
-            # Generate continuous path through all segments
-            for i in range(len(points) - 1):
-                start_point = points[i]
-                end_point = points[i + 1]
-                
-                # Calculate segment length
-                dx = end_point[0] - start_point[0]
-                dy = end_point[1] - start_point[1]
-                segment_length = math.sqrt(dx*dx + dy*dy)
-                
-                # Calculate number of steps for this segment
-                num_steps = max(8, int(segment_length / step_size))
-                
-                # Generate points along this segment
-                for j in range(num_steps + 1):
-                    t = j / num_steps
-                    x = start_point[0] + t * dx
-                    y = start_point[1] + t * dy
-                    
-                    # Calculate tangent angle
-                    tangent_angle = math.atan2(dy, dx)
-                    
-                    # Convert to absolute angle
-                    absolute_angle = -(math.degrees(tangent_angle) - 90.0)
-                    while absolute_angle > 180:
-                        absolute_angle -= 360
-                    while absolute_angle < -180:
-                        absolute_angle += 360
-                    
-                    # Z=0 for continuous cutting
-                    toolpath.append((x, y, math.radians(absolute_angle), 0))
-            
-            return toolpath
-            
-        except Exception as e:
-            logger.error(f"Error generating continuous polyline path: {e}")
-            return []
+        return generate_continuous_polyline_toolpath(polyline, step_size=0.05)
     
     def _generate_continuous_line_path(self, line):
         """
-        Generate a single continuous path for a line with no stopping.
+        Generate a single continuous path for a line with smooth motion.
         Returns: List of (x, y, angle, z) tuples for continuous motion
         """
-        try:
-            start_point = (line.dxf.start.x, line.dxf.start.y)
-            end_point = (line.dxf.end.x, line.dxf.end.y)
-            
-            # Calculate line length
-            dx = end_point[0] - start_point[0]
-            dy = end_point[1] - start_point[1]
-            line_length = math.sqrt(dx*dx + dy*dy)
-            
-            # Calculate number of steps
-            step_size = 0.1  # inches
-            num_steps = max(8, int(line_length / step_size))
-            
-            toolpath = []
-            
-            # Generate points along the line
-            for i in range(num_steps + 1):
-                t = i / num_steps
-                x = start_point[0] + t * dx
-                y = start_point[1] + t * dy
-                
-                # Calculate tangent angle
-                tangent_angle = math.atan2(dy, dx)
-                
-                # Convert to absolute angle
-                absolute_angle = -(math.degrees(tangent_angle) - 90.0)
-                while absolute_angle > 180:
-                    absolute_angle -= 360
-                while absolute_angle < -180:
-                    absolute_angle += 360
-                
-                # Z=0 for continuous cutting
-                toolpath.append((x, y, math.radians(absolute_angle), 0))
-            
-            return toolpath
-            
-        except Exception as e:
-            logger.error(f"Error generating continuous line path: {e}")
-            return []
+        return generate_continuous_line_toolpath(line, step_size=0.05)
 
     def _preview_toolpath(self):
         if not hasattr(self, 'toolpath') or not self.toolpath:
@@ -1297,7 +1332,7 @@ class FabricCNCApp:
             
         # Debug: Print machine limits and first toolpath point
         print(f"\n=== TOOLPATH EXECUTION DEBUG ===")
-        print(f"Machine limits: X=±{APP_CONFIG['X_MAX_MM']:.2f}mm, Y=±{APP_CONFIG['Y_MAX_MM']:.2f}mm")
+        print(f"Machine limits: X=±{config.APP_CONFIG['X_MAX_MM']:.2f}mm, Y=±{config.APP_CONFIG['Y_MAX_MM']:.2f}mm")
         
         # Debug: Check sensor states before starting toolpath
         if MOTOR_IMPORTS_AVAILABLE:
@@ -1309,10 +1344,10 @@ class FabricCNCApp:
         if self.toolpath and self.toolpath[0]:
             first_point = self.toolpath[0][0]
             x, y, angle, z = first_point
-            x_mm = x * APP_CONFIG['INCH_TO_MM']
-            y_mm = y * APP_CONFIG['INCH_TO_MM']
+            x_mm = x * config.APP_CONFIG['INCH_TO_MM']
+            y_mm = y * config.APP_CONFIG['INCH_TO_MM']
             print(f"First toolpath point: X={x:.3f}in ({x_mm:.2f}mm), Y={y:.3f}in ({y_mm:.2f}mm)")
-            if abs(x_mm) > APP_CONFIG['X_MAX_MM'] or abs(y_mm) > APP_CONFIG['Y_MAX_MM']:
+            if abs(x_mm) > config.APP_CONFIG['X_MAX_MM'] or abs(y_mm) > config.APP_CONFIG['Y_MAX_MM']:
                 print(f"⚠️  WARNING: First point beyond machine limits!")
                 return
             
@@ -1328,7 +1363,7 @@ class FabricCNCApp:
         if self.toolpath and self.toolpath[0]:
             first_point = self.toolpath[0][0]
             x, y, angle, z = first_point
-            self._travel_to_start(x * APP_CONFIG['INCH_TO_MM'], y * APP_CONFIG['INCH_TO_MM'])
+            self._travel_to_start(x * config.APP_CONFIG['INCH_TO_MM'], y * config.APP_CONFIG['INCH_TO_MM'])
         else:
             self._run_toolpath_step()
 
@@ -1336,12 +1371,12 @@ class FabricCNCApp:
         """Travel from home to the start position of the toolpath."""
         # Move to start position with Z up
         if MOTOR_IMPORTS_AVAILABLE:
-            self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=APP_CONFIG['Z_UP_MM'], rot=0.0)
+            self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=config.APP_CONFIG['Z_UP_MM'], rot=0.0)
         
         # Update position and display
         self._current_toolpath_pos['X'] = x_mm
         self._current_toolpath_pos['Y'] = y_mm
-        self._current_toolpath_pos['Z'] = APP_CONFIG['Z_UP_MM']
+        self._current_toolpath_pos['Z'] = config.APP_CONFIG['Z_UP_MM']
         self._current_toolpath_pos['ROT'] = 0.0
         
         self._update_position_display()
@@ -1365,11 +1400,11 @@ class FabricCNCApp:
             return
         x, y, angle, z = path[step_idx]
         # Set toolpath position directly (no swap)
-        x_mm = x * APP_CONFIG['INCH_TO_MM']
-        y_mm = y * APP_CONFIG['INCH_TO_MM']
+        x_mm = x * config.APP_CONFIG['INCH_TO_MM']
+        y_mm = y * config.APP_CONFIG['INCH_TO_MM']
         self._current_toolpath_pos['X'] = x_mm
         self._current_toolpath_pos['Y'] = y_mm
-        self._current_toolpath_pos['Z'] = APP_CONFIG['Z_DOWN_MM'] if z == 0 else APP_CONFIG['Z_UP_MM']
+        self._current_toolpath_pos['Z'] = config.APP_CONFIG['Z_DOWN_MM'] if z == 0 else config.APP_CONFIG['Z_UP_MM']
         self._current_toolpath_pos['ROT'] = math.degrees(angle)
         
         # Debug: print toolpath coordinates in both units
@@ -1387,8 +1422,8 @@ class FabricCNCApp:
         print(f"[DEBUG] Toolpath pos: X={self._current_toolpath_pos['X']:.2f} Y={self._current_toolpath_pos['Y']:.2f} | Motor pos: X={actual_pos['X']:.2f} Y={actual_pos['Y']:.2f}")
         
         # Check if coordinates are within machine limits
-        if abs(x_mm) > APP_CONFIG['X_MAX_MM'] or abs(y_mm) > APP_CONFIG['Y_MAX_MM']:
-            print(f"[WARNING] Coordinates beyond machine limits! X={x_mm:.2f}mm (limit: ±{APP_CONFIG['X_MAX_MM']:.2f}mm), Y={y_mm:.2f}mm (limit: ±{APP_CONFIG['Y_MAX_MM']:.2f}mm)")
+        if abs(x_mm) > config.APP_CONFIG['X_MAX_MM'] or abs(y_mm) > config.APP_CONFIG['Y_MAX_MM']:
+            print(f"[WARNING] Coordinates beyond machine limits! X={x_mm:.2f}mm (limit: ±{config.APP_CONFIG['X_MAX_MM']:.2f}mm), Y={y_mm:.2f}mm (limit: ±{config.APP_CONFIG['Y_MAX_MM']:.2f}mm)")
         self._update_position_display()  # Force update after each move
         self._draw_canvas()
         # Next step
@@ -1398,88 +1433,30 @@ class FabricCNCApp:
 
     def _draw_live_tool_head_inches(self, pos):
         # Draw a blue dot and orientation line at the current tool head position (in inches)
-        x_in = pos['X'] / APP_CONFIG['INCH_TO_MM']
-        y_in = pos['Y'] / APP_CONFIG['INCH_TO_MM']
+        x_in = pos['X'] / config.APP_CONFIG['INCH_TO_MM']
+        y_in = pos['Y'] / config.APP_CONFIG['INCH_TO_MM']
         rot_rad = math.radians(pos.get('ROT', 0.0))
         x_c, y_c = self._inches_to_canvas(x_in, y_in)
-        r = APP_CONFIG['LIVE_TOOL_HEAD_RADIUS']
+        r = config.APP_CONFIG['LIVE_TOOL_HEAD_RADIUS']
         self.canvas.create_oval(x_c - r, y_c - r, x_c + r, y_c + r, fill=UI_COLORS['PRIMARY_COLOR'], outline=UI_COLORS['PRIMARY_VARIANT'], width=2)
-        r_dir = APP_CONFIG['LIVE_TOOL_HEAD_DIR_RADIUS']  # 0.5 inch
+        r_dir = config.APP_CONFIG['LIVE_TOOL_HEAD_DIR_RADIUS']  # 0.5 inch
         x2 = x_in + r_dir * math.cos(rot_rad)
         y2 = y_in + r_dir * math.sin(rot_rad)
         x2_c, y2_c = self._inches_to_canvas(x2, y2)
         self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill=UI_COLORS['SECONDARY_COLOR'], width=3)
 
-    # --- Right Toolbar: Motor controls ---
-    def _setup_right_toolbar(self):
-        ctk.CTkLabel(self.right_toolbar, text="Motor Controls", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=(20, 10))
-        
-        # Jog controls (arrow key layout)
-        jog_frame = ctk.CTkFrame(self.right_toolbar, fg_color=UI_COLORS['SURFACE'], corner_radius=12)
-        jog_frame.pack(fill=ctk.X, padx=10, pady=8)
-        # 3x3 grid for arrow keys
-        jog_frame.grid_columnconfigure(0, minsize=32)
-        jog_frame.grid_columnconfigure(1, minsize=32)
-        jog_frame.grid_columnconfigure(2, minsize=32)
-        jog_frame.grid_rowconfigure(0, minsize=32)
-        jog_frame.grid_rowconfigure(1, minsize=32)
-        jog_frame.grid_rowconfigure(2, minsize=32)
-        # Top: Up arrow
-        self._add_jog_button(jog_frame, "↑", lambda: self._jog('Y', +self.jog_speed)).grid(row=0, column=1, padx=2, pady=2)
-        # Middle: Left and Right arrows
-        self._add_jog_button(jog_frame, "←", lambda: self._jog('X', -self.jog_speed)).grid(row=1, column=0, padx=2, pady=2)
-        self._add_jog_button(jog_frame, "→", lambda: self._jog('X', +self.jog_speed)).grid(row=1, column=2, padx=2, pady=2)
-        # Bottom: Down arrow
-        self._add_jog_button(jog_frame, "↓", lambda: self._jog('Y', -self.jog_speed)).grid(row=2, column=1, padx=2, pady=2)
-        
-        # Z and ROT controls section
-        zrot_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
-        zrot_section.pack(fill=ctk.X, padx=10, pady=(0, 8))
-        # Configure grid for centered layout
-        zrot_section.grid_columnconfigure(0, weight=1)
-        zrot_section.grid_columnconfigure(1, weight=1)
-        zrot_section.grid_columnconfigure(2, weight=1)
-        zrot_section.grid_columnconfigure(3, weight=1)
-        zrot_section.grid_rowconfigure(0, weight=1)
-        # Center the Z and ROT buttons
-        self._add_jog_button(zrot_section, "Z+", lambda: self._jog('Z', +1)).grid(row=0, column=0, padx=4, pady=4, sticky="nsew")
-        self._add_jog_button(zrot_section, "Z-", lambda: self._jog('Z', -1)).grid(row=0, column=1, padx=4, pady=4, sticky="nsew")
-        self._add_jog_button(zrot_section, "ROT+", lambda: self._jog('ROT', +5)).grid(row=0, column=2, padx=4, pady=4, sticky="nsew")
-        self._add_jog_button(zrot_section, "ROT-", lambda: self._jog('ROT', -5)).grid(row=0, column=3, padx=4, pady=4, sticky="nsew")
-        
-        # Speed adjustment section
-        speed_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
-        speed_section.pack(fill=ctk.X, padx=10, pady=(0, 8))
-        ctk.CTkLabel(speed_section, text="Jog Step (in)", font=("Arial", 16, "bold")).pack(side=ctk.LEFT, padx=10, pady=10)
-        self._jog_slider_scale = 0.01
-        speed_slider = ctk.CTkSlider(speed_section, from_=1, to=200, number_of_steps=199, variable=None, width=120, command=lambda v: self._on_jog_slider(v))
-        speed_slider.pack(side=ctk.LEFT, padx=5)
-        speed_entry = ctk.CTkEntry(speed_section, textvariable=self.jog_speed_var, width=50)
-        speed_entry.pack(side=ctk.LEFT, padx=5)
-        self.jog_speed_var.trace_add('write', lambda *a: self._update_jog_speed())
-        
-        # Home controls section
-        home_section = ctk.CTkFrame(self.right_toolbar, fg_color="#f0f0f0", corner_radius=8)
-        home_section.pack(fill=ctk.X, padx=10, pady=8)
-        # Home controls
-        home_frame = ctk.CTkFrame(home_section, fg_color=UI_COLORS['SURFACE'], corner_radius=12)
-        home_frame.pack(fill=ctk.X, padx=10, pady=10)
-        ctk.CTkButton(home_frame, text="Home X", command=lambda: self._home('X'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, pady=2)
-        ctk.CTkButton(home_frame, text="Home Y", command=lambda: self._home('Y'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, pady=2)
-        ctk.CTkButton(home_frame, text="Home Z", command=lambda: self._home('Z'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, pady=2)
-        ctk.CTkButton(home_frame, text="Home ROT", command=lambda: self._home('ROT'), height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, pady=2)
-        ctk.CTkButton(home_frame, text="Home All (Sync)", command=self._home_all, height=35, font=("Arial", 16, "bold")).pack(fill=ctk.X, pady=2)
-        
-        # Coordinates display section
-        coord_section = ctk.CTkFrame(self.right_toolbar, fg_color="#d0d0d0", corner_radius=8)
-        coord_section.pack(fill=ctk.X, padx=10, pady=8)
-        self.coord_label = ctk.CTkLabel(coord_section, text="", font=("Consolas", 16, "bold"), text_color=UI_COLORS['ON_SURFACE'])
-        self.coord_label.pack(pady=10)
+
 
     def _add_jog_button(self, parent, text, cmd):
         # Use larger font for arrow buttons
         font_size = 20 if text in ["↑", "↓", "←", "→"] else 16
         btn = ctk.CTkButton(parent, text=text, command=cmd, width=50, height=40, fg_color=UI_COLORS['PRIMARY_COLOR'], text_color=UI_COLORS['ON_PRIMARY'], hover_color=UI_COLORS['PRIMARY_VARIANT'], corner_radius=8, font=("Arial", font_size, "bold"))
+        return btn
+
+    def _add_compact_jog_button(self, parent, text, cmd):
+        # Compact version for the minimal right toolbar - consistent with app styling
+        font_size = 16 if text in ["↑", "↓", "←", "→"] else 12
+        btn = ctk.CTkButton(parent, text=text, command=cmd, width=35, height=30, fg_color=UI_COLORS['PRIMARY_COLOR'], text_color=UI_COLORS['ON_PRIMARY'], hover_color=UI_COLORS['PRIMARY_VARIANT'], corner_radius=8, font=("Arial", font_size, "bold"))
         return btn
 
     def _jog(self, axis, delta):
@@ -1531,23 +1508,28 @@ class FabricCNCApp:
 
     def _update_position_display(self):
         pos = self.motor_ctrl.get_position()
-        x_disp = pos['X']/APP_CONFIG['INCH_TO_MM']
-        y_disp = pos['Y']/APP_CONFIG['INCH_TO_MM']
-        z_disp = pos['Z']/APP_CONFIG['INCH_TO_MM']  # Convert Z to inches
+        x_disp = pos['X']/config.APP_CONFIG['INCH_TO_MM']
+        y_disp = pos['Y']/config.APP_CONFIG['INCH_TO_MM']
+        z_disp = pos['Z']/config.APP_CONFIG['INCH_TO_MM']  # Convert Z to inches
         rot_disp = pos['ROT']
-        text = f"X: {x_disp:.2f} in\nY: {y_disp:.2f} in\nZ: {z_disp:.2f} in\nROT: {rot_disp:.1f}°"
+        text = f"X:{x_disp:.1f}\nY:{y_disp:.1f}\nZ:{z_disp:.1f}\nR:{rot_disp:.0f}°"
         self.coord_label.configure(text=text)
         self.root.after(200, self._update_position_display)
 
     def _update_jog_speed(self):
         try:
-            self.jog_speed = self.jog_speed_var.get() * APP_CONFIG['INCH_TO_MM']
+            self.jog_speed = self.jog_speed_var.get() * config.APP_CONFIG['INCH_TO_MM']
         except Exception:
             pass
 
     def _on_jog_slider(self, value):
-        # Convert int slider value to float inches
-        self.jog_speed_var.set(int(value) * self._jog_slider_scale)
+        # Convert slider value to float inches
+        speed_inches = float(value) * self._jog_slider_scale
+        self.jog_speed_var.set(speed_inches)
+        # Update the display label
+        self.jog_speed_label.configure(text=f"{speed_inches:.1f} in")
+        # Update the actual jog speed
+        self.jog_speed = speed_inches * config.APP_CONFIG['INCH_TO_MM']
 
     def _toggle_fullscreen(self):
         """Toggle full screen mode."""
