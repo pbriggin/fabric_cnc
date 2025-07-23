@@ -719,6 +719,10 @@ class FabricCNCApp:
         if self.toolpath:
             self._draw_toolpath_inches()
         
+        # Draw new toolpath preview if available
+        if hasattr(self, 'toolpath_data') and self.toolpath_data:
+            self._draw_toolpath_inches()
+        
         # Draw current tool head position (all axes)
         pos = self.motor_ctrl.get_position()
         x = max(0.0, min(pos['X'], config.APP_CONFIG['X_MAX_MM']))
@@ -1016,22 +1020,65 @@ class FabricCNCApp:
                 self.canvas.create_line(*[coord for pt in points for coord in pt], fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
 
     def _draw_toolpath_inches(self):
-        # Draw toolpath in inches
-        if not hasattr(self, 'toolpath') or not self.toolpath:
+        """Draw toolpath with arrows and corner markers on the canvas."""
+        if not hasattr(self, 'toolpath_data') or not self.toolpath_data:
             return
-        color_cycle = [UI_COLORS['PRIMARY_COLOR'], UI_COLORS['PRIMARY_VARIANT'], UI_COLORS['SECONDARY_COLOR'], '#cc7700', '#aa00cc', '#cc2222', '#0a0', '#f0a', '#0af', '#fa0', '#a0f', '#0fa', '#af0', '#f00', '#00f', '#0ff', '#ff0', '#f0f', '#888', '#444']
-        for i, path in enumerate(self.toolpath):
-            color = color_cycle[i % len(color_cycle)]
-            # Draw as a polyline of all (x, y) points where z==0 (cutting)
-            points = [(x, y) for x, y, angle, z in path if z == 0]
-            if len(points) < 2:
-                continue
-            flat = []
-            for x, y in points:
-                x_c, y_c = self._inches_to_canvas(x, y)
-                flat.extend([x_c, y_c])
-            # Use solid line instead of dashed for clearer visualization
-            self.canvas.create_line(flat, fill=color, width=3)
+        
+        # Draw the main toolpath line
+        if self.toolpath_data.get('positions'):
+            positions = self.toolpath_data['positions']
+            if len(positions) >= 2:
+                canvas_points = []
+                for x_in, y_in in positions:
+                    x_canvas, y_canvas = self._inches_to_canvas(x_in, y_in)
+                    canvas_points.extend([x_canvas, y_canvas])
+                
+                # Draw main toolpath line
+                self.canvas.create_line(canvas_points, fill='blue', width=2, tags='toolpath')
+        
+        # Draw corner markers
+        if self.toolpath_data.get('corners'):
+            for x_in, y_in in self.toolpath_data['corners']:
+                x_canvas, y_canvas = self._inches_to_canvas(x_in, y_in)
+                # Draw red star for corners
+                size = 8
+                self.canvas.create_polygon(
+                    x_canvas, y_canvas - size,
+                    x_canvas + size * 0.5, y_canvas - size * 0.5,
+                    x_canvas + size, y_canvas,
+                    x_canvas + size * 0.5, y_canvas + size * 0.5,
+                    x_canvas, y_canvas + size,
+                    x_canvas - size * 0.5, y_canvas + size * 0.5,
+                    x_canvas - size, y_canvas,
+                    x_canvas - size * 0.5, y_canvas - size * 0.5,
+                    fill='red', outline='darkred', tags='toolpath'
+                )
+        
+        # Draw tool orientation arrows
+        if self.toolpath_data.get('orientations'):
+            orientations = self.toolpath_data['orientations']
+            positions = self.toolpath_data.get('positions', [])
+            
+            # Draw arrows at regular intervals
+            arrow_interval = max(1, len(positions) // 20)  # Show ~20 arrows
+            for i in range(0, len(orientations), arrow_interval):
+                if i < len(positions):
+                    x_in, y_in = positions[i]
+                    a_deg = orientations[i]
+                    x_canvas, y_canvas = self._inches_to_canvas(x_in, y_in)
+                    
+                    # Calculate arrow direction
+                    arrow_length = 15
+                    angle_rad = math.radians(a_deg)
+                    dx = arrow_length * math.cos(angle_rad)
+                    dy = arrow_length * math.sin(angle_rad)
+                    
+                    # Draw arrow
+                    self.canvas.create_line(
+                        x_canvas, y_canvas,
+                        x_canvas + dx, y_canvas + dy,
+                        fill='green', width=3, arrow='last', tags='toolpath'
+                    )
 
     # --- DXF Import/Toolpath ---
     def _import_dxf(self):
@@ -1064,6 +1111,7 @@ class FabricCNCApp:
             self.generated_gcode = ""
             self.gcode_file_path = ""
             self.toolpath = []
+            self.toolpath_data = None
             
             # Update status
             logger.info(f"DXF imported successfully:")
@@ -1347,7 +1395,7 @@ class FabricCNCApp:
         return generate_continuous_line_toolpath(line, step_size=0.05)
 
     def _preview_toolpath(self):
-        """Preview toolpath using the new G-code visualizer."""
+        """Preview toolpath with arrows and corner analysis in the main GUI."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             messagebox.showerror("Missing Dependencies", "G-code visualization modules not available.")
             return
@@ -1357,30 +1405,89 @@ class FabricCNCApp:
             return
         
         try:
-            # Create visualization using the G-code visualizer
-            output_path = self.gcode_file_path.replace('.gcode', '_visualization.png')
+            # Parse GCODE and extract toolpath data
+            self._parse_gcode_for_preview(self.gcode_file_path)
             
-            # Parse and visualize the G-code
-            self.gcode_visualizer.parse_gcode_file(self.gcode_file_path)
-            self.gcode_visualizer.create_visualization(output_path)
+            # Redraw canvas to show toolpath
+            self._draw_canvas()
             
-            # Show the visualization
-            if os.path.exists(output_path):
-                # On macOS, use 'open' command to display the image
-                if platform.system() == 'Darwin':
-                    os.system(f'open "{output_path}"')
-                else:
-                    # On other systems, try to open with default image viewer
-                    os.system(f'xdg-open "{output_path}"' if platform.system() == 'Linux' else f'start "" "{output_path}"')
-                
-                logger.info(f"Toolpath preview created: {output_path}")
-                messagebox.showinfo("Preview Created", f"Toolpath preview saved to:\n{output_path}")
-            else:
-                messagebox.showerror("Preview Error", "Failed to create preview image.")
-                
+            # Show preview info
+            corner_count = len(self.toolpath_data.get('corners', []))
+            messagebox.showinfo("Preview Created", 
+                              f"Toolpath preview displayed in main GUI.\n\n"
+                              f"Corners detected: {corner_count}\n"
+                              f"Toolpath length: {len(self.toolpath_data.get('positions', []))} points")
+            
         except Exception as e:
             logger.error(f"Failed to create toolpath preview: {e}")
             messagebox.showerror("Preview Error", str(e))
+    
+    def _parse_gcode_for_preview(self, gcode_file_path: str):
+        """Parse GCODE file and extract toolpath data for canvas display."""
+        logger.info(f"Parsing GCODE for preview: {gcode_file_path}")
+        
+        # Initialize toolpath data structure
+        self.toolpath_data = {
+            'positions': [],
+            'orientations': [],
+            'corners': [],
+            'z_changes': []
+        }
+        
+        # Current position tracking
+        current_x = 0.0
+        current_y = 0.0
+        current_z = 0.0
+        current_a = 0.0
+        pending_corner = False
+        
+        with open(gcode_file_path, 'r') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line or line.startswith(';'):
+                    continue
+                
+                # Extract coordinates using regex
+                import re
+                x_match = re.search(r'X([-\d.]+)', line)
+                y_match = re.search(r'Y([-\d.]+)', line)
+                z_match = re.search(r'Z([-\d.]+)', line)
+                a_match = re.search(r'A([-\d.]+)', line)
+                
+                # Update current position if coordinates found
+                if x_match:
+                    current_x = float(x_match.group(1))
+                if y_match:
+                    current_y = float(y_match.group(1))
+                if z_match:
+                    current_z = float(z_match.group(1))
+                if a_match:
+                    current_a = float(a_match.group(1))
+                
+                # Check if this is a movement command
+                if line.startswith('G0') or line.startswith('G1'):
+                    # Record position and orientation
+                    self.toolpath_data['positions'].append((current_x, current_y))
+                    self.toolpath_data['orientations'].append(current_a)
+                    
+                    # Check for corner handling
+                    if pending_corner:
+                        self.toolpath_data['corners'].append((current_x, current_y))
+                        pending_corner = False
+                
+                # Check for corner handling
+                if 'Raise Z for corner' in line:
+                    pending_corner = True
+                
+                # Check for Z changes
+                if z_match and abs(current_z - self.toolpath_data.get('last_z', 0)) > 0.1:
+                    self.toolpath_data['z_changes'].append((current_x, current_y, current_z))
+                    self.toolpath_data['last_z'] = current_z
+        
+        logger.info(f"Parsed toolpath data:")
+        logger.info(f"  - Positions: {len(self.toolpath_data['positions'])}")
+        logger.info(f"  - Corners: {len(self.toolpath_data['corners'])}")
+        logger.info(f"  - Z changes: {len(self.toolpath_data['z_changes'])}")
 
     def _run_toolpath(self):
         """Run toolpath using the new G-code executor."""
