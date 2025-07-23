@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test pipeline for test_2.dxf
+Test pipeline for test_4.dxf
 Runs the complete pipeline: DXF processor -> toolpath generator -> visualizer
 """
 
@@ -12,8 +12,8 @@ import time
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 def test_complete_pipeline():
-    """Test the complete pipeline with test_2.dxf"""
-    print("=== Testing Complete Pipeline with test_2.dxf ===")
+    """Test the complete pipeline with test_4.dxf"""
+    print("=== Testing Complete Pipeline with test_4.dxf ===")
     print(f"Working directory: {os.getcwd()}")
     print(f"Script location: {__file__}")
     
@@ -24,7 +24,7 @@ def test_complete_pipeline():
         from toolpath_planning.gcode_visualizer import GCodeVisualizer
         
         # Input file (relative to outputs folder)
-        dxf_file = "/Users/peterbriggs/Downloads/test_2.dxf"
+        dxf_file = "/Users/peterbriggs/Downloads/test_4.dxf"
         
         print(f"\n1. Processing DXF file: {dxf_file}")
         print("-" * 50)
@@ -48,7 +48,7 @@ def test_complete_pipeline():
         
         start_time = time.time()
         generator = ToolpathGenerator()
-        gcode_file = "test_2_pipeline.gcode"
+        gcode_file = "test_4_pipeline.gcode"
         
         # Generate toolpath
         gcode_content = generator.generate_toolpath(shapes)
@@ -83,7 +83,7 @@ def test_complete_pipeline():
         
         start_time = time.time()
         visualizer = GCodeVisualizer()
-        viz_file = "test_2_pipeline_visualization.png"
+        viz_file = "test_4_pipeline_visualization.png"
         
         # Parse the G-code file
         visualizer.parse_gcode_file(gcode_file)

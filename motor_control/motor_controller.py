@@ -442,7 +442,7 @@ class MotorController:
             self._current_movement = None
 
     def move_coordinated(self, x_distance_mm=0, y_distance_mm=0, z_distance_mm=0, rot_distance_mm=0):
-        """Move X and Y axes simultaneously in a coordinated manner."""
+        """Move all axes simultaneously in a coordinated manner for smooth motion."""
         try:
             # Set current movement and reset stop flag
             self._current_movement = 'COORDINATED'
@@ -451,10 +451,9 @@ class MotorController:
             # Debug: Print movement details
             logger.info(f"Coordinated movement: X={x_distance_mm:.2f}mm, Y={y_distance_mm:.2f}mm, Z={z_distance_mm:.2f}mm, ROT={rot_distance_mm:.2f}mm")
             
-            # Only proceed if we have X or Y movement
+            # Handle case where only Z or ROT movement is needed
             if abs(x_distance_mm) < 1e-6 and abs(y_distance_mm) < 1e-6:
                 logger.info("No X/Y movement detected, handling Z and ROT only")
-                # No X/Y movement, just handle Z and ROT if needed
                 if abs(z_distance_mm) > 1e-6:
                     self._move_z(z_distance_mm)
                 if abs(rot_distance_mm) > 1e-6:
@@ -464,15 +463,21 @@ class MotorController:
             # Calculate steps for each axis
             x_config = self.motors['X']
             y_config = self.motors['Y1']  # Use Y1 config for calculations
+            z_config = self.motors['Z']
+            rot_config = self.motors['ROT']
             
             x_revolutions = abs(x_distance_mm) / x_config['MM_PER_REV']
             y_revolutions = abs(y_distance_mm) / y_config['MM_PER_REV']
+            z_revolutions = abs(z_distance_mm) / z_config['MM_PER_REV']
+            rot_revolutions = abs(rot_distance_mm) / rot_config['MM_PER_REV']
             
             x_total_steps = int(x_revolutions * x_config['PULSES_PER_REV'])
             y_total_steps = int(y_revolutions * y_config['PULSES_PER_REV'])
+            z_total_steps = int(z_revolutions * z_config['PULSES_PER_REV'])
+            rot_total_steps = int(rot_revolutions * rot_config['PULSES_PER_REV'])
             
-            # Use the larger number of steps to determine the movement duration
-            max_steps = max(x_total_steps, y_total_steps)
+            # Use the largest number of steps to determine the movement duration
+            max_steps = max(x_total_steps, y_total_steps, z_total_steps, rot_total_steps)
             
             if max_steps == 0:
                 return
@@ -480,22 +485,28 @@ class MotorController:
             # Calculate step ratios for interpolation
             x_step_ratio = x_total_steps / max_steps if max_steps > 0 else 0
             y_step_ratio = y_total_steps / max_steps if max_steps > 0 else 0
+            z_step_ratio = z_total_steps / max_steps if max_steps > 0 else 0
+            rot_step_ratio = rot_total_steps / max_steps if max_steps > 0 else 0
             
             # Debug: Print step calculations
-            logger.info(f"Step calculations: X={x_total_steps} steps, Y={y_total_steps} steps, max_steps={max_steps}")
-            logger.info(f"Step ratios: X={x_step_ratio:.3f}, Y={y_step_ratio:.3f}")
+            logger.info(f"Step calculations: X={x_total_steps}, Y={y_total_steps}, Z={z_total_steps}, ROT={rot_total_steps}, max_steps={max_steps}")
             
-            # Acceleration parameters (use the faster axis for timing)
-            fast_config = x_config if x_config['STEP_DELAY'] <= y_config['STEP_DELAY'] else y_config
-            accel_steps = min(max_steps // 4, 100)
-            decel_steps = min(max_steps // 4, 100)
+            # Enhanced acceleration parameters for smoother motion
+            # Use more aggressive acceleration for better 3D printer-like motion
+            accel_steps = min(max_steps // 8, 200)  # Increased acceleration zone
+            decel_steps = min(max_steps // 8, 200)  # Increased deceleration zone
             cruise_steps = max_steps - accel_steps - decel_steps
             
-            # Movement loop with acceleration/deceleration
+            # Use the fastest axis for timing (lowest STEP_DELAY)
+            fast_config = min([x_config, y_config, z_config, rot_config], key=lambda c: c['STEP_DELAY'])
+            
+            # Movement loop with enhanced acceleration/deceleration
             x_step_counter = 0
             y_step_counter = 0
+            z_step_counter = 0
+            rot_step_counter = 0
             
-            logger.info(f"Starting coordinated movement loop with {max_steps} total steps")
+            logger.info(f"Starting smooth coordinated movement with {max_steps} total steps")
             
             for i in range(max_steps):
                 # Check if stop was requested
@@ -503,15 +514,22 @@ class MotorController:
                     logger.info("Stop requested - halting coordinated movement")
                     break
                 
-                # Calculate current delay based on position in movement
+                # Enhanced acceleration curve for smoother motion
                 if i < accel_steps:
-                    delay = fast_config['STEP_DELAY'] * (1 + (accel_steps - i) / accel_steps)
+                    # Smooth acceleration curve (sine-based)
+                    accel_progress = i / accel_steps
+                    accel_factor = math.sin(accel_progress * math.pi / 2)
+                    delay = fast_config['STEP_DELAY'] * (1 + (1 - accel_factor))
                 elif i >= max_steps - decel_steps:
-                    delay = fast_config['STEP_DELAY'] * (1 + (i - (max_steps - decel_steps)) / decel_steps)
+                    # Smooth deceleration curve (sine-based)
+                    decel_progress = (i - (max_steps - decel_steps)) / decel_steps
+                    decel_factor = math.sin(decel_progress * math.pi / 2)
+                    delay = fast_config['STEP_DELAY'] * (1 + (1 - decel_factor))
                 else:
+                    # Cruise speed
                     delay = fast_config['STEP_DELAY']
                 
-                # Check sensors before moving (X and Y only - ROT sensor checking removed)
+                # Check sensors before moving (X and Y only)
                 if self._check_sensor('X'):
                     logger.warning("X sensor triggered during coordinated movement - stopping")
                     break
@@ -525,6 +543,8 @@ class MotorController:
                 # Determine if we should step each axis based on interpolation
                 should_step_x = False
                 should_step_y = False
+                should_step_z = False
+                should_step_rot = False
                 
                 if x_total_steps > 0:
                     target_x_steps = (i + 1) * x_step_ratio
@@ -538,21 +558,33 @@ class MotorController:
                         should_step_y = True
                         y_step_counter += 1
                 
-                # Step motors - both step functions include their own delays
+                if z_total_steps > 0:
+                    target_z_steps = (i + 1) * z_step_ratio
+                    if z_step_counter < target_z_steps:
+                        should_step_z = True
+                        z_step_counter += 1
+                
+                if rot_total_steps > 0:
+                    target_rot_steps = (i + 1) * rot_step_ratio
+                    if rot_step_counter < target_rot_steps:
+                        should_step_rot = True
+                        rot_step_counter += 1
+                
+                # Step motors with coordinated timing
                 if should_step_x:
                     self._step_motor('X', x_distance_mm > 0, delay)
                 if should_step_y:
                     self._step_y_axis(y_distance_mm > 0, delay)
+                if should_step_z:
+                    self._step_motor('Z', z_distance_mm > 0, delay)
+                if should_step_rot:
+                    self._step_motor('ROT', rot_distance_mm > 0, delay)
                 
-                # Debug: Log every 1000 steps to show progress
-                if i % 1000 == 0 and i > 0:
+                # Progress logging (less frequent for performance)
+                if i % 5000 == 0 and i > 0:
                     logger.info(f"Movement progress: {i}/{max_steps} steps completed")
             
-            # Handle Z and ROT movement after X/Y movement
-            if abs(z_distance_mm) > 1e-6:
-                self._move_z(z_distance_mm)
-            if abs(rot_distance_mm) > 1e-6:
-                self._move_rot(rot_distance_mm)
+            logger.info("Coordinated movement completed")
             
         except Exception as e:
             logger.error(f"Error during coordinated movement: {e}")

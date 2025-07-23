@@ -31,6 +31,7 @@ except ImportError:
 # Import motor control modules
 try:
     from motor_control.motor_controller import MotorController
+    from motor_control.smooth_motion_executor import SmoothMotionExecutor
     MOTOR_IMPORTS_AVAILABLE = True
 except ImportError:
     MOTOR_IMPORTS_AVAILABLE = False
@@ -424,12 +425,12 @@ class FabricCNCApp:
                 feed_rate=1000.0,
                 plunge_rate=200.0
             )
-            self.gcode_executor = GCodeExecutor(self.motor_ctrl)
+            self.smooth_motion_executor = SmoothMotionExecutor(self.motor_ctrl)
             self.gcode_visualizer = GCodeVisualizer()
         else:
             self.dxf_processor = None
             self.toolpath_generator = None
-            self.gcode_executor = None
+            self.smooth_motion_executor = None
             self.gcode_visualizer = None
         
         # Initialize DXF-related attributes (legacy)
@@ -486,7 +487,6 @@ class FabricCNCApp:
         # File buttons with consistent padding
         file_buttons = [
             ("Import DXF", self._import_dxf, "primary"),
-            ("Generate Toolpath", self._generate_toolpath, "secondary"),
             ("Preview Toolpath", self._preview_toolpath, "secondary"),
             ("Run Toolpath", self._run_toolpath, "success"),
             ("Stop Execution", self._stop_execution, "warning"),
@@ -734,11 +734,32 @@ class FabricCNCApp:
         if not self.processed_shapes:
             return
         
-        # DXF processor now outputs coordinates in inches directly
+        # Color palette for different shapes
+        shape_colors = [
+            '#FF6B6B',  # Red
+            '#4ECDC4',  # Teal
+            '#45B7D1',  # Blue
+            '#96CEB4',  # Green
+            '#FFEAA7',  # Yellow
+            '#DDA0DD',  # Plum
+            '#98D8C8',  # Mint
+            '#F7DC6F',  # Gold
+            '#BB8FCE',  # Purple
+            '#85C1E9',  # Sky Blue
+            '#F8C471',  # Orange
+            '#82E0AA',  # Light Green
+            '#F1948A',  # Salmon
+            '#85C1E9',  # Light Blue
+            '#FAD7A0',  # Peach
+        ]
         
-        for shape_name, points in self.processed_shapes.items():
+        # DXF processor now outputs coordinates in inches directly
+        for i, (shape_name, points) in enumerate(self.processed_shapes.items()):
             if not points or len(points) < 2:
                 continue
+            
+            # Select color for this shape
+            color = shape_colors[i % len(shape_colors)]
             
             # Convert points to canvas coordinates
             canvas_points = []
@@ -749,19 +770,18 @@ class FabricCNCApp:
             # Draw the shape as a polyline
             if len(canvas_points) >= 4:  # Need at least 2 points (4 coordinates)
                 self.canvas.create_line(canvas_points, 
-                                      fill=UI_COLORS['PRIMARY_COLOR'], 
-                                      width=2, 
-                                      smooth=True)
+                                      fill=color, 
+                                      width=2)
                 
                 # Draw shape name at the first point
                 if canvas_points:
                     x_canvas, y_canvas = canvas_points[0], canvas_points[1]
                     self.canvas.create_text(x_canvas + 10, y_canvas - 10, 
                                           text=shape_name, 
-                                          fill=UI_COLORS['PRIMARY_COLOR'],
+                                          fill=color,
                                           font=("Arial", 8, "bold"))
         
-        logger.debug(f"Drew {len(self.processed_shapes)} processed shapes")
+        logger.debug(f"Drew {len(self.processed_shapes)} processed shapes with unique colors")
 
     def _reload_config_and_redraw(self):
         """Reload configuration and redraw the canvas to reflect changes."""
@@ -1058,9 +1078,32 @@ class FabricCNCApp:
             orientations = self.toolpath_data['orientations']
             positions = self.toolpath_data.get('positions', [])
             
-            # Draw arrows at regular intervals
-            arrow_interval = max(1, len(positions) // 20)  # Show ~20 arrows
-            for i in range(0, len(orientations), arrow_interval):
+            # Draw arrows every 1.0 inches along the path
+            arrow_spacing_inches = 1.0
+            arrow_indices = []
+            
+            if len(positions) > 1:
+                # Calculate cumulative distance along the path
+                cumulative_distance = 0.0
+                last_pos = positions[0]
+                
+                for i, pos in enumerate(positions):
+                    if i > 0:
+                        # Calculate distance to previous point
+                        dx = pos[0] - last_pos[0]
+                        dy = pos[1] - last_pos[1]
+                        segment_distance = math.sqrt(dx*dx + dy*dy)
+                        cumulative_distance += segment_distance
+                        
+                        # Check if we should place an arrow here
+                        if cumulative_distance >= arrow_spacing_inches:
+                            arrow_indices.append(i)
+                            cumulative_distance = 0.0  # Reset for next 0.5" interval
+                    
+                    last_pos = pos
+            
+            logger.info(f"Drawing arrows: {len(positions)} positions, {len(orientations)} orientations, {len(arrow_indices)} arrows at 0.5\" intervals")
+            for i in arrow_indices:
                 if i < len(positions):
                     x_in, y_in = positions[i]
                     a_deg = orientations[i]
@@ -1069,8 +1112,13 @@ class FabricCNCApp:
                     # Calculate arrow direction
                     arrow_length = 15
                     angle_rad = math.radians(a_deg)
+                    
+                    # Account for canvas Y-axis inversion (Tkinter Y is top-down)
+                    # In machine coordinates: positive Y is up, positive X is right
+                    # In canvas coordinates: positive Y is down, positive X is right
+                    # So we need to flip the Y component of the arrow
                     dx = arrow_length * math.cos(angle_rad)
-                    dy = arrow_length * math.sin(angle_rad)
+                    dy = -arrow_length * math.sin(angle_rad)  # Flip Y component
                     
                     # Draw arrow
                     self.canvas.create_line(
@@ -1078,6 +1126,8 @@ class FabricCNCApp:
                         x_canvas + dx, y_canvas + dy,
                         fill='green', width=3, arrow='last', tags='toolpath'
                     )
+            
+            logger.info(f"Drew {len(arrow_indices)} arrows")
 
     # --- DXF Import/Toolpath ---
     def _import_dxf(self):
@@ -1236,6 +1286,48 @@ class FabricCNCApp:
             logger.error(f"Failed to generate toolpath: {e}")
             self.status_label.configure(text=f"Toolpath generation failed: {str(e)}", text_color="red")
     
+    def _generate_toolpath_internal(self):
+        """Internal method to generate toolpath without UI status updates."""
+        if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
+            logger.error("Toolpath generation modules not available.")
+            raise Exception("Missing toolpath dependencies")
+        
+        if not self.processed_shapes:
+            logger.warning("No DXF imported. Import a DXF file first.")
+            raise Exception("Import DXF first")
+        
+        try:
+            # Generate G-code using the toolpath generator
+            self.generated_gcode = self.toolpath_generator.generate_toolpath(self.processed_shapes)
+            
+            if not self.generated_gcode:
+                logger.error("Failed to generate G-code.")
+                raise Exception("Toolpath generation failed")
+            
+            # Save G-code to file
+            base_name = os.path.splitext(os.path.basename(self.dxf_file_path))[0]
+            self.gcode_file_path = f"outputs/toolpath_{base_name}.gcode"
+            
+            # Ensure outputs directory exists
+            os.makedirs("outputs", exist_ok=True)
+            
+            with open(self.gcode_file_path, 'w') as f:
+                f.write(self.generated_gcode)
+            
+            # Count lines and corners for logging
+            gcode_lines = self.generated_gcode.split('\n')
+            total_lines = len([line for line in gcode_lines if line.strip() and not line.strip().startswith(';')])
+            corner_count = len([line for line in gcode_lines if 'Raise Z for corner' in line])
+            
+            logger.info(f"Toolpath generated successfully:")
+            logger.info(f"  - G-code file: {self.gcode_file_path}")
+            logger.info(f"  - Total lines: {total_lines}")
+            logger.info(f"  - Corners detected: {corner_count}")
+            
+        except Exception as e:
+            logger.error(f"Failed to generate toolpath: {e}")
+            raise
+    
     def _detect_circle_from_splines(self, splines):
         """
         Detect if multiple splines form a circle and return center and radius.
@@ -1321,12 +1413,17 @@ class FabricCNCApp:
             self.status_label.configure(text="Missing visualization dependencies", text_color="red")
             return
         
-        if not self.gcode_file_path or not os.path.exists(self.gcode_file_path):
-            logger.warning("No G-code file. Generate a toolpath first.")
-            self.status_label.configure(text="Generate toolpath first", text_color="orange")
+        if not self.processed_shapes:
+            logger.warning("No DXF imported. Import a DXF file first.")
+            self.status_label.configure(text="Import DXF first", text_color="orange")
             return
         
         try:
+            # Generate toolpath if it doesn't exist
+            if not self.gcode_file_path or not os.path.exists(self.gcode_file_path):
+                logger.info("Generating toolpath for preview...")
+                self._generate_toolpath_internal()
+            
             # Parse GCODE and extract toolpath data
             self._parse_gcode_for_preview(self.gcode_file_path)
             
@@ -1336,7 +1433,7 @@ class FabricCNCApp:
             # Update status with preview info
             corner_count = len(self.toolpath_data.get('corners', []))
             point_count = len(self.toolpath_data.get('positions', []))
-            self.status_label.configure(text=f"Preview: {point_count} points, {corner_count} corners", text_color="green")
+            self.status_label.configure(text="Preview", text_color="green")
             
         except Exception as e:
             logger.error(f"Failed to create toolpath preview: {e}")
@@ -1429,15 +1526,17 @@ class FabricCNCApp:
                         # Update UI with progress (this will be called from the thread)
                         self.root.after(0, lambda: self._update_execution_progress(progress, status))
                     
-                    logger.info(f"Starting G-code execution: {self.gcode_file_path}")
-                    self.gcode_executor.execute_gcode_file(self.gcode_file_path, progress_callback)
-                    logger.info("G-code execution completed successfully")
+                    logger.info(f"Starting smooth motion execution: {self.gcode_file_path}")
+                    # Read GCODE file and execute with smooth motion
+                    with open(self.gcode_file_path, 'r') as f:
+                        gcode_lines = f.readlines()
+                    self.smooth_motion_executor.execute_toolpath_from_gcode(gcode_lines, progress_callback)
+                    logger.info("Smooth motion execution completed successfully")
                     
-                    # Update completion status
-                    self.root.after(0, lambda: self.status_label.configure(text="Toolpath execution completed", text_color="green"))
-                    
+                    # Update UI on completion
+                    self.root.after(0, lambda: self.status_label.configure(text="Execution completed", text_color="green"))
                 except Exception as e:
-                    logger.error(f"G-code execution failed: {e}")
+                    logger.error(f"Error during smooth motion execution: {e}")
                     self.root.after(0, lambda: self.status_label.configure(text=f"Execution failed: {str(e)}", text_color="red"))
             
             # Start execution thread
@@ -1463,13 +1562,13 @@ class FabricCNCApp:
             self.status_label.configure(text="Missing execution dependencies", text_color="red")
             return
         
-        if not self.gcode_executor or not self.gcode_executor.is_executing:
+        if not self.smooth_motion_executor or not self.smooth_motion_executor.is_executing:
             logger.info("No G-code execution is currently running.")
             self.status_label.configure(text="No execution running", text_color="orange")
             return
         
         try:
-            self.gcode_executor.stop_execution()
+            self.smooth_motion_executor.stop_execution()
             logger.info("G-code execution stopped by user")
             self.status_label.configure(text="Execution stopped", text_color="orange")
         except Exception as e:
