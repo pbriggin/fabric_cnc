@@ -25,7 +25,7 @@ class ToolpathGenerator:
     
     def __init__(self, 
                  cutting_height: float = -1.0,  # Changed from -2.0 to -1.0 inches to stay within machine limits
-                 safe_height: float = -0.5,
+                 safe_height: float = -0.5,  # Safe height is -0.5 inches (above cutting height)
                  corner_angle_threshold: float = 15.0,  # Increased from 5.0 to be less sensitive to curves
                  feed_rate: float = 1000.0,
                  plunge_rate: float = 200.0):
@@ -123,7 +123,11 @@ class ToolpathGenerator:
             first_z_rotation = self._calculate_z_rotation(first_point, points[1])
             gcode_lines.append(f"G0 A{first_z_rotation:.3f} ; Set initial cutting wheel angle")
         
+        # First plunge - use G0 to ensure Z movement completes before XY movement
         gcode_lines.append(f"G0 Z{self.cutting_height} ; Plunge to cutting height")
+        
+        # Add a small delay to ensure plunge completes before first cutting move
+        gcode_lines.append("G4 P0.1 ; Wait 0.1 seconds for plunge to complete")
         
         # Process each segment
         for i in range(len(points) - 1):
@@ -143,7 +147,7 @@ class ToolpathGenerator:
                 # For corners: raise Z, rotate angle, lower Z, move to next point
                 gcode_lines.append(f"G0 Z{self.safe_height} ; Raise Z for corner")
                 gcode_lines.append(f"G0 A{z_rotation:.3f} ; Rotate Z for corner")
-                gcode_lines.append(f"G1 Z{self.cutting_height} F{self.plunge_rate} ; Lower Z to cutting height")
+                gcode_lines.append(f"G0 Z{self.cutting_height} ; Lower Z to cutting height")
                 gcode_lines.append(f"G0 X{next_point[0]:.3f} Y{next_point[1]:.3f} ; Move to next point")
             else:
                 # For curves: direct cut to next point (Z stays at cutting height)

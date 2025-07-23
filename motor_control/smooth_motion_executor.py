@@ -30,7 +30,7 @@ class SmoothMotionExecutor:
         self.motor_controller = motor_controller
         self.is_executing = False
         self.stop_requested = False
-        self.current_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0}
+        self.current_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
         
     def execute_toolpath_from_gcode(self, gcode_lines: List[str], progress_callback: Optional[Callable] = None):
         """
@@ -123,7 +123,7 @@ class SmoothMotionExecutor:
                 segments.append({
                     'type': 'home',
                     'start_pos': self.current_position.copy(),
-                    'target_pos': {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0},
+                    'target_pos': {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0},
                     'is_corner': True,
                     'line_number': line_num + 1
                 })
@@ -188,7 +188,10 @@ class SmoothMotionExecutor:
         for axis, value in params.items():
             if axis == 'F':  # Feed rate - ignore for position calculation
                 continue
-            target_pos[axis] = value
+            elif axis == 'A':  # Map GCODE 'A' to internal 'ROT'
+                target_pos['ROT'] = value
+            else:
+                target_pos[axis] = value
         
         return target_pos
     
@@ -230,24 +233,42 @@ class SmoothMotionExecutor:
         """Execute a home segment."""
         logger.info("Executing home command")
         self.motor_controller.home_all_synchronous()
-        self.current_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0}
+        
+        # Sync position tracking after homing - get actual motor controller position
+        if hasattr(self.motor_controller, 'get_position'):
+            actual_pos = self.motor_controller.get_position()
+            self.current_position = actual_pos.copy()
+            logger.info(f"Position synced after homing: {self.current_position}")
+        else:
+            self.current_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
+            logger.info(f"Position reset to home: {self.current_position}")
     
     def _execute_rapid_segment(self, segment: Dict):
         """Execute a rapid positioning segment (corner)."""
         start_pos = segment['start_pos']
         target_pos = segment['target_pos']
         
-        logger.info(f"Rapid move to corner: X={target_pos['X']:.2f}, Y={target_pos['Y']:.2f}, Z={target_pos['Z']:.2f}, A={target_pos['A']:.2f}")
+        logger.info(f"RAPID: ({self.current_position['X']:.1f},{self.current_position['Y']:.1f},{self.current_position['Z']:.1f},{self.current_position['ROT']:.1f}) -> ({target_pos['X']:.1f},{target_pos['Y']:.1f},{target_pos['Z']:.1f},{target_pos['ROT']:.1f})")
         
         # Execute rapid movement to corner
         self.motor_controller.move_to(
             x=target_pos['X'],
             y=target_pos['Y'], 
             z=target_pos['Z'],
-            rot=target_pos['A']
+            rot=target_pos['ROT']
         )
         
-        self.current_position = target_pos.copy()
+        # Sync with actual motor controller position after movement
+        if hasattr(self.motor_controller, 'get_position'):
+            actual_pos = self.motor_controller.get_position()
+            self.current_position = actual_pos.copy()
+            logger.info(f"Position synced after rapid: {self.current_position}")
+            
+            # Debug print for Z position comparison
+            if abs(target_pos['Z'] - actual_pos['Z']) > 0.001:
+                print(f"*** Z POSITION MISMATCH: Target={target_pos['Z']:.3f}, Actual={actual_pos['Z']:.3f} ***")
+        else:
+            self.current_position = target_pos.copy()
     
     def _execute_linear_segment(self, segment: Dict):
         """Execute a linear interpolation segment (smooth motion)."""
@@ -258,19 +279,29 @@ class SmoothMotionExecutor:
         delta_x = target_pos['X'] - start_pos['X']
         delta_y = target_pos['Y'] - start_pos['Y']
         delta_z = target_pos['Z'] - start_pos['Z']
-        delta_a = target_pos['A'] - start_pos['A']
+        delta_rot = target_pos['ROT'] - start_pos['ROT']
         
-        logger.info(f"Smooth motion: X={delta_x:.2f}, Y={delta_y:.2f}, Z={delta_z:.2f}, A={delta_a:.2f}")
+        logger.info(f"LINEAR: ({start_pos['X']:.1f},{start_pos['Y']:.1f},{start_pos['Z']:.1f},{start_pos['ROT']:.1f}) -> ({target_pos['X']:.1f},{target_pos['Y']:.1f},{target_pos['Z']:.1f},{target_pos['ROT']:.1f}) = delta({delta_x:.2f},{delta_y:.2f},{delta_z:.2f},{delta_rot:.2f})")
         
         # Execute smooth coordinated movement
         self.motor_controller.move_coordinated(
             x_distance_mm=delta_x,
             y_distance_mm=delta_y,
             z_distance_mm=delta_z,
-            rot_distance_mm=delta_a
+            rot_distance_mm=delta_rot
         )
         
-        self.current_position = target_pos.copy()
+        # Sync with actual motor controller position after movement
+        if hasattr(self.motor_controller, 'get_position'):
+            actual_pos = self.motor_controller.get_position()
+            self.current_position = actual_pos.copy()
+            logger.info(f"Position synced after linear: {self.current_position}")
+            
+            # Debug print for Z position comparison
+            if abs(target_pos['Z'] - actual_pos['Z']) > 0.001:
+                print(f"*** Z POSITION MISMATCH: Target={target_pos['Z']:.3f}, Actual={actual_pos['Z']:.3f} ***")
+        else:
+            self.current_position = target_pos.copy()
     
     def stop_execution(self):
         """Stop smooth motion execution."""

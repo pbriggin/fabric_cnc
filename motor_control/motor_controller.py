@@ -46,6 +46,14 @@ class MotorController:
         self._stop_requested = False
         self._current_movement = None
         
+        # Position tracking for each axis (in mm/degrees)
+        self._current_positions = {
+            'X': 0.0,
+            'Y': 0.0,
+            'Z': 0.0,
+            'ROT': 0.0
+        }
+        
         # Enhanced sensor debouncing with individual times per sensor
         # Map internal motor names to config names
         motor_to_config_map = {
@@ -286,6 +294,31 @@ class MotorController:
         time.sleep(delay/2)
         GPIO.output(config['STEP'], GPIO.LOW)
         time.sleep(delay/2)
+        
+        # Update position tracking
+        self._update_position(motor, direction)
+
+    def _update_position(self, motor, direction):
+        """Update position tracking for a motor step."""
+        # Handle Y-axis case (which uses Y1 and Y2 motors)
+        if motor == 'Y':
+            config = self.motors['Y1']  # Use Y1 config for calculations
+        else:
+            config = self.motors[motor]
+        
+        # Calculate step distance based on motor configuration
+        if motor == 'ROT':
+            # For rotation, each step is 360 degrees / PULSES_PER_REV
+            step_distance = 360.0 / config['PULSES_PER_REV']
+        else:
+            # For linear axes, each step is MM_PER_REV / PULSES_PER_REV
+            step_distance = config['MM_PER_REV'] / config['PULSES_PER_REV']
+        
+        # Update position based on direction
+        if direction:
+            self._current_positions[motor] += step_distance
+        else:
+            self._current_positions[motor] -= step_distance
 
     def _step_y_axis(self, direction, delay):
         """Step both Y motors together to maintain sync."""
@@ -312,6 +345,9 @@ class MotorController:
         GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
         GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
         time.sleep(delay/2)
+        
+        # Update Y position tracking (average of both motors)
+        self._update_position('Y', direction)
 
     def _step_y_axis_individual(self, direction, delay, y1_homed, y2_homed):
         """Step Y motors individually - only step motors that haven't found home."""
@@ -345,6 +381,10 @@ class MotorController:
             GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
         
         time.sleep(delay/2)
+        
+        # Update Y position tracking if either motor moved
+        if not y1_homed or not y2_homed:
+            self._update_position('Y', direction)
 
     def move_distance(self, distance_mm, axis='X'):
         """Move the specified distance with acceleration/deceleration."""
@@ -448,12 +488,36 @@ class MotorController:
             self._current_movement = 'COORDINATED'
             self._stop_requested = False
             
+            # The parameters are already in millimeters, no conversion needed
+            # (The method signature suggests mm, and the calling code should provide mm)
+            INCHES_TO_MM = 25.4  # Keep this for safety limits
+            # x_distance_mm = x_distance_mm * INCHES_TO_MM
+            # y_distance_mm = y_distance_mm * INCHES_TO_MM
+            # z_distance_mm = z_distance_mm * INCHES_TO_MM
+            # Note: Rotation is typically in degrees, not inches, so don't convert
+            
+            # Z-axis safety limits (in mm)
+            Z_UP_LIMIT_MM = 0.5 * INCHES_TO_MM     # 0.5 inches up
+            Z_DOWN_LIMIT_MM = -1.0 * INCHES_TO_MM  # 1.0 inches down
+            
+            # Check absolute position limits (not just distance)
+            current_z_mm = self._current_positions['Z']
+            target_z_mm = current_z_mm + z_distance_mm
+            
+            # Check if target position would exceed limits
+            if target_z_mm > Z_UP_LIMIT_MM:
+                logger.warning(f"Z target position {target_z_mm:.2f}mm ({target_z_mm/INCHES_TO_MM:.2f}in) exceeds up limit of {Z_UP_LIMIT_MM:.2f}mm - limiting movement")
+                z_distance_mm = Z_UP_LIMIT_MM - current_z_mm
+            elif target_z_mm < Z_DOWN_LIMIT_MM:
+                logger.warning(f"Z target position {target_z_mm:.2f}mm ({target_z_mm/INCHES_TO_MM:.2f}in) exceeds down limit of {Z_DOWN_LIMIT_MM:.2f}mm - limiting movement")
+                z_distance_mm = Z_DOWN_LIMIT_MM - current_z_mm
+            
             # Debug: Print movement details
             logger.info(f"Coordinated movement: X={x_distance_mm:.2f}mm, Y={y_distance_mm:.2f}mm, Z={z_distance_mm:.2f}mm, ROT={rot_distance_mm:.2f}mm")
             
             # Handle case where only Z or ROT movement is needed
             if abs(x_distance_mm) < 1e-6 and abs(y_distance_mm) < 1e-6:
-                logger.info("No X/Y movement detected, handling Z and ROT only")
+                logger.info("Z/ROT only movement")
                 if abs(z_distance_mm) > 1e-6:
                     self._move_z(z_distance_mm)
                 if abs(rot_distance_mm) > 1e-6:
@@ -506,7 +570,7 @@ class MotorController:
             z_step_counter = 0
             rot_step_counter = 0
             
-            logger.info(f"Starting smooth coordinated movement with {max_steps} total steps")
+            logger.info(f"Starting coordinated movement: X={x_distance_mm:.2f}mm, Y={y_distance_mm:.2f}mm, Z={z_distance_mm:.2f}mm, ROT={rot_distance_mm:.2f}mm")
             
             for i in range(max_steps):
                 # Check if stop was requested
@@ -529,15 +593,16 @@ class MotorController:
                     # Cruise speed
                     delay = fast_config['STEP_DELAY']
                 
-                # Check sensors before moving (X and Y only)
-                if self._check_sensor('X'):
-                    logger.warning("X sensor triggered during coordinated movement - stopping")
+                # Check sensors before moving (X and Y only) - only if moving toward home
+                # During normal operation, sensors should only trigger when moving toward home
+                if x_distance_mm < 0 and self._check_sensor('X'):
+                    logger.warning("X sensor triggered during movement toward home - stopping")
                     break
-                if self._check_sensor('Y1'):
-                    logger.warning("Y1 sensor triggered during coordinated movement - stopping")
+                if y_distance_mm < 0 and self._check_sensor('Y1'):
+                    logger.warning("Y1 sensor triggered during movement toward home - stopping")
                     break
-                if self._check_sensor('Y2'):
-                    logger.warning("Y2 sensor triggered during coordinated movement - stopping")
+                if y_distance_mm < 0 and self._check_sensor('Y2'):
+                    logger.warning("Y2 sensor triggered during movement toward home - stopping")
                     break
                 
                 # Determine if we should step each axis based on interpolation
@@ -578,7 +643,7 @@ class MotorController:
                 if should_step_z:
                     self._step_motor('Z', z_distance_mm > 0, delay)
                 if should_step_rot:
-                    self._step_motor('ROT', rot_distance_mm > 0, delay)
+                    self._step_motor('ROT', rot_distance_mm < 0, delay)  # Inverted for rotation
                 
                 # Progress logging (less frequent for performance)
                 if i % 5000 == 0 and i > 0:
@@ -633,9 +698,9 @@ class MotorController:
             else:
                 delay = config['STEP_DELAY']
             
-            # Check sensor before moving
-            if self._check_sensor('X'):
-                logger.warning("X sensor triggered during movement - stopping")
+            # Check sensor before moving - only if moving toward home
+            if distance_mm < 0 and self._check_sensor('X'):
+                logger.warning("X sensor triggered during movement toward home - stopping")
                 break
             
             # Step motor (direction is determined by distance_mm > 0)
@@ -672,9 +737,9 @@ class MotorController:
             else:
                 delay = config['STEP_DELAY']
             
-            # Check sensors before moving
-            if self._check_sensor('Y1') or self._check_sensor('Y2'):
-                logger.warning("Y sensor triggered during movement - stopping")
+            # Check sensors before moving - only if moving toward home
+            if distance_mm < 0 and (self._check_sensor('Y1') or self._check_sensor('Y2')):
+                logger.warning("Y sensor triggered during movement toward home - stopping")
                 break
             
             # Step both Y motors together (direction is determined by distance_mm > 0)
@@ -686,6 +751,23 @@ class MotorController:
     def _move_z(self, distance_mm):
         """Move Z axis the specified distance."""
         config = self.motors['Z']
+        
+        # Z-axis safety limits (in mm)
+        INCHES_TO_MM = 25.4
+        Z_UP_LIMIT_MM = 0.5 * INCHES_TO_MM     # 0.5 inches up
+        Z_DOWN_LIMIT_MM = -1.0 * INCHES_TO_MM  # 1.0 inches down
+        
+        # Check absolute position limits (not just distance)
+        current_z_mm = self._current_positions['Z']
+        target_z_mm = current_z_mm + distance_mm
+        
+        # Check if target position would exceed limits
+        if target_z_mm > Z_UP_LIMIT_MM:
+            logger.warning(f"Z target position {target_z_mm:.2f}mm ({target_z_mm/INCHES_TO_MM:.2f}in) exceeds up limit of {Z_UP_LIMIT_MM:.2f}mm - limiting movement")
+            distance_mm = Z_UP_LIMIT_MM - current_z_mm
+        elif target_z_mm < Z_DOWN_LIMIT_MM:
+            logger.warning(f"Z target position {target_z_mm:.2f}mm ({target_z_mm/INCHES_TO_MM:.2f}in) exceeds down limit of {Z_DOWN_LIMIT_MM:.2f}mm - limiting movement")
+            distance_mm = Z_DOWN_LIMIT_MM - current_z_mm
         
         # Convert mm to steps (use absolute value for step count)
         revolutions = abs(distance_mm) / config['MM_PER_REV']
@@ -756,8 +838,8 @@ class MotorController:
             else:
                 delay = config['STEP_DELAY']
             
-            # Step motor (direction is determined by distance_mm > 0)
-            self._step_motor('ROT', distance_mm > 0, delay)
+            # Step motor (direction is determined by distance_mm > 0, inverted for rotation)
+            self._step_motor('ROT', distance_mm < 0, delay)
 
     def home_axis(self, axis='X'):
         """Home the specified axis."""
@@ -792,7 +874,7 @@ class MotorController:
     def home_all_synchronous(self):
         """Home all axes simultaneously using threading."""
         try:
-            logger.info("Starting synchronous homing of all axes")
+            # logger.info("Starting synchronous homing of all axes")
             
             # Create threads for each axis
             threads = {}
@@ -804,8 +886,8 @@ class MotorController:
             def home_with_result(axis):
                 """Home a single axis and store the result."""
                 try:
-                    with log_lock:
-                        logger.info(f"Starting homing for {axis} axis")
+                    # with log_lock:
+                    #     logger.info(f"Starting homing for {axis} axis")
                     
                     if axis == 'X':
                         self._home_x()
@@ -817,8 +899,8 @@ class MotorController:
                         self._home_rot()
                     
                     results[axis] = True
-                    with log_lock:
-                        logger.info(f"Completed homing for {axis} axis")
+                    # with log_lock:
+                    #     logger.info(f"Completed homing for {axis} axis")
                         
                 except Exception as e:
                     results[axis] = False
@@ -840,7 +922,11 @@ class MotorController:
             if failed_axes:
                 raise Exception(f"Homing failed for axes: {', '.join(failed_axes)}")
             
-            logger.info("Synchronous homing completed successfully for all axes")
+            # Reset all sensor debounce states after homing to prevent false triggers
+            logger.info("Resetting all sensor debounce states after homing...")
+            self.reset_sensor_debounce_state()
+            
+            # logger.info("Synchronous homing completed successfully for all axes")
             
         except Exception as e:
             logger.error(f"Error during synchronous homing: {e}")
@@ -872,18 +958,18 @@ class MotorController:
             self._step_motor('X', config['HOME_DIRECTION'] < 0, config['HOME_SPEED'])
         
         # Move back slightly to clear sensor
-        logger.info("Moving back to clear sensor...")
+        # logger.info("Moving back to clear sensor...")
         for _ in range(200):  # Much more extreme back-off to ensure sensors are cleared
             self._step_motor('X', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
         
         # Move forward very slowly until sensor is triggered again (fine approach)
-        logger.info("Fine approach to home position...")
+        # logger.info("Fine approach to home position...")
         fine_speed = 0.005  # Much slower speed for fine approach (5ms between pulses)
         while not self._check_sensor('X'):
             self._step_motor('X', config['HOME_DIRECTION'] < 0, fine_speed)
         
         # Move back slightly again to clear sensor for second approach
-        logger.info("Moving back for second approach...")
+        # logger.info("Moving back for second approach...")
         for _ in range(100):  # Smaller back-off for second approach
             self._step_motor('X', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
         
@@ -897,6 +983,8 @@ class MotorController:
         for _ in range(100):  # Move 100 steps away from home
             self._step_motor('X', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
         
+        # Reset X position to 0 after homing
+        self.set_position(x=0.0)
         logger.info("X axis homed successfully")
 
     def _home_y(self):
@@ -905,10 +993,10 @@ class MotorController:
         # Reset debounce state to prevent carryover issues
         self.reset_sensor_debounce_state_for_axis('Y')
         
-        logger.info("Starting Y axis homing sequence")
+        # logger.info("Starting Y axis homing sequence")
         
         # Step 1: Fast approach - Move until both sensors are triggered
-        logger.info("Step 1: Fast approach to find home...")
+        # logger.info("Step 1: Fast approach to find home...")
         y1_homed = False
         y2_homed = False
         
@@ -916,22 +1004,22 @@ class MotorController:
             # Check sensors and update homed status
             if not y1_homed and self._check_sensor('Y1'):
                 y1_homed = True
-                logger.info("Y1 (left) motor found home")
+                # logger.info("Y1 (left) motor found home")
             if not y2_homed and self._check_sensor('Y2'):
                 y2_homed = True
-                logger.info("Y2 (right) motor found home")
+                # logger.info("Y2 (right) motor found home")
             
             # Step motors - only step motors that haven't found home yet
             if not y1_homed or not y2_homed:
                 self._step_y_axis_individual(config['HOME_DIRECTION'] < 0, config['HOME_SPEED'], y1_homed, y2_homed)
         
         # Step 2: Back off to clear sensors
-        logger.info("Step 2: Moving back to clear sensors...")
+        # logger.info("Step 2: Moving back to clear sensors...")
         for _ in range(200):  # Much more extreme back-off to ensure sensors are cleared
             self._step_y_axis_individual(config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'], False, False)
         
         # Step 3: Fine approach - Move very slowly until both sensors are triggered again
-        logger.info("Step 3: Fine approach to home position...")
+        # logger.info("Step 3: Fine approach to home position...")
         y1_homed = False
         y2_homed = False
         
@@ -942,22 +1030,22 @@ class MotorController:
             # Check sensors and update homed status
             if not y1_homed and self._check_sensor('Y1'):
                 y1_homed = True
-                logger.info("Y1 (left) motor fine approach complete")
+                # logger.info("Y1 (left) motor fine approach complete")
             if not y2_homed and self._check_sensor('Y2'):
                 y2_homed = True
-                logger.info("Y2 (right) motor fine approach complete")
+                # logger.info("Y2 (right) motor fine approach complete")
             
             # Step motors - only step motors that haven't found home yet
             if not y1_homed or not y2_homed:
                 self._step_y_axis_individual(config['HOME_DIRECTION'] < 0, fine_speed, y1_homed, y2_homed)
         
         # Step 3.5: Move back slightly again to clear sensors for second approach
-        logger.info("Step 3.5: Moving back for second approach...")
+        # logger.info("Step 3.5: Moving back for second approach...")
         for _ in range(100):  # Smaller back-off for second approach
             self._step_y_axis_individual(config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'], False, False)
         
         # Step 4: Second fine approach to verify sensor positions
-        logger.info("Step 4: Second fine approach to verify home position...")
+        # logger.info("Step 4: Second fine approach to verify home position...")
         y1_homed = False
         y2_homed = False
         
@@ -965,20 +1053,22 @@ class MotorController:
             # Check sensors and update homed status
             if not y1_homed and self._check_sensor('Y1'):
                 y1_homed = True
-                logger.info("Y1 (left) motor second fine approach complete")
+                # logger.info("Y1 (left) motor second fine approach complete")
             if not y2_homed and self._check_sensor('Y2'):
                 y2_homed = True
-                logger.info("Y2 (right) motor second fine approach complete")
+                # logger.info("Y2 (right) motor second fine approach complete")
             
             # Step motors - only step motors that haven't found home yet
             if not y1_homed or not y2_homed:
                 self._step_y_axis_individual(config['HOME_DIRECTION'] < 0, fine_speed, y1_homed, y2_homed)
         
         # Step 5: Final back off for clearance
-        logger.info("Step 5: Moving away from home position for clearance...")
+        # logger.info("Step 5: Moving away from home position for clearance...")
         for _ in range(100):
             self._step_y_axis_individual(config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'], False, False)
         
+        # Reset Y position to 0 after homing
+        self.set_position(y=0.0)
         logger.info("Y axis homing sequence completed successfully")
 
     def _home_z(self):
@@ -987,16 +1077,16 @@ class MotorController:
         # Reset debounce state to prevent carryover issues
         self.reset_sensor_debounce_state_for_axis('Z')
         
-        logger.info("Starting Z axis homing sequence")
-        logger.info(f"Z HOME_DIRECTION: {config['HOME_DIRECTION']}, moving in direction: {config['HOME_DIRECTION'] < 0}")
+        # logger.info("Starting Z axis homing sequence")
+        # logger.info(f"Z HOME_DIRECTION: {config['HOME_DIRECTION']}, moving in direction: {config['HOME_DIRECTION'] < 0}")
         
         # Move until sensor is triggered
         step_count = 0
         while not self._check_sensor('Z'):
             self._step_motor('Z', config['HOME_DIRECTION'] < 0, config['HOME_SPEED'])
             step_count += 1
-            if step_count % 1000 == 0:  # Log every 1000 steps
-                logger.info(f"Z homing: {step_count} steps completed, sensor still not triggered")
+            # if step_count % 1000 == 0:  # Log every 1000 steps
+            #     logger.info(f"Z homing: {step_count} steps completed, sensor still not triggered")
         
         logger.info(f"Z sensor triggered after {step_count} steps")
         
@@ -1039,6 +1129,8 @@ class MotorController:
         for _ in range(2000):  # Much more aggressive final back-off for Z axis to provide maximum clearance
             self._step_motor('Z', config['HOME_DIRECTION'] > 0, config['HOME_SPEED'])
         
+        # Reset Z position to 0 after homing
+        self.set_position(z=0.0)
         logger.info("Z axis homed successfully")
 
     def _home_rot(self):
@@ -1079,6 +1171,8 @@ class MotorController:
         for _ in range(355):  # Move 355 steps (80 degrees) away from home - updated for 1600 PULSES_PER_REV
             self._step_motor('ROT', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
         
+        # Reset rotation position to 0 after homing
+        self.set_position(rot=0.0)
         logger.info("Rotation axis homed successfully")
 
     def stop_movement(self):
@@ -1086,28 +1180,59 @@ class MotorController:
         self._stop_requested = True
         logger.info("Stop movement requested")
     
+    def get_position(self):
+        """Get current position in mm/degrees."""
+        return self._current_positions.copy()
+    
+    def set_position(self, x=None, y=None, z=None, rot=None):
+        """Set current position for specific axes."""
+        if x is not None:
+            self._current_positions['X'] = x
+        if y is not None:
+            self._current_positions['Y'] = y
+        if z is not None:
+            self._current_positions['Z'] = z
+        if rot is not None:
+            self._current_positions['ROT'] = rot
+        logger.info(f"Position set to: {self._current_positions}")
+    
+    def sync_position(self):
+        """Sync position tracking - returns current tracked positions."""
+        return self._current_positions.copy()
+    
     def move_to(self, x=None, y=None, z=None, rot=None):
         """Move to absolute position.
         
         Args:
-            x: Target X position in mm
-            y: Target Y position in mm  
-            z: Target Z position in mm
+            x: Target X position in inches
+            y: Target Y position in inches  
+            z: Target Z position in inches
             rot: Target rotation in degrees
         """
-        # Get current position
+        # Get current position (in mm)
         current_pos = self.get_position()
         
-        # Calculate distances to move
-        x_distance = (x - current_pos['X']) if x is not None else 0
-        y_distance = (y - current_pos['Y']) if y is not None else 0
-        z_distance = (z - current_pos['Z']) if z is not None else 0
-        rot_distance = (rot - current_pos['ROT']) if rot is not None else 0
+        # Convert target positions from inches to mm for distance calculation
+        INCHES_TO_MM = 25.4
+        x_mm = x * INCHES_TO_MM if x is not None else None
+        y_mm = y * INCHES_TO_MM if y is not None else None
+        z_mm = z * INCHES_TO_MM if z is not None else None
+        rot_deg = rot  # Rotation stays in degrees
         
-        # Execute coordinated movement
+        # Calculate distances to move (in inches for move_coordinated)
+        x_distance = (x - current_pos['X']/INCHES_TO_MM) if x is not None else 0
+        y_distance = (y - current_pos['Y']/INCHES_TO_MM) if y is not None else 0
+        z_distance = (z - current_pos['Z']/INCHES_TO_MM) if z is not None else 0
+        rot_distance = (rot_deg - current_pos['ROT']) if rot_deg is not None else 0
+        
+        # Execute coordinated movement (pass distances in inches)
         self.move_coordinated(x_distance, y_distance, z_distance, rot_distance)
         
-        logger.info(f"Move to: X={x:.2f}, Y={y:.2f}, Z={z:.2f}, ROT={rot:.2f}")
+        x_str = f"{x:.2f}" if x is not None else "None"
+        y_str = f"{y:.2f}" if y is not None else "None"
+        z_str = f"{z:.2f}" if z is not None else "None"
+        rot_str = f"{rot:.2f}" if rot is not None else "None"
+        logger.info(f"Move to: X={x_str}, Y={y_str}, Z={z_str}, ROT={rot_str}")
 
     def cleanup(self):
         """Clean up resources and disable all motors."""
