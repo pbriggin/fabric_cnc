@@ -15,6 +15,8 @@ import time
 import math
 import tkinter.filedialog as filedialog
 import tkinter.messagebox as messagebox
+import re
+from typing import List, Tuple, Optional, Dict
 
 # Try to import ezdxf for DXF parsing
 try:
@@ -34,7 +36,16 @@ try:
 except ImportError:
     MOTOR_IMPORTS_AVAILABLE = False
 
-# Import toolpath planning modules
+# Import new DXF processing and toolpath generation modules
+try:
+    from dxf_processing.dxf_processor import DXFProcessor
+    from toolpath_planning.toolpath_generator import ToolpathGenerator
+    from toolpath_planning.gcode_visualizer import GCodeVisualizer
+    DXF_TOOLPATH_IMPORTS_AVAILABLE = True
+except ImportError:
+    DXF_TOOLPATH_IMPORTS_AVAILABLE = False
+
+# Import toolpath planning modules (legacy)
 try:
     from toolpath_planning import (
         ContinuousToolpathGenerator,
@@ -403,10 +414,34 @@ class FabricCNCApp:
         self.motor_ctrl = SimulatedMotorController() if SIMULATION_MODE else RealMotorController()
         self._jog_in_progress = {'X': False, 'Y': False, 'Z': False, 'ROT': False}
         self._arrow_key_repeat_delay = config.APP_CONFIG['ARROW_KEY_REPEAT_DELAY']
-        # Initialize DXF-related attributes
+        
+        # Initialize new DXF processing and toolpath generation
+        if DXF_TOOLPATH_IMPORTS_AVAILABLE:
+            self.dxf_processor = DXFProcessor()
+            self.toolpath_generator = ToolpathGenerator(
+                cutting_height=-2.0,
+                safe_height=5.0,
+                corner_angle_threshold=10.0,  # 10-degree threshold
+                feed_rate=1000.0,
+                plunge_rate=200.0
+            )
+            self.gcode_executor = GCodeExecutor(self.motor_ctrl)
+            self.gcode_visualizer = GCodeVisualizer()
+        else:
+            self.dxf_processor = None
+            self.toolpath_generator = None
+            self.gcode_executor = None
+            self.gcode_visualizer = None
+        
+        # Initialize DXF-related attributes (legacy)
         self.dxf_doc = None
         self.dxf_entities = []
         self.toolpath = []
+        
+        # New DXF processing attributes
+        self.processed_shapes = {}
+        self.generated_gcode = ""
+        self.gcode_file_path = ""
         self._setup_ui()
         self._bind_arrow_keys()
         self._update_position_display()
@@ -455,6 +490,7 @@ class FabricCNCApp:
             ("Generate Toolpath", self._generate_toolpath, "secondary"),
             ("Preview Toolpath", self._preview_toolpath, "secondary"),
             ("Run Toolpath", self._run_toolpath, "success"),
+            ("Stop Execution", self._stop_execution, "warning"),
             ("E-Stop", self._estop, "danger")
         ]
         
@@ -670,18 +706,59 @@ class FabricCNCApp:
         self.canvas.delete("all")
         # Draw axes in inches
         self._draw_axes_in_inches()
-        # Draw DXF entities if loaded
+        
+        # Draw processed shapes from new DXF processor
+        if self.processed_shapes:
+            self._draw_processed_shapes()
+        
+        # Draw legacy DXF entities if loaded
         if self.dxf_doc and self.dxf_entities:
             self._draw_dxf_entities_inches()
+        
         # Draw toolpath if generated
         if self.toolpath:
             self._draw_toolpath_inches()
+        
         # Draw current tool head position (all axes)
         pos = self.motor_ctrl.get_position()
         x = max(0.0, min(pos['X'], config.APP_CONFIG['X_MAX_MM']))
         y = max(0.0, min(pos['Y'], config.APP_CONFIG['Y_MAX_MM']))
         clamped_pos = {'X': x, 'Y': y}
         self._draw_tool_head_inches(clamped_pos)
+
+    def _draw_processed_shapes(self):
+        """Draw processed shapes from the new DXF processor."""
+        if not self.processed_shapes:
+            return
+        
+        # DXF processor now outputs coordinates in inches directly
+        
+        for shape_name, points in self.processed_shapes.items():
+            if not points or len(points) < 2:
+                continue
+            
+            # Convert points to canvas coordinates
+            canvas_points = []
+            for x_in, y_in in points:
+                x_canvas, y_canvas = self._inches_to_canvas(x_in, y_in)
+                canvas_points.extend([x_canvas, y_canvas])
+            
+            # Draw the shape as a polyline
+            if len(canvas_points) >= 4:  # Need at least 2 points (4 coordinates)
+                self.canvas.create_line(canvas_points, 
+                                      fill=UI_COLORS['PRIMARY_COLOR'], 
+                                      width=2, 
+                                      smooth=True)
+                
+                # Draw shape name at the first point
+                if canvas_points:
+                    x_canvas, y_canvas = canvas_points[0], canvas_points[1]
+                    self.canvas.create_text(x_canvas + 10, y_canvas - 10, 
+                                          text=shape_name, 
+                                          fill=UI_COLORS['PRIMARY_COLOR'],
+                                          font=("Arial", 8, "bold"))
+        
+        logger.debug(f"Drew {len(self.processed_shapes)} processed shapes")
 
     def _reload_config_and_redraw(self):
         """Reload configuration and redraw the canvas to reflect changes."""
@@ -958,107 +1035,129 @@ class FabricCNCApp:
 
     # --- DXF Import/Toolpath ---
     def _import_dxf(self):
-        if ezdxf is None:
-            messagebox.showerror("Missing Dependency", "ezdxf is not installed. Please install it to import DXF files.")
+        """Import DXF file using the new DXF processor."""
+        if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
+            messagebox.showerror("Missing Dependencies", "DXF processing modules not available. Please install required dependencies.")
             return
+        
         initial_dir = os.path.expanduser("~/Desktop/DXF")
         file_path = filedialog.askopenfilename(initialdir=initial_dir, filetypes=[("DXF Files", "*.dxf")])
         if not file_path:
             return
+        
         try:
-            doc = readfile(file_path)
-            msp = doc.modelspace()
-            # Support LINE, LWPOLYLINE, POLYLINE, SPLINE, ARC, CIRCLE
-            entities = []
-            for e in msp:
-                t = e.dxftype()
-                if t in ('LINE', 'LWPOLYLINE', 'POLYLINE', 'SPLINE', 'ARC', 'CIRCLE'):
-                    entities.append(e)
-            if not entities:
-                messagebox.showerror("DXF Import Error", "No supported entities (LINE, LWPOLYLINE, POLYLINE, SPLINE, ARC, CIRCLE) found in DXF file.")
+            # Process DXF using the new processor (now works entirely in inches)
+            self.processed_shapes = self.dxf_processor.process_dxf(file_path)
+            
+            # Center the shapes in the build area with 1" buffer
+            if self.processed_shapes:
+                self._center_shapes_in_build_area()
+            
+            if not self.processed_shapes:
+                messagebox.showerror("DXF Import Error", "No shapes found in DXF file.")
                 return
-            # Detect units
-            insunits = doc.header.get('$INSUNITS', 0)
-            # 1 = inches, 4 = mm, 0 = unitless (assume inches)
-            if insunits == 4:
-                self.dxf_unit_scale = 1.0 / 25.4  # mm to in
-            else:
-                self.dxf_unit_scale = 1.0  # inches or unitless
-            # Normalize all points to inches and (0,0) bottom left
-            all_x, all_y = [], []
-            logger.info(f"Processing {len(entities)} entities for bounding box calculation")
-            for e in entities:
-                t = e.dxftype()
-                logger.info(f"Processing entity type: {t}")
-                if t == 'LINE':
-                    all_x.extend([e.dxf.start.x * self.dxf_unit_scale, e.dxf.end.x * self.dxf_unit_scale])
-                    all_y.extend([e.dxf.start.y * self.dxf_unit_scale, e.dxf.end.y * self.dxf_unit_scale])
-                elif t in ('LWPOLYLINE', 'POLYLINE'):
-                    pts = [p[:2] for p in e.get_points()] if t == 'LWPOLYLINE' else [(v.dxf.x, v.dxf.y) for v in e.vertices()]
-                    for x, y in pts:
-                        all_x.append(x * self.dxf_unit_scale)
-                        all_y.append(y * self.dxf_unit_scale)
-                elif t == 'CIRCLE':
-                    center = e.dxf.center
-                    r = e.dxf.radius
-                    logger.info(f"Processing CIRCLE: center=({center.x}, {center.y}), radius={r}")
-                    # Generate points around the circle circumference for proper bounding box
-                    # Calculate segments based on angle requirement
-                    max_angle_deg = 2.0
-                    # For a circle, angle between segments = 360 / n
-                    # We want angle < max_angle_deg, so n > 360 / max_angle_deg
-                    min_segments = int(360 / max_angle_deg) + 1
-                    n = max(min_segments, 128)  # At least 128 segments
-                    n = min(n, 512)  # Max 512 segments
-                    for i in range(n):
-                        angle = 2 * math.pi * i / n
-                        x = center.x + r * math.cos(angle)
-                        y = center.y + r * math.sin(angle)
-                        all_x.append(x * self.dxf_unit_scale)
-                        all_y.append(y * self.dxf_unit_scale)
-                elif t == 'SPLINE':
-                    logger.info(f"Processing SPLINE")
-                    # Flatten spline to points for bounding box calculation
-                    max_angle_deg = 2.0
-                    pts = flatten_spline_with_angle_limit(e, max_angle_deg)
-                    for pt in pts:
-                        if len(pt) >= 2:
-                            all_x.append(pt[0] * self.dxf_unit_scale)
-                            all_y.append(pt[1] * self.dxf_unit_scale)
-                    logger.info(f"  Generated {len(pts)} points from spline (max angle: {max_angle_deg}°)")
-            logger.info(f"Collected {len(all_x)} points for bounding box calculation")
-            if not all_x or not all_y:
-                raise ValueError("No valid points found in DXF file for bounding box calculation")
-            min_x = min(all_x)
-            min_y = min(all_y)
-            max_x = max(all_x)
-            max_y = max(all_y)
             
-            # Add 1-inch buffer around the DXF content
-            buffer_inches = 1.0
-            self.dxf_offset = (min_x - buffer_inches, min_y - buffer_inches)
+            # Store the file path for later use
+            self.dxf_file_path = file_path
             
-            # Store the buffered extents for reference
-            self.dxf_buffered_extents = (
-                min_x - buffer_inches,  # buffered_min_x
-                min_y - buffer_inches,  # buffered_min_y
-                max_x + buffer_inches,  # buffered_max_x
-                max_y + buffer_inches   # buffered_max_y
-            )
-            self.dxf_doc = doc
-            self.dxf_entities = entities
+            # Clear previous toolpath data
+            self.generated_gcode = ""
+            self.gcode_file_path = ""
             self.toolpath = []
-            # Debug logging
+            
+            # Update status
             logger.info(f"DXF imported successfully:")
-            logger.info(f"  - Entities found: {len(entities)}")
-            logger.info(f"  - Unit scale: {self.dxf_unit_scale}")
-            logger.info(f"  - Original extents: min_x={min_x:.3f}, min_y={min_y:.3f}, max_x={max_x:.3f}, max_y={max_y:.3f}")
-            logger.info(f"  - Buffered extents: min_x={self.dxf_buffered_extents[0]:.3f}, min_y={self.dxf_buffered_extents[1]:.3f}, max_x={self.dxf_buffered_extents[2]:.3f}, max_y={self.dxf_buffered_extents[3]:.3f}")
-            logger.info(f"  - Offset with buffer: dx={self.dxf_offset[0]:.3f}, dy={self.dxf_offset[1]:.3f}")
+            logger.info(f"  - File: {file_path}")
+            logger.info(f"  - Shapes found: {len(self.processed_shapes)}")
+            
+            # Show shape information
+            shape_info = []
+            for shape_name, points in self.processed_shapes.items():
+                shape_info.append(f"{shape_name}: {len(points)} points")
+            
+            messagebox.showinfo("DXF Import Success", 
+                              f"Successfully imported DXF file.\n\n"
+                              f"Shapes found: {len(self.processed_shapes)}\n\n"
+                              f"Shapes:\n" + "\n".join(shape_info))
+            
+            # Redraw canvas to show imported shapes
             self._draw_canvas()
+            
         except Exception as e:
             logger.error(f"Failed to load DXF: {e}")
             messagebox.showerror("DXF Import Error", str(e))
+    
+    def _center_shapes_in_build_area(self):
+        """Center all shapes in the build area with 1" buffer."""
+        if not self.processed_shapes:
+            return
+        
+        # Get build area dimensions (in inches)
+        build_width = config.APP_CONFIG['X_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
+        build_height = config.APP_CONFIG['Y_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
+        
+        # Calculate available area (build area minus 1" buffer on each side)
+        available_width = build_width - 2.0  # 1" buffer on each side
+        available_height = build_height - 2.0  # 1" buffer on each side
+        
+        # Find the bounds of all shapes
+        all_x_coords = []
+        all_y_coords = []
+        for points in self.processed_shapes.values():
+            if points:
+                x_coords = [p[0] for p in points]
+                y_coords = [p[1] for p in points]
+                all_x_coords.extend(x_coords)
+                all_y_coords.extend(y_coords)
+        
+        if not all_x_coords or not all_y_coords:
+            return
+        
+        # Calculate current bounds
+        min_x = min(all_x_coords)
+        max_x = max(all_x_coords)
+        min_y = min(all_y_coords)
+        max_y = max(all_y_coords)
+        
+        current_width = max_x - min_x
+        current_height = max_y - min_y
+        
+        # Calculate scale to fit in available area
+        scale_x = available_width / current_width if current_width > 0 else 1.0
+        scale_y = available_height / current_height if current_height > 0 else 1.0
+        scale = min(scale_x, scale_y, 1.0)  # Don't scale up, only down if needed
+        
+        # Calculate center of current shapes
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        
+        # Calculate center of available area
+        target_center_x = build_width / 2
+        target_center_y = build_height / 2
+        
+        # Calculate translation
+        translate_x = target_center_x - center_x
+        translate_y = target_center_y - center_y
+        
+        # Apply transformation to all shapes
+        transformed_shapes = {}
+        for shape_name, points in self.processed_shapes.items():
+            transformed_points = []
+            for x, y in points:
+                # Scale and translate
+                new_x = (x - center_x) * scale + target_center_x
+                new_y = (y - center_y) * scale + target_center_y
+                transformed_points.append((new_x, new_y))
+            transformed_shapes[shape_name] = transformed_points
+        
+        self.processed_shapes = transformed_shapes
+        
+        logger.info(f"Centered shapes in build area:")
+        logger.info(f"  Build area: {build_width:.1f}\" x {build_height:.1f}\"")
+        logger.info(f"  Available area: {available_width:.1f}\" x {available_height:.1f}\"")
+        logger.info(f"  Original bounds: ({min_x:.1f}, {min_y:.1f}) to ({max_x:.1f}, {max_y:.1f})")
+        logger.info(f"  Scale applied: {scale:.3f}")
+        logger.info(f"  Translation: ({translate_x:.1f}, {translate_y:.1f})")
 
     def _get_dxf_extents_inches(self):
         # Use normalized points for extents
@@ -1119,194 +1218,55 @@ class FabricCNCApp:
         return min_x, min_y, max_x, max_y
 
     def _generate_toolpath(self):
-        """
-        Generate truly continuous toolpaths without any stopping between segments.
-        All entities are combined into a single continuous motion path.
-        """
-        if not self.dxf_entities:
+        """Generate toolpath using the new toolpath generator."""
+        if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
+            messagebox.showerror("Missing Dependencies", "Toolpath generation modules not available.")
+            return
+        
+        if not self.processed_shapes:
             messagebox.showwarning("No DXF", "Import a DXF file first.")
             return
         
-        scale = getattr(self, 'dxf_unit_scale', 1.0)
-        dx, dy = self.dxf_offset
-        
-        # --- Generate ONE continuous toolpath combining ALL entities ---
-        combined_toolpath = []
-        
-        logger.info(f"Processing {len(self.dxf_entities)} entities for single continuous toolpath generation")
-        
-        # DEBUG: Log all entity types to identify what's being processed
-        entity_types = {}
-        for e in self.dxf_entities:
-            t = e.dxftype()
-            entity_types[t] = entity_types.get(t, 0) + 1
-        logger.info(f"Entity types found: {entity_types}")
-        
-        # Check if we have multiple splines that might form a circle
-        splines = [e for e in self.dxf_entities if e.dxftype() == 'SPLINE']
-        if len(splines) >= 2:
-            logger.info(f"Found {len(splines)} splines - checking if they form a circle")
-            # Try to detect if splines form a circle and combine them
-            circle_center, circle_radius = self._detect_circle_from_splines(splines)
-            if circle_center and circle_radius:
-                logger.info(f"Detected circle from splines: center=({circle_center[0]:.3f}, {circle_center[1]:.3f}), radius={circle_radius:.3f}")
-                # Generate continuous path for detected circle
-                continuous_path = self._generate_continuous_circle_path(
-                    circle_center, circle_radius
-                )
-                
-                # Transform coordinates and add to combined toolpath
-                for x, y, angle, z in continuous_path:
-                    tx = (x * scale) - dx
-                    ty = (y * scale) - dy
-                    combined_toolpath.append((tx, ty, angle, z))
-                
-                logger.info(f"Added {len(continuous_path)} waypoints from detected circle")
-                
-                # Skip processing individual splines since we've combined them
-                processed_splines = True
-            else:
-                processed_splines = False
-        else:
-            processed_splines = False
-        
-        for i, e in enumerate(self.dxf_entities):
-            t = e.dxftype()
+        try:
+            # Generate G-code using the toolpath generator
+            self.generated_gcode = self.toolpath_generator.generate_toolpath(self.processed_shapes)
             
-            # Skip splines if we've already processed them as a circle
-            if t == 'SPLINE' and processed_splines:
-                logger.info(f"Skipping SPLINE {i+1} (already processed as circle)")
-                continue
-                
-            logger.info(f"Processing entity {i+1}/{len(self.dxf_entities)}: {t}")
+            if not self.generated_gcode:
+                messagebox.showerror("Toolpath Generation Error", "Failed to generate G-code.")
+                return
             
-            if t == 'SPLINE':
-                logger.info(f"  Generating continuous SPLINE path")
-                # Generate continuous path for spline
-                continuous_path = self._generate_continuous_spline_path(e)
-                
-                # Transform coordinates and add to combined toolpath
-                for x, y, angle, z in continuous_path:
-                    tx = (x * scale) - dx
-                    ty = (y * scale) - dy
-                    combined_toolpath.append((tx, ty, angle, z))
-                
-                logger.info(f"  Added {len(continuous_path)} waypoints to combined toolpath")
-                
-            elif t == 'CIRCLE':
-                center = e.dxf.center
-                radius = e.dxf.radius
-                logger.info(f"  Generating continuous CIRCLE path: center=({center.x}, {center.y}), radius={radius}")
-                
-                # Generate continuous path for full circle
-                continuous_path = self._generate_continuous_circle_path(
-                    (center.x, center.y), radius
-                )
-                
-                # Transform coordinates and add to combined toolpath
-                for x, y, angle, z in continuous_path:
-                    tx = (x * scale) - dx
-                    ty = (y * scale) - dy
-                    combined_toolpath.append((tx, ty, angle, z))
-                
-                logger.info(f"  Added {len(continuous_path)} waypoints to combined toolpath")
-                
-            elif t == 'ARC':
-                center = e.dxf.center
-                radius = e.dxf.radius
-                start_angle = math.radians(e.dxf.start_angle)
-                end_angle = math.radians(e.dxf.end_angle)
-                
-                # Handle angle wrapping
-                if end_angle < start_angle:
-                    end_angle += 2 * math.pi
-                
-                logger.info(f"  Generating continuous ARC path: center=({center.x}, {center.y}), radius={radius}, angles={math.degrees(start_angle):.1f}° to {math.degrees(end_angle):.1f}°")
-                
-                # Generate continuous path for arc
-                continuous_path = self._generate_continuous_circle_path(
-                    (center.x, center.y), radius,
-                    start_angle=start_angle, end_angle=end_angle
-                )
-                
-                # Transform coordinates and add to combined toolpath
-                for x, y, angle, z in continuous_path:
-                    tx = (x * scale) - dx
-                    ty = (y * scale) - dy
-                    combined_toolpath.append((tx, ty, angle, z))
-                
-                logger.info(f"  Added {len(continuous_path)} waypoints to combined toolpath")
+            # Save G-code to file
+            base_name = os.path.splitext(os.path.basename(self.dxf_file_path))[0]
+            self.gcode_file_path = f"outputs/toolpath_{base_name}.gcode"
             
-            elif t in ('LWPOLYLINE', 'POLYLINE'):
-                logger.info(f"  Generating continuous POLYLINE path")
-                # Generate continuous path for polyline
-                continuous_path = self._generate_continuous_polyline_path(e)
-                
-                # Transform coordinates and add to combined toolpath
-                for x, y, angle, z in continuous_path:
-                    tx = (x * scale) - dx
-                    ty = (y * scale) - dy
-                    combined_toolpath.append((tx, ty, angle, z))
-                
-                logger.info(f"  Added {len(continuous_path)} waypoints to combined toolpath")
+            # Ensure outputs directory exists
+            os.makedirs("outputs", exist_ok=True)
             
-            elif t == 'LINE':
-                start_point = (e.dxf.start.x, e.dxf.start.y)
-                end_point = (e.dxf.end.x, e.dxf.end.y)
-                logger.info(f"  Generating continuous LINE path: from ({start_point[0]:.3f}, {start_point[1]:.3f}) to ({end_point[0]:.3f}, {end_point[1]:.3f})")
-                # Generate continuous path for line
-                continuous_path = self._generate_continuous_line_path(e)
-                
-                # Transform coordinates and add to combined toolpath
-                for x, y, angle, z in continuous_path:
-                    tx = (x * scale) - dx
-                    ty = (y * scale) - dy
-                    combined_toolpath.append((tx, ty, angle, z))
-                
-                logger.info(f"  Added {len(continuous_path)} waypoints to combined toolpath")
-        
-        # Store the single combined continuous toolpath
-        self.toolpath = [combined_toolpath]
-        
-        # Debug output
-        logger.info(f"=== CONTINUOUS TOOLPATH DEBUG INFO ===")
-        logger.info(f"Generated 1 combined continuous toolpath")
-        logger.info(f"Combined toolpath - {len(combined_toolpath)} points:")
-        
-        # Show first 5 points
-        for j, (x, y, angle, z) in enumerate(combined_toolpath[:5]):
-            angle_deg = math.degrees(angle)
-            z_status = "DOWN" if z == 0 else "UP"
-            logger.info(f"  Point {j+1}: X={x*25.4:.2f}mm ({x:.3f}in), Y={y*25.4:.2f}mm ({y:.3f}in), Angle={angle_deg:.1f}°, Z={z_status}")
-        
-        if len(combined_toolpath) > 5:
-            logger.info(f"  ... ({len(combined_toolpath)-5} more points) ...")
-        
-        logger.info(f"Total points: {len(combined_toolpath)}")
-        logger.info(f"Continuous toolpaths: 1")
-        logger.info(f"Discrete toolpaths: 0")
-        
-        # Check machine limits
-        logger.info(f"=== MACHINE LIMITS ===")
-        x_limits = (-68.0, 68.0)  # inches
-        y_limits = (-45.0, 45.0)  # inches
-        logger.info(f"X limits: {x_limits[0]*25.4:.2f}mm to {x_limits[1]*25.4:.2f}mm")
-        logger.info(f"Y limits: {y_limits[0]*25.4:.2f}mm to {y_limits[1]*25.4:.2f}mm")
-        
-        all_within_limits = True
-        for x, y, angle, z in combined_toolpath:
-            if not (x_limits[0] <= x <= x_limits[1] and y_limits[0] <= y <= y_limits[1]):
-                all_within_limits = False
-                break
-        
-        if all_within_limits:
-            logger.info("✅ All points within machine limits")
-        else:
-            logger.warning("⚠️ Some points outside machine limits")
-        
-        logger.info("=== END DEBUG INFO ===")
-        
-        self._draw_canvas()
+            with open(self.gcode_file_path, 'w') as f:
+                f.write(self.generated_gcode)
+            
+            # Count lines and corners for status
+            gcode_lines = self.generated_gcode.split('\n')
+            total_lines = len([line for line in gcode_lines if line.strip() and not line.strip().startswith(';')])
+            corner_count = len([line for line in gcode_lines if 'Raise Z for corner' in line])
+            
+            logger.info(f"Toolpath generated successfully:")
+            logger.info(f"  - G-code file: {self.gcode_file_path}")
+            logger.info(f"  - Total lines: {total_lines}")
+            logger.info(f"  - Corners detected: {corner_count}")
+            
+            messagebox.showinfo("Toolpath Generation Success", 
+                              f"Successfully generated toolpath.\n\n"
+                              f"G-code file: {self.gcode_file_path}\n"
+                              f"Total lines: {total_lines}\n"
+                              f"Corners detected: {corner_count}")
+            
+            # Redraw canvas to show toolpath
+            self._draw_canvas()
+            
+        except Exception as e:
+            logger.error(f"Failed to generate toolpath: {e}")
+            messagebox.showerror("Toolpath Generation Error", str(e))
     
     def _detect_circle_from_splines(self, splines):
         """
@@ -1387,84 +1347,116 @@ class FabricCNCApp:
         return generate_continuous_line_toolpath(line, step_size=0.05)
 
     def _preview_toolpath(self):
-        if not hasattr(self, 'toolpath') or not self.toolpath:
-            messagebox.showwarning("No Toolpath", "Generate a toolpath first.")
+        """Preview toolpath using the new G-code visualizer."""
+        if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
+            messagebox.showerror("Missing Dependencies", "G-code visualization modules not available.")
             return
-        self._draw_canvas()  # Clear previous preview only once
-        def animate_shape(shape_idx=0):
-            if shape_idx >= len(self.toolpath):
-                return
-            path = self.toolpath[shape_idx]
-            def animate_step(idx=0):
-                steps_per_tick = 1  # Animate 1 step per timer tick for smoothness
-                if idx >= len(path):
-                    self.root.after(50, animate_shape, shape_idx+1)  # Short pause between shapes
-                    return
-                for j in range(steps_per_tick):
-                    if idx + j >= len(path):
-                        break
-                    x, y, angle, z = path[idx + j]
-                    r = 0.5  # radius in inches
-                    x_c, y_c = self._inches_to_canvas(x, y)
-                    # Draw blue dot for continuous cutting (Z=0)
-                    if z == 0:
-                        self.canvas.create_oval(x_c-6, y_c-6, x_c+6, y_c+6, fill=UI_COLORS['PRIMARY_COLOR'], outline=UI_COLORS['PRIMARY_VARIANT'])
-                    # Draw orientation line (cutting blade orientation)
-                    # Motor controller handles direction inversion, so use original angle
-                    # Only flip angle for Y-axis coordinate system transformation
-                    display_angle = angle + math.pi/2  # Original angle + flip for Y-axis
-                    x2 = x + r * math.cos(display_angle)
-                    y2 = y + r * math.sin(display_angle)
-                    x2_c, y2_c = self._inches_to_canvas(x2, y2)
-                    self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill=UI_COLORS['SECONDARY_COLOR'], width=3)
-                self.root.after(2, animate_step, idx + steps_per_tick)  # Smoother animation
-            animate_step()
-        animate_shape()
+        
+        if not self.gcode_file_path or not os.path.exists(self.gcode_file_path):
+            messagebox.showwarning("No G-code", "Generate a toolpath first.")
+            return
+        
+        try:
+            # Create visualization using the G-code visualizer
+            output_path = self.gcode_file_path.replace('.gcode', '_visualization.png')
+            
+            # Parse and visualize the G-code
+            self.gcode_visualizer.parse_gcode_file(self.gcode_file_path)
+            self.gcode_visualizer.create_visualization(output_path)
+            
+            # Show the visualization
+            if os.path.exists(output_path):
+                # On macOS, use 'open' command to display the image
+                if platform.system() == 'Darwin':
+                    os.system(f'open "{output_path}"')
+                else:
+                    # On other systems, try to open with default image viewer
+                    os.system(f'xdg-open "{output_path}"' if platform.system() == 'Linux' else f'start "" "{output_path}"')
+                
+                logger.info(f"Toolpath preview created: {output_path}")
+                messagebox.showinfo("Preview Created", f"Toolpath preview saved to:\n{output_path}")
+            else:
+                messagebox.showerror("Preview Error", "Failed to create preview image.")
+                
+        except Exception as e:
+            logger.error(f"Failed to create toolpath preview: {e}")
+            messagebox.showerror("Preview Error", str(e))
 
     def _run_toolpath(self):
-        if not hasattr(self, 'toolpath') or not self.toolpath:
-            messagebox.showwarning("No Toolpath", "Generate a toolpath first.")
+        """Run toolpath using the new G-code executor."""
+        if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
+            messagebox.showerror("Missing Dependencies", "G-code execution modules not available.")
             return
+        
+        if not self.gcode_file_path or not os.path.exists(self.gcode_file_path):
+            messagebox.showwarning("No G-code", "Generate a toolpath first.")
+            return
+        
+        # Confirm execution
+        result = messagebox.askyesno("Run Toolpath", 
+                                   "Are you sure you want to run the toolpath?\n\n"
+                                   "This will move the machine according to the generated G-code.\n"
+                                   "Make sure the machine is properly set up and safe to operate.")
+        if not result:
+            return
+        
+        try:
+            # Execute G-code in a separate thread to avoid blocking the UI
+            def execute_gcode():
+                try:
+                    def progress_callback(progress, status):
+                        # Update UI with progress (this will be called from the thread)
+                        self.root.after(0, lambda: self._update_execution_progress(progress, status))
+                    
+                    logger.info(f"Starting G-code execution: {self.gcode_file_path}")
+                    self.gcode_executor.execute_gcode_file(self.gcode_file_path, progress_callback)
+                    logger.info("G-code execution completed successfully")
+                    
+                    # Show completion message
+                    self.root.after(0, lambda: messagebox.showinfo("Execution Complete", 
+                                                                 "Toolpath execution completed successfully."))
+                    
+                except Exception as e:
+                    logger.error(f"G-code execution failed: {e}")
+                    self.root.after(0, lambda: messagebox.showerror("Execution Error", str(e)))
             
-        # Debug: Print machine limits and first toolpath point
-        print(f"\n=== TOOLPATH EXECUTION DEBUG ===")
-        print(f"Machine limits: X=±{config.APP_CONFIG['X_MAX_MM']:.2f}mm, Y=±{config.APP_CONFIG['Y_MAX_MM']:.2f}mm")
+            # Start execution thread
+            execution_thread = threading.Thread(target=execute_gcode, daemon=True)
+            execution_thread.start()
+            
+        except Exception as e:
+            logger.error(f"Failed to start G-code execution: {e}")
+            messagebox.showerror("Execution Error", str(e))
+    
+    def _update_execution_progress(self, progress, status):
+        """Update UI with execution progress."""
+        # This method can be expanded to show progress in the UI
+        logger.info(f"Execution progress: {progress:.1f}% - {status}")
+    
+    def _stop_execution(self):
+        """Stop G-code execution."""
+        if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
+            messagebox.showerror("Missing Dependencies", "G-code execution modules not available.")
+            return
         
-        # Debug: Check sensor states before starting toolpath
-        if MOTOR_IMPORTS_AVAILABLE:
-            sensor_states = self.motor_ctrl.get_sensor_states()
-            print(f"\n=== SENSOR STATES BEFORE TOOLPATH ===")
-            for motor, state in sensor_states.items():
-                print(f"{motor}: raw={state['raw']}, debounced={state['debounced']}, last_trigger_time={state['last_trigger_time']:.3f}s, readings={state['readings']}")
+        if not self.gcode_executor or not self.gcode_executor.is_executing:
+            messagebox.showinfo("No Execution", "No G-code execution is currently running.")
+            return
         
-        if self.toolpath and self.toolpath[0]:
-            first_point = self.toolpath[0][0]
-            x, y, angle, z = first_point
-            x_mm = x * config.APP_CONFIG['INCH_TO_MM']
-            y_mm = y * config.APP_CONFIG['INCH_TO_MM']
-            print(f"First toolpath point: X={x:.3f}in ({x_mm:.2f}mm), Y={y:.3f}in ({y_mm:.2f}mm)")
-            if abs(x_mm) > config.APP_CONFIG['X_MAX_MM'] or abs(y_mm) > config.APP_CONFIG['Y_MAX_MM']:
-                print(f"⚠️  WARNING: First point beyond machine limits!")
-                return
+        # Confirm stop
+        result = messagebox.askyesno("Stop Execution", 
+                                   "Are you sure you want to stop the current G-code execution?\n\n"
+                                   "This will halt the machine movement immediately.")
+        if not result:
+            return
         
-        # Convert toolpath to continuous execution format
-        toolpath_points = []
-        for shape_idx, path in enumerate(self.toolpath):
-            for step_idx, (x, y, angle, z) in enumerate(path):
-                x_mm = x * config.APP_CONFIG['INCH_TO_MM']
-                y_mm = y * config.APP_CONFIG['INCH_TO_MM']
-                rot_deg = math.degrees(angle)
-                z_mm = config.APP_CONFIG['Z_DOWN_MM'] if z == 0 else config.APP_CONFIG['Z_UP_MM']
-                toolpath_points.append((x_mm, y_mm, rot_deg, z_mm))
-        
-        print(f"Converted toolpath to {len(toolpath_points)} continuous points")
-        
-        # Execute continuous toolpath
-        if MOTOR_IMPORTS_AVAILABLE:
-            self.motor_ctrl.execute_continuous_toolpath(toolpath_points)
-        
-        self._running_toolpath = False
-        print("Toolpath execution completed")
+        try:
+            self.gcode_executor.stop_execution()
+            logger.info("G-code execution stopped by user")
+            messagebox.showinfo("Execution Stopped", "G-code execution has been stopped.")
+        except Exception as e:
+            logger.error(f"Failed to stop G-code execution: {e}")
+            messagebox.showerror("Stop Error", str(e))
 
     def _travel_to_start(self, x_mm, y_mm):
         """Travel from home to the start position of the toolpath."""
@@ -1703,6 +1695,204 @@ def main():
 # G-code generation functions moved to toolpath_planning package
 
 # G-code file operations moved to toolpath_planning package
+
+class GCodeExecutor:
+    """Executes G-code commands for smooth motor control."""
+    
+    def __init__(self, motor_controller):
+        """Initialize G-code executor.
+        
+        Args:
+            motor_controller: Motor controller instance
+        """
+        self.motor_ctrl = motor_controller
+        self.current_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0}
+        self.feed_rate = 1000.0  # mm/min
+        self.is_executing = False
+        self.stop_requested = False
+        
+        # G-code state
+        self.absolute_positioning = True
+        self.units_mm = True
+        
+        logger.info("G-code executor initialized")
+    
+    def execute_gcode_file(self, gcode_file_path: str, progress_callback=None):
+        """Execute G-code from file.
+        
+        Args:
+            gcode_file_path: Path to G-code file
+            progress_callback: Optional callback for progress updates
+        """
+        try:
+            with open(gcode_file_path, 'r') as f:
+                gcode_lines = f.readlines()
+            
+            self.execute_gcode_lines(gcode_lines, progress_callback)
+        except Exception as e:
+            logger.error(f"Error executing G-code file: {e}")
+            raise
+    
+    def execute_gcode_lines(self, gcode_lines: List[str], progress_callback=None):
+        """Execute G-code from list of lines.
+        
+        Args:
+            gcode_lines: List of G-code lines
+            progress_callback: Optional callback for progress updates
+        """
+        self.is_executing = True
+        self.stop_requested = False
+        
+        total_lines = len(gcode_lines)
+        executed_lines = 0
+        
+        try:
+            for line_num, line in enumerate(gcode_lines, 1):
+                if self.stop_requested:
+                    logger.info("G-code execution stopped by user")
+                    break
+                
+                line = line.strip()
+                if not line or line.startswith(';'):
+                    continue
+                
+                # Parse and execute the line
+                self._execute_gcode_line(line)
+                executed_lines += 1
+                
+                # Update progress
+                if progress_callback and total_lines > 0:
+                    progress = (executed_lines / total_lines) * 100
+                    progress_callback(progress, f"Line {line_num}/{total_lines}")
+                
+                # Small delay for smooth execution
+                time.sleep(0.001)
+        
+        except Exception as e:
+            logger.error(f"Error executing G-code at line {line_num}: {e}")
+            raise
+        finally:
+            self.is_executing = False
+    
+    def _execute_gcode_line(self, line: str):
+        """Execute a single G-code line.
+        
+        Args:
+            line: G-code line to execute
+        """
+        # Remove comments
+        line = line.split(';')[0].strip()
+        if not line:
+            return
+        
+        # Parse command
+        cmd_match = re.match(r'^([GM]\d+)(.*)$', line.upper())
+        if not cmd_match:
+            logger.warning(f"Invalid G-code line: {line}")
+            return
+        
+        command = cmd_match.group(1)
+        params = cmd_match.group(2)
+        
+        # Parse parameters
+        params_dict = {}
+        for param_match in re.finditer(r'([XYZAF])([+-]?\d*\.?\d*)', params):
+            axis = param_match.group(1)
+            value = float(param_match.group(2)) if param_match.group(2) else 0.0
+            params_dict[axis] = value
+        
+        # Execute command
+        if command.startswith('G'):
+            self._execute_g_command(command, params_dict)
+        elif command.startswith('M'):
+            self._execute_m_command(command, params_dict)
+    
+    def _execute_g_command(self, command: str, params: Dict[str, float]):
+        """Execute G command.
+        
+        Args:
+            command: G command (e.g., G0, G1, G21, G90)
+            params: Command parameters
+        """
+        if command == 'G0':  # Rapid positioning
+            self._move_to_position(params, rapid=True)
+        elif command == 'G1':  # Linear interpolation
+            self._move_to_position(params, rapid=False)
+        elif command == 'G21':  # Set units to millimeters
+            self.units_mm = True
+        elif command == 'G90':  # Absolute positioning
+            self.absolute_positioning = True
+        elif command == 'G91':  # Relative positioning
+            self.absolute_positioning = False
+        elif command == 'G28':  # Home all axes
+            self._home_all_axes()
+        else:
+            logger.warning(f"Unsupported G command: {command}")
+    
+    def _execute_m_command(self, command: str, params: Dict[str, float]):
+        """Execute M command.
+        
+        Args:
+            command: M command
+            params: Command parameters
+        """
+        if command == 'M3':  # Spindle on
+            logger.info("Spindle on")
+        elif command == 'M5':  # Spindle off
+            logger.info("Spindle off")
+        else:
+            logger.warning(f"Unsupported M command: {command}")
+    
+    def _move_to_position(self, params: Dict[str, float], rapid: bool = False):
+        """Move to specified position.
+        
+        Args:
+            params: Position parameters (X, Y, Z, A, F)
+            rapid: Whether this is a rapid move
+        """
+        # Calculate target position
+        target_pos = self.current_position.copy()
+        
+        for axis, value in params.items():
+            if axis == 'F':  # Feed rate
+                self.feed_rate = value
+                continue
+            
+            if self.absolute_positioning:
+                target_pos[axis] = value
+            else:
+                target_pos[axis] += value
+        
+        # Convert to motor controller format
+        x_mm = target_pos.get('X', self.current_position['X'])
+        y_mm = target_pos.get('Y', self.current_position['Y'])
+        z_mm = target_pos.get('Z', self.current_position['Z'])
+        a_deg = target_pos.get('A', self.current_position['A'])
+        
+        # Execute movement
+        if MOTOR_IMPORTS_AVAILABLE:
+            self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=z_mm, rot=a_deg)
+        
+        # Update current position
+        self.current_position = target_pos
+        
+        logger.debug(f"Move to: X={x_mm:.2f}, Y={y_mm:.2f}, Z={z_mm:.2f}, A={a_deg:.2f}")
+    
+    def _home_all_axes(self):
+        """Home all axes."""
+        if MOTOR_IMPORTS_AVAILABLE:
+            self.motor_ctrl.home_all_synchronous()
+        
+        # Reset position to home
+        self.current_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0}
+        logger.info("Homed all axes")
+    
+    def stop_execution(self):
+        """Stop G-code execution."""
+        self.stop_requested = True
+        if MOTOR_IMPORTS_AVAILABLE:
+            self.motor_ctrl.stop_movement()
+        logger.info("G-code execution stopped")
 
 if __name__ == "__main__":
     main() 

@@ -4,28 +4,14 @@ Toolpath Planning Package for Fabric CNC
 Provides motion planning, G-code generation, and toolpath optimization for the redesigned system.
 """
 
-from .motion_planner import (
-    MotionPlanner,
-    ToolpathOptimizer,
-    ToolpathPoint,
-    ToolpathSegment,
-    ToolpathType
-)
-
-from .gcode_generator import (
-    GCodeGenerator,
-    GCodeSettings
-)
+# Import the modules that actually exist
+from .toolpath_generator import ToolpathGenerator
+from .gcode_visualizer import GCodeVisualizer
 
 __all__ = [
-    # Motion planning
-    'MotionPlanner',
-    'ToolpathOptimizer',
-    'ToolpathPoint',
-    'ToolpathSegment',
-    'ToolpathType',
+    # Toolpath generation
+    'ToolpathGenerator',
     
-    # G-code generation
-    'GCodeGenerator',
-    'GCodeSettings'
+    # G-code visualization
+    'GCodeVisualizer'
 ] 

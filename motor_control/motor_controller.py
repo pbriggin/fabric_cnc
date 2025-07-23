@@ -1054,7 +1054,28 @@ class MotorController:
         self._stop_requested = True
         logger.info("Stop movement requested")
     
-
+    def move_to(self, x=None, y=None, z=None, rot=None):
+        """Move to absolute position.
+        
+        Args:
+            x: Target X position in mm
+            y: Target Y position in mm  
+            z: Target Z position in mm
+            rot: Target rotation in degrees
+        """
+        # Get current position
+        current_pos = self.get_position()
+        
+        # Calculate distances to move
+        x_distance = (x - current_pos['X']) if x is not None else 0
+        y_distance = (y - current_pos['Y']) if y is not None else 0
+        z_distance = (z - current_pos['Z']) if z is not None else 0
+        rot_distance = (rot - current_pos['ROT']) if rot is not None else 0
+        
+        # Execute coordinated movement
+        self.move_coordinated(x_distance, y_distance, z_distance, rot_distance)
+        
+        logger.info(f"Move to: X={x:.2f}, Y={y:.2f}, Z={z:.2f}, ROT={rot:.2f}")
 
     def cleanup(self):
         """Clean up resources and disable all motors."""
