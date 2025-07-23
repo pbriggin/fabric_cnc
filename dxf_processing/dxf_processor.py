@@ -12,11 +12,11 @@ class DXFProcessor:
     """
     A DXF processor that extracts shapes from DXF files and converts them to point lists.
     Curves are broken down into small segments with angle changes less than 0.5 degrees.
-    Works entirely in inches - no unit conversion.
     """
     
     def __init__(self, max_angle_change_degrees: float = 0.1):
-        """Initialize the DXF processor.
+        """
+        Initialize the DXF processor.
         
         Args:
             max_angle_change_degrees: Maximum angle change between curve segments in degrees
@@ -31,7 +31,7 @@ class DXFProcessor:
             dxf_path: Path to the DXF file
             
         Returns:
-            Dictionary mapping shape names to lists of (x, y) coordinate tuples in inches
+            Dictionary mapping shape names to lists of (x, y) coordinate tuples
         """
         try:
             # Load the DXF file
@@ -98,8 +98,11 @@ class DXFProcessor:
             # Merge shapes that share points
             merged_shapes = self._merge_connected_shapes(shapes)
             
+            # Position shapes with bottom-left justification and 1" buffer
+            positioned_shapes = self._position_shapes_bottom_left(merged_shapes, buffer_inches=1.0)
+            
             logger.info(f"Processed {len(shapes)} entities, merged into {len(merged_shapes)} shapes")
-            return merged_shapes
+            return positioned_shapes
             
         except Exception as e:
             logger.error(f"Error processing DXF file: {e}")
@@ -118,8 +121,8 @@ class DXFProcessor:
         
         # Calculate number of segments needed
         circumference = 2 * math.pi * radius
-        segment_length = 0.01  # 0.01 inch segments
-        num_segments = max(64, int(circumference / segment_length))
+        segment_length = radius * self.max_angle_change_radians
+        num_segments = max(8, int(circumference / segment_length))
         
         points = []
         for i in range(num_segments + 1):
@@ -127,7 +130,10 @@ class DXFProcessor:
             x = center.x + radius * math.cos(angle)
             y = center.y + radius * math.sin(angle)
             points.append((x, y))
-            
+        
+        # Remove duplicate points
+        points = self._remove_duplicate_points(points, min_distance=0.05)
+        
         return points
     
     def _process_arc(self, entity) -> List[Tuple[float, float]]:
@@ -137,14 +143,14 @@ class DXFProcessor:
         start_angle = math.radians(entity.dxf.start_angle)
         end_angle = math.radians(entity.dxf.end_angle)
         
-        # Ensure end_angle > start_angle
+        # Normalize angles
         if end_angle <= start_angle:
             end_angle += 2 * math.pi
-            
+        
         # Calculate number of segments needed
         arc_length = radius * (end_angle - start_angle)
-        segment_length = 0.01  # 0.01 inch segments
-        num_segments = max(32, int(arc_length / segment_length))
+        segment_length = radius * self.max_angle_change_radians
+        num_segments = max(4, int(arc_length / segment_length))
         
         points = []
         for i in range(num_segments + 1):
@@ -152,7 +158,10 @@ class DXFProcessor:
             x = center.x + radius * math.cos(angle)
             y = center.y + radius * math.sin(angle)
             points.append((x, y))
-            
+        
+        # Remove duplicate points
+        points = self._remove_duplicate_points(points, min_distance=0.05)
+        
         return points
     
     def _process_lwpolyline(self, entity) -> List[Tuple[float, float]]:
@@ -163,32 +172,52 @@ class DXFProcessor:
             x, y = vertex[0], vertex[1]
             original_points.append((x, y))
         
-        # If it's a closed polyline, ensure the last point connects to the first
-        if entity.closed and original_points and original_points[0] != original_points[-1]:
-            original_points.append(original_points[0])
+        if len(original_points) < 2:
+            return original_points
         
-        # Add intermediate points for better curve representation
-        refined_points = []
+        # Interpolate between points to increase density
+        interpolated_points = []
+        
         for i in range(len(original_points) - 1):
             p1 = original_points[i]
             p2 = original_points[i + 1]
             
-            refined_points.append(p1)
+            # Add the first point
+            interpolated_points.append(p1)
             
-            # Add intermediate points if the segment is long
+            # Calculate distance between points
             distance = math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
-            if distance > 0.1:  # If segment is longer than 0.1 inches
-                num_intermediate = int(distance / 0.01)  # One point every 0.01 inches
+            
+            # Determine number of intermediate points based on distance and angle change
+            # For longer segments, add more points
+            if distance > 0.1:  # Only interpolate for segments longer than 0.1 units
+                # Calculate angle change if we have 3 points
+                if i > 0:
+                    p0 = original_points[i - 1]
+                    angle_change = self._calculate_angle_change(p0, p1, p2)
+                    # More points for sharper turns
+                    num_intermediate = max(2, int(abs(angle_change) / self.max_angle_change_radians))
+                else:
+                    num_intermediate = 3  # Default for first segment
+                
+                # Add intermediate points
                 for j in range(1, num_intermediate):
                     t = j / num_intermediate
                     x = p1[0] + t * (p2[0] - p1[0])
                     y = p1[1] + t * (p2[1] - p1[1])
-                    refined_points.append((x, y))
+                    interpolated_points.append((x, y))
         
-        if original_points:
-            refined_points.append(original_points[-1])
+        # Add the last point
+        interpolated_points.append(original_points[-1])
         
-        return refined_points
+        # If the polyline is closed, add the first point at the end
+        if entity.closed:
+            interpolated_points.append(interpolated_points[0])
+        
+        # Remove duplicate points
+        interpolated_points = self._remove_duplicate_points(interpolated_points, min_distance=0.05)
+        
+        return interpolated_points
     
     def _process_polyline(self, entity) -> List[Tuple[float, float]]:
         """Process a POLYLINE entity."""
@@ -198,126 +227,239 @@ class DXFProcessor:
             x, y = vertex.dxf.location.x, vertex.dxf.location.y
             points.append((x, y))
         
-        # If it's a closed polyline, ensure the last point connects to the first
-        if entity.closed and points and points[0] != points[-1]:
+        # If the polyline is closed, add the first point at the end
+        if entity.closed:
             points.append(points[0])
+        
+        # Remove duplicate points
+        points = self._remove_duplicate_points(points, min_distance=0.05)
         
         return points
     
     def _process_spline(self, entity) -> List[Tuple[float, float]]:
-        """Process a SPLINE entity by flattening it into line segments."""
+        """Process a SPLINE entity by sampling points along the curve."""
         try:
-            # Try to flatten the spline
-            points = list(entity.flattening(0.01))  # 0.01 inch tolerance
+            # Get the spline curve
+            spline = entity.construction_tool()
             
-            # Check if the spline has extreme coordinates that might cause issues
+            # Check if the spline is closed
+            is_closed = entity.closed if hasattr(entity, 'closed') else False
+            
+            # For splines, we'll sample at regular parameter intervals
+            # Use a higher number of segments for smoother splines
+            num_segments = 500  # Increased from 100 for smoother curve approximation
+            
+            points = []
+            for i in range(num_segments + 1):
+                # Use parameter t from 0 to 1
+                t = i / num_segments
+                point = spline.point(t)
+                points.append((point.x, point.y))
+            
+            # Validate the spline points for extreme coordinates
             if points:
-                x_coords = [p[0] for p in points if len(p) >= 2]
-                y_coords = [p[1] for p in points if len(p) >= 2]
+                x_coords = [p[0] for p in points]
+                y_coords = [p[1] for p in points]
+                x_min, x_max = min(x_coords), max(x_coords)
+                y_min, y_max = min(y_coords), max(y_coords)
+                width = x_max - x_min
+                height = y_max - y_min
                 
-                if x_coords and y_coords:
-                    x_range = max(x_coords) - min(x_coords)
-                    y_range = max(y_coords) - min(y_coords)
-                    
-                    # If the spline has extreme dimensions, use control points as fallback
-                    if x_range > 1000 or y_range > 1000:
-                        logger.warning(f"Spline has extreme coordinates: width={x_range:.1f}, height={y_range:.1f}, bounds=({min(x_coords):.1f},{max(x_coords):.1f}),({min(y_coords):.1f},{max(y_coords):.1f})")
-                        logger.info("Using control points as fallback for extreme spline")
+                # Check for extreme dimensions (likely corrupted or invalid spline)
+                if width > 100 or height > 100 or abs(x_max) > 100 or abs(y_max) > 100:
+                    logger.warning(f"Spline has extreme coordinates: width={width:.1f}, height={height:.1f}, bounds=({x_min:.1f},{x_max:.1f}),({y_min:.1f},{y_max:.1f})")
+                    # Try fallback to control points
+                    try:
+                        control_points = []
+                        for point in entity.control_points:
+                            # Handle both point objects and numpy arrays
+                            if hasattr(point, 'x') and hasattr(point, 'y'):
+                                control_points.append((point.x, point.y))
+                            elif hasattr(point, '__len__') and len(point) >= 2:
+                                control_points.append((float(point[0]), float(point[1])))
                         
-                        # Use control points as fallback
-                        control_points = entity.control_points
+                        # Validate control points
                         if control_points:
-                            points = [(cp.x, cp.y) for cp in control_points]
+                            cx_coords = [p[0] for p in control_points]
+                            cy_coords = [p[1] for p in control_points]
+                            cx_min, cx_max = min(cx_coords), max(cx_coords)
+                            cy_min, cy_max = min(cy_coords), max(cy_coords)
+                            c_width = cx_max - cx_min
+                            c_height = cy_max - cy_min
+                            
+                            if c_width < 100 and c_height < 100 and abs(cx_max) < 100 and abs(cy_max) < 100:
+                                logger.info("Using control points as fallback for extreme spline")
+                                return control_points
+                            else:
+                                logger.warning("Control points also have extreme coordinates, skipping spline")
+                                return []
                         else:
+                            logger.warning("No control points available, skipping spline")
                             return []
+                    except Exception as e:
+                        logger.warning(f"Error getting control points: {e}")
+                        return []
             
-            # Convert to list of tuples and filter out invalid points
-            result = []
-            for point in points:
-                if len(point) >= 2:
-                    result.append((point[0], point[1]))
+            # If the spline should be closed but isn't, add the first point at the end
+            if is_closed and len(points) > 1:
+                first_point = points[0]
+                last_point = points[-1]
+                distance = math.sqrt((first_point[0] - last_point[0])**2 + (first_point[1] - last_point[1])**2)
+                if distance > 0.001:  # If not already closed
+                    points.append(first_point)
             
-            return result
+            # Remove duplicate points
+            points = self._remove_duplicate_points(points, min_distance=0.05)
+            
+            return points
             
         except Exception as e:
-            logger.warning(f"Error processing spline, using control points: {e}")
+            logger.warning(f"Error processing spline: {e}")
+            # Fallback: try to get control points
             try:
-                # Fallback to control points
-                control_points = entity.control_points
-                if control_points:
-                    return [(cp.x, cp.y) for cp in control_points]
+                points = []
+                for point in entity.control_points:
+                    # Handle both point objects and numpy arrays
+                    if hasattr(point, 'x') and hasattr(point, 'y'):
+                        points.append((point.x, point.y))
+                    elif hasattr(point, '__len__') and len(point) >= 2:
+                        points.append((float(point[0]), float(point[1])))
+                return points
             except:
-                pass
-            return []
+                return []
     
     def _merge_connected_shapes(self, shapes: Dict[str, List[Tuple[float, float]]]) -> Dict[str, List[Tuple[float, float]]]:
-        """Merge shapes that share points within a tolerance."""
-        if not shapes:
-            return {}
+        """
+        Merge shapes that share points into single shapes.
         
-        # Start with all shapes
-        remaining_shapes = list(shapes.items())
+        Args:
+            shapes: Dictionary of shape names to point lists
+            
+        Returns:
+            Dictionary of merged shapes
+        """
+        if len(shapes) <= 1:
+            return shapes
+        
+        # Convert to list for easier processing
+        shape_list = list(shapes.items())
         merged_shapes = {}
+        used_indices = set()
         
-        while remaining_shapes:
-            current_name, current_points = remaining_shapes.pop(0)
-            merged_points = current_points.copy()
-            
-            # Try to merge with remaining shapes
-            i = 0
-            while i < len(remaining_shapes):
-                other_name, other_points = remaining_shapes[i]
+        for i, (name1, points1) in enumerate(shape_list):
+            if i in used_indices:
+                continue
                 
-                if self._shapes_share_points(merged_points, other_points, tolerance=0.1):
-                    # Merge the shapes
-                    merged_points = self._merge_point_lists(merged_points, other_points)
-                    logger.info(f"Merged shapes {current_name} and {other_name}")
-                    remaining_shapes.pop(i)
-                else:
-                    i += 1
+            # Start with this shape
+            current_points = points1.copy()
+            used_indices.add(i)
             
-            # Remove duplicate points from merged shape
-            merged_points = self._remove_duplicate_points(merged_points)
+            # Look for shapes that share points with current shape
+            changed = True
+            while changed:
+                changed = False
+                for j, (name2, points2) in enumerate(shape_list):
+                    if j in used_indices:
+                        continue
+                    
+                    # Check if shapes share any points
+                    if self._shapes_share_points(current_points, points2):
+                        # Try to merge the shapes
+                        merged_result = self._merge_point_lists(current_points, points2)
+                        if merged_result is not None:
+                            current_points = merged_result
+                            used_indices.add(j)
+                            changed = True
+                            logger.info(f"Merged shapes {name1} and {name2}")
+                        else:
+                            logger.info(f"Shapes {name1} and {name2} share points but cannot be merged properly")
             
-            merged_shapes[current_name] = merged_points
+            # Add merged shape
+            merged_name = f"merged_shape_{len(merged_shapes)}"
+            # Remove duplicates from the merged shape
+            current_points = self._remove_duplicate_points(current_points, min_distance=0.05)
+            merged_shapes[merged_name] = current_points
         
         return merged_shapes
     
     def _shapes_share_points(self, points1: List[Tuple[float, float]], 
                            points2: List[Tuple[float, float]], 
                            tolerance: float = 0.1) -> bool:
-        """Check if two shapes share any points within tolerance."""
+        """
+        Check if two shapes share any points within tolerance.
+        
+        Args:
+            points1: First shape's points
+            points2: Second shape's points
+            tolerance: Distance tolerance for considering points the same
+            
+        Returns:
+            True if shapes share points, False otherwise
+        """
         for p1 in points1:
             for p2 in points2:
                 distance = math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
-                if distance < tolerance:
+                if distance <= tolerance:
                     return True
         return False
     
     def _merge_point_lists(self, points1: List[Tuple[float, float]], 
                           points2: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
-        """Merge two point lists, avoiding duplicates."""
+        """
+        Merge two point lists, removing duplicates and ensuring continuity.
+        
+        Args:
+            points1: First point list
+            points2: Second point list
+            
+        Returns:
+            Merged point list
+        """
+        # Start with first list
         merged = points1.copy()
         
-        for point in points2:
-            # Check if point is already in merged list
-            is_duplicate = False
-            for existing_point in merged:
-                distance = math.sqrt((point[0] - existing_point[0])**2 + (point[1] - existing_point[1])**2)
-                if distance < 0.01:  # 0.01 inch tolerance for duplicates
-                    is_duplicate = True
-                    break
-            
-            if not is_duplicate:
-                merged.append(point)
+        # Find the best connection point
+        best_connection = None
+        min_distance = float('inf')
+        
+        # Check all possible connections
+        for i, p1 in enumerate(points1):
+            for j, p2 in enumerate(points2):
+                # Check end of points1 to start of points2
+                if i == len(points1) - 1:
+                    distance = math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+                    if distance < min_distance:
+                        min_distance = distance
+                        best_connection = ('end_to_start', i, j)
+                
+                # Check end of points2 to start of points1
+                if j == len(points2) - 1:
+                    distance = math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
+                    if distance < min_distance:
+                        min_distance = distance
+                        best_connection = ('start_to_end', i, j)
+        
+        # Apply the best connection only if it's within reasonable tolerance
+        if best_connection and min_distance < 0.1:  # 0.1 unit tolerance (same as point sharing)
+            connection_type, i, j = best_connection
+            if connection_type == 'end_to_start':
+                # Add points2 after points1
+                merged.extend(points2)
+            else:  # start_to_end
+                # Add points1 after points2
+                merged = points2 + merged
+        else:
+            # No good connection found - don't merge these shapes
+            # Return None to indicate that merging should not occur
+            return None
         
         return merged
     
     def _process_hatch(self, entity) -> List[Tuple[float, float]]:
-        """Process a HATCH entity by extracting boundary points."""
-        points = []
-        
+        """Process a HATCH entity by extracting its boundary paths."""
         try:
+            points = []
+            
             # Get the hatch boundary paths
             for path in entity.paths:
                 if hasattr(path, 'vertices'):
@@ -326,80 +468,166 @@ class DXFProcessor:
                 elif hasattr(path, 'get_points'):
                     for point in path.get_points():
                         points.append((point[0], point[1]))
+            
+            return points
+            
         except Exception as e:
             logger.warning(f"Error processing hatch: {e}")
-        
-        return points
+            return []
     
     def _remove_duplicate_points(self, points: List[Tuple[float, float]], 
                                 min_distance: float = 0.01) -> List[Tuple[float, float]]:
-        """Remove duplicate points that are very close together."""
+        """
+        Remove duplicate or near-duplicate points from a point list.
+        
+        Args:
+            points: List of (x, y) coordinate tuples
+            min_distance: Minimum distance between consecutive points
+            
+        Returns:
+            Filtered point list with duplicates removed
+        """
         if len(points) <= 1:
             return points
         
-        result = [points[0]]
-        original_count = len(points)
+        filtered_points = [points[0]]  # Always keep the first point
         
-        for point in points[1:]:
-            # Check if this point is too close to the last point in result
-            last_point = result[-1]
-            distance = math.sqrt((point[0] - last_point[0])**2 + (point[1] - last_point[1])**2)
+        for i in range(1, len(points)):
+            current_point = points[i]
+            last_point = filtered_points[-1]
             
+            # Check for exact duplicates first (handles floating point precision issues)
+            if (abs(current_point[0] - last_point[0]) < 1e-10 and 
+                abs(current_point[1] - last_point[1]) < 1e-10):
+                # Exact duplicate - skip this point
+                continue
+            
+            # Calculate distance to last kept point
+            distance = math.sqrt((current_point[0] - last_point[0])**2 + 
+                               (current_point[1] - last_point[1])**2)
+            
+            # Only add point if it's far enough from the last kept point
             if distance >= min_distance:
-                result.append(point)
+                filtered_points.append(current_point)
         
-        removed_count = original_count - len(result)
-        if removed_count > 0:
-            logger.info(f"Removed {removed_count} duplicate points ({original_count} -> {len(result)})")
+        logger.info(f"Removed {len(points) - len(filtered_points)} duplicate points "
+                   f"({len(points)} -> {len(filtered_points)})")
         
-        return result
+        return filtered_points
+    
+    def _position_shapes_bottom_left(self, shapes: Dict[str, List[Tuple[float, float]]], 
+                                    buffer_inches: float = 1.0) -> Dict[str, List[Tuple[float, float]]]:
+        """
+        Position all shapes so they are bottom-left justified with a buffer.
+        
+        Args:
+            shapes: Dictionary mapping shape names to lists of (x, y) coordinate tuples
+            buffer_inches: Buffer distance in inches from the bottom and left edges
+            
+        Returns:
+            Dictionary with the same shape names but translated coordinates
+        """
+        if not shapes:
+            return shapes
+        
+        # Calculate the overall bounding box of all shapes
+        all_points = []
+        for points in shapes.values():
+            all_points.extend(points)
+        
+        if not all_points:
+            return shapes
+        
+        # Find the current bounds
+        min_x = min(p[0] for p in all_points)
+        max_x = max(p[0] for p in all_points)
+        min_y = min(p[1] for p in all_points)
+        max_y = max(p[1] for p in all_points)
+        
+        logger.info(f"Original bounds: X({min_x:.3f}, {max_x:.3f}), Y({min_y:.3f}, {max_y:.3f})")
+        
+        # Calculate translation to move shapes to bottom-left with buffer
+        translate_x = buffer_inches - min_x
+        translate_y = buffer_inches - min_y
+        
+        logger.info(f"Translating by: X={translate_x:.3f}, Y={translate_y:.3f}")
+        
+        # Apply translation to all shapes
+        positioned_shapes = {}
+        for shape_name, points in shapes.items():
+            translated_points = [(p[0] + translate_x, p[1] + translate_y) for p in points]
+            positioned_shapes[shape_name] = translated_points
+        
+        # Log the new bounds
+        new_all_points = []
+        for points in positioned_shapes.values():
+            new_all_points.extend(points)
+        
+        new_min_x = min(p[0] for p in new_all_points)
+        new_max_x = max(p[0] for p in new_all_points)
+        new_min_y = min(p[1] for p in new_all_points)
+        new_max_y = max(p[1] for p in new_all_points)
+        
+        logger.info(f"New bounds: X({new_min_x:.3f}, {new_max_x:.3f}), Y({new_min_y:.3f}, {new_max_y:.3f})")
+        
+        return positioned_shapes
     
     def _calculate_angle_change(self, p1: Tuple[float, float], 
                                p2: Tuple[float, float], 
                                p3: Tuple[float, float]) -> float:
-        """Calculate the angle change between three points."""
-        # Vector from p1 to p2
+        """
+        Calculate the angle change between three consecutive points.
+        
+        Args:
+            p1, p2, p3: Three consecutive points as (x, y) tuples
+            
+        Returns:
+            Angle change in radians
+        """
+        # Calculate vectors
         v1 = (p2[0] - p1[0], p2[1] - p1[1])
-        # Vector from p2 to p3
         v2 = (p3[0] - p2[0], p3[1] - p2[1])
         
         # Calculate magnitudes
         mag1 = math.sqrt(v1[0]**2 + v1[1]**2)
         mag2 = math.sqrt(v2[0]**2 + v2[1]**2)
         
-        if mag1 == 0 or mag2 == 0:
-            return 0.0
+        if  mag1 == 0 or mag2 == 0:
+            return 0
         
         # Calculate dot product
         dot_product = v1[0] * v2[0] + v1[1] * v2[1]
         
         # Calculate angle
         cos_angle = dot_product / (mag1 * mag2)
-        cos_angle = max(-1, min(1, cos_angle))  # Clamp to valid range
-        angle = math.acos(cos_angle)
+        cos_angle = max(-1, min(1, cos_angle))  # Clamp to [-1, 1]
         
-        return angle
+        return math.acos(cos_angle)
+
 
 def main():
-    """Test the DXF processor."""
+    """Test the DXF processor with the provided DXF file."""
     processor = DXFProcessor()
     
-    # Test with a sample DXF file
-    dxf_path = "test_2.dxf"
+    # Test with the provided DXF file
+    dxf_path = "/Users/peterbriggs/Downloads/circle_test_formatted.dxf"
+    
     try:
         shapes = processor.process_dxf(dxf_path)
-        print(f"Processed {len(shapes)} shapes from {dxf_path}")
         
+        print(f"Found {len(shapes)} shapes:")
         for shape_name, points in shapes.items():
             print(f"{shape_name}: {len(points)} points")
             if points:
-                x_coords = [p[0] for p in points]
-                y_coords = [p[1] for p in points]
-                print(f"  X range: {min(x_coords):.3f} to {max(x_coords):.3f}")
-                print(f"  Y range: {min(y_coords):.3f} to {max(y_coords):.3f}")
-                
+                print(f"  First point: {points[0]}")
+                print(f"  Last point: {points[-1]}")
+                print(f"  Bounds: X({min(p[0] for p in points):.3f}, {max(p[0] for p in points):.3f}), "
+                      f"Y({min(p[1] for p in points):.3f}, {max(p[1] for p in points):.3f})")
+            print()
+            
     except Exception as e:
         print(f"Error: {e}")
+
 
 if __name__ == "__main__":
     main() 

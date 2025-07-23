@@ -11,12 +11,7 @@ Takes output from DXF processor and generates GCODE with:
 
 import math
 import logging
-import sys
-import os
 from typing import Dict, List, Tuple, Optional
-
-# Add parent directory to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from dxf_processing.dxf_processor import DXFProcessor
 
 # Set up logging
@@ -29,17 +24,17 @@ class ToolpathGenerator:
     """
     
     def __init__(self, 
-                 cutting_height: float = -0.08,  # -0.08 inches = -2mm
-                 safe_height: float = 0.2,  # 0.2 inches = 5mm
-                 corner_angle_threshold: float = 10.0,
+                 cutting_height: float = -2.0,
+                 safe_height: float = 5.0,
+                 corner_angle_threshold: float = 15.0,  # Increased from 5.0 to be less sensitive to curves
                  feed_rate: float = 1000.0,
                  plunge_rate: float = 200.0):
         """
         Initialize the toolpath generator.
         
         Args:
-            cutting_height: Z height when cutting (negative = below surface) in inches
-            safe_height: Z height when moving between cuts (positive = above surface) in inches
+            cutting_height: Z height when cutting (negative = below surface)
+            safe_height: Z height when moving between cuts (positive = above surface)
             corner_angle_threshold: Angle in degrees above which to raise Z at corners
             feed_rate: Feed rate for cutting moves (mm/min)
             plunge_rate: Feed rate for Z plunges (mm/min)
@@ -312,7 +307,7 @@ def main():
     )
     
     # Process DXF file
-    dxf_path = "outputs/test_2.dxf"
+    dxf_path = "test_2.dxf"
     
     try:
         # Get shapes from DXF processor
@@ -328,7 +323,7 @@ def main():
         gcode = toolpath_generator.generate_toolpath(shapes)
         
         # Save GCODE to file
-        output_filename = f"outputs/toolpath_{dxf_path.split('/')[-1].replace('.dxf', '.gcode')}"
+        output_filename = f"toolpath_{dxf_path.split('/')[-1].replace('.dxf', '.gcode')}"
         with open(output_filename, 'w') as f:
             f.write(gcode)
         

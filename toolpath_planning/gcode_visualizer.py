@@ -141,8 +141,8 @@ class GCodeVisualizer:
         
         # Set title and labels
         ax.set_title('Tool Orientation (A-Axis)')
-        ax.set_xlabel('X (mm)')
-        ax.set_ylabel('Y (mm)')
+        ax.set_xlabel('X (inches)')
+        ax.set_ylabel('Y (inches)')
         ax.grid(True, alpha=0.3)
         
         # Make axes equal
@@ -182,7 +182,7 @@ class GCodeVisualizer:
                                   norm=plt.Normalize(vmin=z_min, vmax=z_max))
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax)
-        cbar.set_label('Z Height (mm)')
+        cbar.set_label('Z Height (inches)')
     
     def _plot_tool_orientation(self, ax, x_array, y_array, a_array):
         """Plot tool orientation with direction arrows."""
@@ -218,34 +218,57 @@ class GCodeVisualizer:
         ax.scatter(x_array[-1], y_array[-1], c='red', s=100, marker='s', 
                   label='End', zorder=5)
     
+    def get_statistics(self):
+        """Get statistics about the GCODE file as a dictionary."""
+        if not self.x_positions:
+            return {
+                'total_movements': 0,
+                'corners': 0,
+                'z_changes': 0,
+                'x_range': (0, 0),
+                'y_range': (0, 0),
+                'z_range': (0, 0),
+                'total_path_length': 0
+            }
+        
+        x_array = np.array(self.x_positions)
+        y_array = np.array(self.y_positions)
+        z_array = np.array(self.z_positions)
+        
+        # Calculate total path length
+        total_length = 0
+        for i in range(len(x_array) - 1):
+            dx = x_array[i+1] - x_array[i]
+            dy = y_array[i+1] - y_array[i]
+            total_length += np.sqrt(dx**2 + dy**2)
+        
+        return {
+            'total_movements': len(self.x_positions),
+            'corners': len(self.corner_points),
+            'z_changes': len(self.z_changes),
+            'x_range': (float(x_array.min()), float(x_array.max())),
+            'y_range': (float(y_array.min()), float(y_array.max())),
+            'z_range': (float(z_array.min()), float(z_array.max())),
+            'total_path_length': float(total_length)
+        }
+    
     def print_statistics(self):
         """Print statistics about the GCODE file."""
         if not self.x_positions:
             print("No data to analyze")
             return
         
-        print("\n=== GCODE Analysis ===")
-        print(f"Total movements: {len(self.x_positions)}")
-        print(f"Corners detected: {len(self.corner_points)}")
-        print(f"Z-height changes: {len(self.z_changes)}")
+        stats = self.get_statistics()
         
-        if self.x_positions:
-            x_array = np.array(self.x_positions)
-            y_array = np.array(self.y_positions)
-            z_array = np.array(self.z_positions)
-            
-            print(f"\nX range: {x_array.min():.2f} to {x_array.max():.2f} mm")
-            print(f"Y range: {y_array.min():.2f} to {y_array.max():.2f} mm")
-            print(f"Z range: {z_array.min():.2f} to {z_array.max():.2f} mm")
-            
-            # Calculate total path length
-            total_length = 0
-            for i in range(len(x_array) - 1):
-                dx = x_array[i+1] - x_array[i]
-                dy = y_array[i+1] - y_array[i]
-                total_length += np.sqrt(dx**2 + dy**2)
-            
-            print(f"Total path length: {total_length:.2f} mm")
+        print("\n=== GCODE Analysis ===")
+        print(f"Total movements: {stats['total_movements']}")
+        print(f"Corners detected: {stats['corners']}")
+        print(f"Z-height changes: {stats['z_changes']}")
+        
+        print(f"\nX range: {stats['x_range'][0]:.2f} to {stats['x_range'][1]:.2f} inches")
+        print(f"Y range: {stats['y_range'][0]:.2f} to {stats['y_range'][1]:.2f} inches")
+        print(f"Z range: {stats['z_range'][0]:.2f} to {stats['z_range'][1]:.2f} inches")
+        print(f"Total path length: {stats['total_path_length']:.2f} inches")
 
 
 def main():
