@@ -14,7 +14,6 @@ import platform
 import time
 import math
 import tkinter.filedialog as filedialog
-import tkinter.messagebox as messagebox
 import re
 from typing import List, Tuple, Optional, Dict
 
@@ -1084,7 +1083,8 @@ class FabricCNCApp:
     def _import_dxf(self):
         """Import DXF file using the new DXF processor."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
-            messagebox.showerror("Missing Dependencies", "DXF processing modules not available. Please install required dependencies.")
+            logger.error("DXF processing modules not available. Please install required dependencies.")
+            self.status_label.configure(text="Missing DXF dependencies", text_color="red")
             return
         
         initial_dir = os.path.expanduser("~/Desktop/DXF")
@@ -1096,12 +1096,9 @@ class FabricCNCApp:
             # Process DXF using the new processor (now works entirely in inches)
             self.processed_shapes = self.dxf_processor.process_dxf(file_path)
             
-            # Center the shapes in the build area with 1" buffer
-            if self.processed_shapes:
-                self._center_shapes_in_build_area()
-            
             if not self.processed_shapes:
-                messagebox.showerror("DXF Import Error", "No shapes found in DXF file.")
+                logger.error("No shapes found in DXF file.")
+                self.status_label.configure(text="No shapes found in DXF", text_color="red")
                 return
             
             # Store the file path for later use
@@ -1118,94 +1115,17 @@ class FabricCNCApp:
             logger.info(f"  - File: {file_path}")
             logger.info(f"  - Shapes found: {len(self.processed_shapes)}")
             
-            # Show shape information
-            shape_info = []
-            for shape_name, points in self.processed_shapes.items():
-                shape_info.append(f"{shape_name}: {len(points)} points")
-            
-            messagebox.showinfo("DXF Import Success", 
-                              f"Successfully imported DXF file.\n\n"
-                              f"Shapes found: {len(self.processed_shapes)}\n\n"
-                              f"Shapes:\n" + "\n".join(shape_info))
+            # Update status label
+            self.status_label.configure(text=f"DXF imported: {len(self.processed_shapes)} shapes", text_color="green")
             
             # Redraw canvas to show imported shapes
             self._draw_canvas()
             
         except Exception as e:
             logger.error(f"Failed to load DXF: {e}")
-            messagebox.showerror("DXF Import Error", str(e))
+            self.status_label.configure(text=f"DXF import failed: {str(e)}", text_color="red")
     
-    def _center_shapes_in_build_area(self):
-        """Center all shapes in the build area with 1" buffer."""
-        if not self.processed_shapes:
-            return
-        
-        # Get build area dimensions (in inches)
-        build_width = config.APP_CONFIG['X_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
-        build_height = config.APP_CONFIG['Y_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
-        
-        # Calculate available area (build area minus 1" buffer on each side)
-        available_width = build_width - 2.0  # 1" buffer on each side
-        available_height = build_height - 2.0  # 1" buffer on each side
-        
-        # Find the bounds of all shapes
-        all_x_coords = []
-        all_y_coords = []
-        for points in self.processed_shapes.values():
-            if points:
-                x_coords = [p[0] for p in points]
-                y_coords = [p[1] for p in points]
-                all_x_coords.extend(x_coords)
-                all_y_coords.extend(y_coords)
-        
-        if not all_x_coords or not all_y_coords:
-            return
-        
-        # Calculate current bounds
-        min_x = min(all_x_coords)
-        max_x = max(all_x_coords)
-        min_y = min(all_y_coords)
-        max_y = max(all_y_coords)
-        
-        current_width = max_x - min_x
-        current_height = max_y - min_y
-        
-        # Calculate scale to fit in available area
-        scale_x = available_width / current_width if current_width > 0 else 1.0
-        scale_y = available_height / current_height if current_height > 0 else 1.0
-        scale = min(scale_x, scale_y, 1.0)  # Don't scale up, only down if needed
-        
-        # Calculate center of current shapes
-        center_x = (min_x + max_x) / 2
-        center_y = (min_y + max_y) / 2
-        
-        # Calculate center of available area
-        target_center_x = build_width / 2
-        target_center_y = build_height / 2
-        
-        # Calculate translation
-        translate_x = target_center_x - center_x
-        translate_y = target_center_y - center_y
-        
-        # Apply transformation to all shapes
-        transformed_shapes = {}
-        for shape_name, points in self.processed_shapes.items():
-            transformed_points = []
-            for x, y in points:
-                # Scale and translate
-                new_x = (x - center_x) * scale + target_center_x
-                new_y = (y - center_y) * scale + target_center_y
-                transformed_points.append((new_x, new_y))
-            transformed_shapes[shape_name] = transformed_points
-        
-        self.processed_shapes = transformed_shapes
-        
-        logger.info(f"Centered shapes in build area:")
-        logger.info(f"  Build area: {build_width:.1f}\" x {build_height:.1f}\"")
-        logger.info(f"  Available area: {available_width:.1f}\" x {available_height:.1f}\"")
-        logger.info(f"  Original bounds: ({min_x:.1f}, {min_y:.1f}) to ({max_x:.1f}, {max_y:.1f})")
-        logger.info(f"  Scale applied: {scale:.3f}")
-        logger.info(f"  Translation: ({translate_x:.1f}, {translate_y:.1f})")
+
 
     def _get_dxf_extents_inches(self):
         # Use normalized points for extents
@@ -1268,11 +1188,13 @@ class FabricCNCApp:
     def _generate_toolpath(self):
         """Generate toolpath using the new toolpath generator."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
-            messagebox.showerror("Missing Dependencies", "Toolpath generation modules not available.")
+            logger.error("Toolpath generation modules not available.")
+            self.status_label.configure(text="Missing toolpath dependencies", text_color="red")
             return
         
         if not self.processed_shapes:
-            messagebox.showwarning("No DXF", "Import a DXF file first.")
+            logger.warning("No DXF imported. Import a DXF file first.")
+            self.status_label.configure(text="Import DXF first", text_color="orange")
             return
         
         try:
@@ -1280,7 +1202,8 @@ class FabricCNCApp:
             self.generated_gcode = self.toolpath_generator.generate_toolpath(self.processed_shapes)
             
             if not self.generated_gcode:
-                messagebox.showerror("Toolpath Generation Error", "Failed to generate G-code.")
+                logger.error("Failed to generate G-code.")
+                self.status_label.configure(text="Toolpath generation failed", text_color="red")
                 return
             
             # Save G-code to file
@@ -1303,18 +1226,15 @@ class FabricCNCApp:
             logger.info(f"  - Total lines: {total_lines}")
             logger.info(f"  - Corners detected: {corner_count}")
             
-            messagebox.showinfo("Toolpath Generation Success", 
-                              f"Successfully generated toolpath.\n\n"
-                              f"G-code file: {self.gcode_file_path}\n"
-                              f"Total lines: {total_lines}\n"
-                              f"Corners detected: {corner_count}")
+            # Update status label
+            self.status_label.configure(text=f"Toolpath generated: {total_lines} lines, {corner_count} corners", text_color="green")
             
             # Redraw canvas to show toolpath
             self._draw_canvas()
             
         except Exception as e:
             logger.error(f"Failed to generate toolpath: {e}")
-            messagebox.showerror("Toolpath Generation Error", str(e))
+            self.status_label.configure(text=f"Toolpath generation failed: {str(e)}", text_color="red")
     
     def _detect_circle_from_splines(self, splines):
         """
@@ -1397,11 +1317,13 @@ class FabricCNCApp:
     def _preview_toolpath(self):
         """Preview toolpath with arrows and corner analysis in the main GUI."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
-            messagebox.showerror("Missing Dependencies", "G-code visualization modules not available.")
+            logger.error("G-code visualization modules not available.")
+            self.status_label.configure(text="Missing visualization dependencies", text_color="red")
             return
         
         if not self.gcode_file_path or not os.path.exists(self.gcode_file_path):
-            messagebox.showwarning("No G-code", "Generate a toolpath first.")
+            logger.warning("No G-code file. Generate a toolpath first.")
+            self.status_label.configure(text="Generate toolpath first", text_color="orange")
             return
         
         try:
@@ -1411,16 +1333,14 @@ class FabricCNCApp:
             # Redraw canvas to show toolpath
             self._draw_canvas()
             
-            # Show preview info
+            # Update status with preview info
             corner_count = len(self.toolpath_data.get('corners', []))
-            messagebox.showinfo("Preview Created", 
-                              f"Toolpath preview displayed in main GUI.\n\n"
-                              f"Corners detected: {corner_count}\n"
-                              f"Toolpath length: {len(self.toolpath_data.get('positions', []))} points")
+            point_count = len(self.toolpath_data.get('positions', []))
+            self.status_label.configure(text=f"Preview: {point_count} points, {corner_count} corners", text_color="green")
             
         except Exception as e:
             logger.error(f"Failed to create toolpath preview: {e}")
-            messagebox.showerror("Preview Error", str(e))
+            self.status_label.configure(text=f"Preview failed: {str(e)}", text_color="red")
     
     def _parse_gcode_for_preview(self, gcode_file_path: str):
         """Parse GCODE file and extract toolpath data for canvas display."""
@@ -1492,19 +1412,13 @@ class FabricCNCApp:
     def _run_toolpath(self):
         """Run toolpath using the new G-code executor."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
-            messagebox.showerror("Missing Dependencies", "G-code execution modules not available.")
+            logger.error("G-code execution modules not available.")
+            self.status_label.configure(text="Missing execution dependencies", text_color="red")
             return
         
         if not self.gcode_file_path or not os.path.exists(self.gcode_file_path):
-            messagebox.showwarning("No G-code", "Generate a toolpath first.")
-            return
-        
-        # Confirm execution
-        result = messagebox.askyesno("Run Toolpath", 
-                                   "Are you sure you want to run the toolpath?\n\n"
-                                   "This will move the machine according to the generated G-code.\n"
-                                   "Make sure the machine is properly set up and safe to operate.")
-        if not result:
+            logger.warning("No G-code file. Generate a toolpath first.")
+            self.status_label.configure(text="Generate toolpath first", text_color="orange")
             return
         
         try:
@@ -1519,21 +1433,23 @@ class FabricCNCApp:
                     self.gcode_executor.execute_gcode_file(self.gcode_file_path, progress_callback)
                     logger.info("G-code execution completed successfully")
                     
-                    # Show completion message
-                    self.root.after(0, lambda: messagebox.showinfo("Execution Complete", 
-                                                                 "Toolpath execution completed successfully."))
+                    # Update completion status
+                    self.root.after(0, lambda: self.status_label.configure(text="Toolpath execution completed", text_color="green"))
                     
                 except Exception as e:
                     logger.error(f"G-code execution failed: {e}")
-                    self.root.after(0, lambda: messagebox.showerror("Execution Error", str(e)))
+                    self.root.after(0, lambda: self.status_label.configure(text=f"Execution failed: {str(e)}", text_color="red"))
             
             # Start execution thread
             execution_thread = threading.Thread(target=execute_gcode, daemon=True)
             execution_thread.start()
             
+            # Update status to show execution started
+            self.status_label.configure(text="Toolpath execution started", text_color="blue")
+            
         except Exception as e:
             logger.error(f"Failed to start G-code execution: {e}")
-            messagebox.showerror("Execution Error", str(e))
+            self.status_label.configure(text=f"Failed to start execution: {str(e)}", text_color="red")
     
     def _update_execution_progress(self, progress, status):
         """Update UI with execution progress."""
@@ -1543,27 +1459,22 @@ class FabricCNCApp:
     def _stop_execution(self):
         """Stop G-code execution."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
-            messagebox.showerror("Missing Dependencies", "G-code execution modules not available.")
+            logger.error("G-code execution modules not available.")
+            self.status_label.configure(text="Missing execution dependencies", text_color="red")
             return
         
         if not self.gcode_executor or not self.gcode_executor.is_executing:
-            messagebox.showinfo("No Execution", "No G-code execution is currently running.")
-            return
-        
-        # Confirm stop
-        result = messagebox.askyesno("Stop Execution", 
-                                   "Are you sure you want to stop the current G-code execution?\n\n"
-                                   "This will halt the machine movement immediately.")
-        if not result:
+            logger.info("No G-code execution is currently running.")
+            self.status_label.configure(text="No execution running", text_color="orange")
             return
         
         try:
             self.gcode_executor.stop_execution()
             logger.info("G-code execution stopped by user")
-            messagebox.showinfo("Execution Stopped", "G-code execution has been stopped.")
+            self.status_label.configure(text="Execution stopped", text_color="orange")
         except Exception as e:
             logger.error(f"Failed to stop G-code execution: {e}")
-            messagebox.showerror("Stop Error", str(e))
+            self.status_label.configure(text=f"Stop failed: {str(e)}", text_color="red")
 
     def _travel_to_start(self, x_mm, y_mm):
         """Travel from home to the start position of the toolpath."""
