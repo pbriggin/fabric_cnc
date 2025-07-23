@@ -11,11 +11,13 @@ Takes output from DXF processor and generates GCODE with:
 
 import math
 import logging
-from typing import Dict, List, Tuple, Optional
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'dxf_processing'))
-from dxf_processor import DXFProcessor
+from typing import Dict, List, Tuple, Optional
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from dxf_processing.dxf_processor import DXFProcessor
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -310,7 +312,7 @@ def main():
     )
     
     # Process DXF file
-    dxf_path = "../outputs/test_2.dxf"
+    dxf_path = "outputs/test_2.dxf"
     
     try:
         # Get shapes from DXF processor
@@ -326,7 +328,7 @@ def main():
         gcode = toolpath_generator.generate_toolpath(shapes)
         
         # Save GCODE to file
-        output_filename = f"../outputs/toolpath_{dxf_path.split('/')[-1].replace('.dxf', '.gcode')}"
+        output_filename = f"outputs/toolpath_{dxf_path.split('/')[-1].replace('.dxf', '.gcode')}"
         with open(output_filename, 'w') as f:
             f.write(gcode)
         
