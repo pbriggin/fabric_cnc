@@ -24,8 +24,8 @@ class ToolpathGenerator:
     """
     
     def __init__(self, 
-                 cutting_height: float = -2.0,
-                 safe_height: float = 5.0,
+                 cutting_height: float = -1.0,  # Changed from -2.0 to -1.0 inches to stay within machine limits
+                 safe_height: float = -0.5,
                  corner_angle_threshold: float = 15.0,  # Increased from 5.0 to be less sensitive to curves
                  feed_rate: float = 1000.0,
                  plunge_rate: float = 200.0):
@@ -90,7 +90,6 @@ class ToolpathGenerator:
         """Generate GCODE footer."""
         return [
             "",
-            f"G0 Z{self.safe_height} ; Move to safe height",
             "G28 ; Home all axes",
             "M2 ; End program"
         ]
@@ -118,6 +117,12 @@ class ToolpathGenerator:
         # Start at first point
         first_point = points[0]
         gcode_lines.append(f"G0 X{first_point[0]:.3f} Y{first_point[1]:.3f} ; Move to start")
+        
+        # Set initial Z rotation for first segment
+        if len(points) > 1:
+            first_z_rotation = self._calculate_z_rotation(first_point, points[1])
+            gcode_lines.append(f"G0 A{first_z_rotation:.3f} ; Set initial cutting wheel angle")
+        
         gcode_lines.append(f"G0 Z{self.cutting_height} ; Plunge to cutting height")
         
         # Process each segment
@@ -135,43 +140,22 @@ class ToolpathGenerator:
             z_rotation = self._calculate_z_rotation(current_point, next_point)
             
             if should_raise_z:
-                # Raise Z, rotate Z, move to next point, then plunge
+                # For corners: raise Z, rotate angle, lower Z, move to next point
                 gcode_lines.append(f"G0 Z{self.safe_height} ; Raise Z for corner")
                 gcode_lines.append(f"G0 A{z_rotation:.3f} ; Rotate Z for corner")
-                gcode_lines.append(f"G0 X{next_point[0]:.3f} Y{next_point[1]:.3f} ; Move to next point")
                 gcode_lines.append(f"G1 Z{self.cutting_height} F{self.plunge_rate} ; Lower Z to cutting height")
+                gcode_lines.append(f"G0 X{next_point[0]:.3f} Y{next_point[1]:.3f} ; Move to next point")
             else:
-                # Direct move to next point (Z stays at cutting height)
-                gcode_lines.append(f"G1 X{next_point[0]:.3f} Y{next_point[1]:.3f} A{z_rotation:.3f} F{self.feed_rate} ; Cut to next point")
+                # For curves: direct cut to next point (Z stays at cutting height)
+                gcode_lines.append(f"G1 X{next_point[0]:.3f} Y{next_point[1]:.3f} F{self.feed_rate} ; Cut to next point")
         
-        # If shape is closed, handle the last segment
-        if len(points) > 2:
-            last_point = points[-1]
-            first_point = points[0]
-            
-            # Check if shape is closed (last point close to first point)
-            distance = math.sqrt((last_point[0] - first_point[0])**2 + (last_point[1] - first_point[1])**2)
-            logger.info(f"Shape closure distance: {distance}")
-            if distance < 0.001:  # Shape is closed
-                # For closed shapes, check the second-to-last point for the corner
-                # (the transition from curve to final straight line)
-                second_to_last_index = len(points) - 2
-                should_raise_z = self._is_genuine_corner(points, second_to_last_index)
-                logger.info(f"Should raise Z for closed shape: {should_raise_z}")
-                
-                # Calculate Z rotation for the final segment
-                z_rotation = self._calculate_z_rotation(last_point, first_point)
-                
-                if should_raise_z:
-                    gcode_lines.append(f"G0 Z{self.safe_height} ; Raise Z for final corner")
-                    gcode_lines.append(f"G0 A{z_rotation:.3f} ; Rotate Z for final corner")
-                    gcode_lines.append(f"G0 X{first_point[0]:.3f} Y{first_point[1]:.3f} ; Move to start")
-                    gcode_lines.append(f"G1 Z{self.cutting_height} F{self.plunge_rate} ; Lower Z to cutting height")
-                else:
-                    gcode_lines.append(f"G1 X{first_point[0]:.3f} Y{first_point[1]:.3f} A{z_rotation:.3f} F{self.feed_rate} ; Close shape")
+        # For closed shapes, the main loop already handles all segments correctly
+        # No additional handling needed
         
-        # Raise Z at end of shape
-        gcode_lines.append(f"G0 Z{self.safe_height} ; Raise Z after shape")
+        # Raise tool to safe height before homing
+        gcode_lines.append(f"G0 Z{self.safe_height} ; Raise tool to safe height")
+        
+        # Add blank line for spacing
         gcode_lines.append("")
         
         return gcode_lines
@@ -274,6 +258,7 @@ class ToolpathGenerator:
     def _calculate_z_rotation(self, point1: Tuple[float, float], point2: Tuple[float, float]) -> float:
         """
         Calculate Z rotation angle to make cutting blade parallel to line segment.
+        Tool starts parallel to Y-axis, so we need to adjust by 90 degrees.
         
         Args:
             point1: First point (x, y)
@@ -291,7 +276,10 @@ class ToolpathGenerator:
         # Convert to degrees
         angle_degrees = math.degrees(angle_radians)
         
-        return angle_degrees
+        # Adjust for tool starting parallel to Y-axis (add 90 degrees)
+        adjusted_angle = angle_degrees + 90.0
+        
+        return adjusted_angle
 
 
 def main():
@@ -299,9 +287,9 @@ def main():
     # Initialize processors
     dxf_processor = DXFProcessor()
     toolpath_generator = ToolpathGenerator(
-        cutting_height=-2.0,
-        safe_height=5.0,
-        corner_angle_threshold=2.0,
+        cutting_height=-1.0,
+        safe_height=-0.75,
+        corner_angle_threshold=5.0,
         feed_rate=1000.0,
         plunge_rate=200.0
     )
