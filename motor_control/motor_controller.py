@@ -1290,7 +1290,7 @@ class MotorController:
             self._step_motor('ROT', config['HOME_DIRECTION'] < 0, fine_speed)
         
         # Move away from home position to clear sensor and allow movement
-        for _ in range(728):  # Move 728 steps (82 degrees) away from home - updated for 3200 PULSES_PER_REV
+        for _ in range(720):  # Move 720 steps (81.0 degrees) away from home - reduced by 1.0 degrees total
             self._step_motor('ROT', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
         
         # Reset rotation position to 0 after homing
