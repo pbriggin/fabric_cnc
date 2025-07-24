@@ -141,10 +141,10 @@ class StepByStepExecutor:
             
             print(f"Linear move: delta({delta_x:.2f}, {delta_y:.2f}, {delta_z:.2f}, {delta_rot:.2f})")
             self.motor_ctrl.move_coordinated(
-                x_distance_mm=delta_x,
-                y_distance_mm=delta_y,
-                z_distance_mm=delta_z,
-                rot_distance_mm=delta_rot
+                x_distance_inch=delta_x,
+                y_distance_inch=delta_y,
+                z_distance_inch=delta_z,
+                rot_distance_deg=delta_rot
             )
             self.executor.current_position = target.copy()
             
@@ -167,11 +167,11 @@ def main():
         "G28",           # Home all axes
         "G0 Z5.0",       # Move to safe height
         "G0 X1.0 Y1.0",  # Move to start position
-        "G0 Z-1.0",      # Plunge to cutting height
+        "G0 Z-1.35",      # Plunge to cutting height
         "G1 X2.0 Y2.0",  # Cut to next position
         "G0 Z5.0",       # Raise to safe height
         "G0 X1.0 Y1.0",  # Move back to start
-        "G0 Z-1.0",      # Plunge again
+        "G0 Z-1.35",      # Plunge again
         "G0 Z5.0",       # Raise to safe height
     ]
     

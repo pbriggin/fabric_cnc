@@ -46,7 +46,7 @@ class MotorController:
         self._stop_requested = False
         self._current_movement = None
         
-        # Position tracking for each axis (in mm/degrees)
+        # Position tracking for each axis (in inches/degrees)
         self._current_positions = {
             'X': 0.0,
             'Y': 0.0,
@@ -311,14 +311,21 @@ class MotorController:
             # For rotation, each step is 360 degrees / PULSES_PER_REV
             step_distance = 360.0 / config['PULSES_PER_REV']
         else:
-            # For linear axes, each step is MM_PER_REV / PULSES_PER_REV
-            step_distance = config['MM_PER_REV'] / config['PULSES_PER_REV']
+            # For linear axes, each step is INCH_PER_REV / PULSES_PER_REV
+            step_distance = config['INCH_PER_REV'] / config['PULSES_PER_REV']
+        
+        # Store previous position for logging
+        prev_position = self._current_positions[motor]
         
         # Update position based on direction
         if direction:
             self._current_positions[motor] += step_distance
         else:
             self._current_positions[motor] -= step_distance
+        
+        # Log rotation position changes for debugging (only significant changes)
+        if motor == 'ROT' and abs(self._current_positions[motor] - prev_position) > 1.0:
+            logger.info(f"ROT step: {prev_position:.3f}° -> {self._current_positions[motor]:.3f}° (step={step_distance:.3f}°, dir={'+' if direction else '-'})")
 
     def _step_y_axis(self, direction, delay):
         """Step both Y motors together to maintain sync."""
@@ -386,7 +393,7 @@ class MotorController:
         if not y1_homed or not y2_homed:
             self._update_position('Y', direction)
 
-    def move_distance(self, distance_mm, axis='X'):
+    def move_distance(self, distance_inch, axis='X'):
         """Move the specified distance with acceleration/deceleration."""
         try:
             # Set current movement and reset stop flag
@@ -394,13 +401,13 @@ class MotorController:
             self._stop_requested = False
             
             if axis == 'X':
-                self._move_x(distance_mm)
+                self._move_x(distance_inch)
             elif axis == 'Y':
-                self._move_y(distance_mm)
+                self._move_y(distance_inch)
             elif axis == 'Z':
-                self._move_z(distance_mm)
+                self._move_z(distance_inch)
             elif axis == 'ROT':
-                self._move_rot(distance_mm)
+                self._move_rot(distance_inch)
             else:
                 raise ValueError(f"Invalid axis: {axis}")
             
@@ -424,7 +431,7 @@ class MotorController:
     def execute_continuous_toolpath(self, toolpath_points):
         """
         Execute a continuous toolpath without stopping between points.
-        toolpath_points: List of (x_mm, y_mm, rot_deg, z_mm) tuples
+        toolpath_points: List of (x_inch, y_inch, rot_deg, z_inch) tuples
         """
         try:
             # Set current movement and reset stop flag
@@ -461,10 +468,10 @@ class MotorController:
                 
                 # Execute coordinated movement to next point
                 self.move_coordinated(
-                    x_distance_mm=delta_x,
-                    y_distance_mm=delta_y,
-                    z_distance_mm=delta_z,
-                    rot_distance_mm=delta_rot
+                    x_distance_inch=delta_x,
+                    y_distance_inch=delta_y,
+                    z_distance_inch=delta_z,
+                    rot_distance_deg=delta_rot
                 )
                 
                 # Update current position
@@ -481,47 +488,41 @@ class MotorController:
         finally:
             self._current_movement = None
 
-    def move_coordinated(self, x_distance_mm=0, y_distance_mm=0, z_distance_mm=0, rot_distance_mm=0):
+    def move_coordinated(self, x_distance_inch=0, y_distance_inch=0, z_distance_inch=0, rot_distance_deg=0):
         """Move all axes simultaneously in a coordinated manner for smooth motion."""
         try:
             # Set current movement and reset stop flag
             self._current_movement = 'COORDINATED'
             self._stop_requested = False
             
-            # The parameters are already in millimeters, no conversion needed
-            # (The method signature suggests mm, and the calling code should provide mm)
-            INCHES_TO_MM = 25.4  # Keep this for safety limits
-            # x_distance_mm = x_distance_mm * INCHES_TO_MM
-            # y_distance_mm = y_distance_mm * INCHES_TO_MM
-            # z_distance_mm = z_distance_mm * INCHES_TO_MM
-            # Note: Rotation is typically in degrees, not inches, so don't convert
-            
-            # Z-axis safety limits (in mm)
-            Z_UP_LIMIT_MM = 0.5 * INCHES_TO_MM     # 0.5 inches up
-            Z_DOWN_LIMIT_MM = -1.0 * INCHES_TO_MM  # 1.0 inches down
+            # Z-axis safety limits (in inches)
+            Z_UP_LIMIT_INCH = 0.5     # 0.5 inches up
+            Z_DOWN_LIMIT_INCH = -1.35  # 1.35 inches down
             
             # Check absolute position limits (not just distance)
-            current_z_mm = self._current_positions['Z']
-            target_z_mm = current_z_mm + z_distance_mm
+            current_z_inch = self._current_positions['Z']
+            target_z_inch = current_z_inch + z_distance_inch
             
             # Check if target position would exceed limits
-            if target_z_mm > Z_UP_LIMIT_MM:
-                logger.warning(f"Z target position {target_z_mm:.2f}mm ({target_z_mm/INCHES_TO_MM:.2f}in) exceeds up limit of {Z_UP_LIMIT_MM:.2f}mm - limiting movement")
-                z_distance_mm = Z_UP_LIMIT_MM - current_z_mm
-            elif target_z_mm < Z_DOWN_LIMIT_MM:
-                logger.warning(f"Z target position {target_z_mm:.2f}mm ({target_z_mm/INCHES_TO_MM:.2f}in) exceeds down limit of {Z_DOWN_LIMIT_MM:.2f}mm - limiting movement")
-                z_distance_mm = Z_DOWN_LIMIT_MM - current_z_mm
+            if target_z_inch > Z_UP_LIMIT_INCH:
+                logger.warning(f"Z target position {target_z_inch:.2f}in exceeds up limit of {Z_UP_LIMIT_INCH:.2f}in - limiting movement")
+                z_distance_inch = Z_UP_LIMIT_INCH - current_z_inch
+            elif target_z_inch < Z_DOWN_LIMIT_INCH:
+                logger.warning(f"Z target position {target_z_inch:.2f}in exceeds down limit of {Z_DOWN_LIMIT_INCH:.2f}in - limiting movement")
+                z_distance_inch = Z_DOWN_LIMIT_INCH - current_z_inch
             
-            # Debug: Print movement details
-            logger.info(f"Coordinated movement: X={x_distance_mm:.2f}mm, Y={y_distance_mm:.2f}mm, Z={z_distance_mm:.2f}mm, ROT={rot_distance_mm:.2f}mm")
+            # Debug: Print movement details (only if rotation is significant)
+            if abs(rot_distance_deg) > 0.1:
+                logger.info(f"Coordinated movement: X={x_distance_inch:.2f}in, Y={y_distance_inch:.2f}in, Z={z_distance_inch:.2f}in, ROT={rot_distance_deg:.2f}°")
+                logger.info(f"Current ROT position: {self._current_positions['ROT']:.3f}°, Target ROT: {self._current_positions['ROT'] + rot_distance_deg:.3f}°")
             
             # Handle case where only Z or ROT movement is needed
-            if abs(x_distance_mm) < 1e-6 and abs(y_distance_mm) < 1e-6:
+            if abs(x_distance_inch) < 1e-6 and abs(y_distance_inch) < 1e-6:
                 logger.info("Z/ROT only movement")
-                if abs(z_distance_mm) > 1e-6:
-                    self._move_z(z_distance_mm)
-                if abs(rot_distance_mm) > 1e-6:
-                    self._move_rot(rot_distance_mm)
+                if abs(z_distance_inch) > 1e-6:
+                    self._move_z(z_distance_inch)
+                if abs(rot_distance_deg) > 1e-6:
+                    self._move_rot(rot_distance_deg)
                 return
             
             # Calculate steps for each axis
@@ -530,15 +531,20 @@ class MotorController:
             z_config = self.motors['Z']
             rot_config = self.motors['ROT']
             
-            x_revolutions = abs(x_distance_mm) / x_config['MM_PER_REV']
-            y_revolutions = abs(y_distance_mm) / y_config['MM_PER_REV']
-            z_revolutions = abs(z_distance_mm) / z_config['MM_PER_REV']
-            rot_revolutions = abs(rot_distance_mm) / rot_config['MM_PER_REV']
+            x_revolutions = abs(x_distance_inch) / x_config['INCH_PER_REV']
+            y_revolutions = abs(y_distance_inch) / y_config['INCH_PER_REV']
+            z_revolutions = abs(z_distance_inch) / z_config['INCH_PER_REV']
+            # For rotation, rot_distance_deg is in degrees, so convert to revolutions
+            rot_revolutions = abs(rot_distance_deg) / 360.0  # 360 degrees per revolution
             
-            x_total_steps = int(x_revolutions * x_config['PULSES_PER_REV'])
-            y_total_steps = int(y_revolutions * y_config['PULSES_PER_REV'])
-            z_total_steps = int(z_revolutions * z_config['PULSES_PER_REV'])
-            rot_total_steps = int(rot_revolutions * rot_config['PULSES_PER_REV'])
+            x_total_steps = int(round(x_revolutions * x_config['PULSES_PER_REV']))
+            y_total_steps = int(round(y_revolutions * y_config['PULSES_PER_REV']))
+            z_total_steps = int(round(z_revolutions * z_config['PULSES_PER_REV']))
+            rot_total_steps = int(round(rot_revolutions * rot_config['PULSES_PER_REV']))
+            
+            # Debug rotation step calculation (only if rotation is significant)
+            if abs(rot_distance_deg) > 0.1:
+                logger.info(f"ROT step calculation: distance={rot_distance_deg:.6f}°, revolutions={rot_revolutions:.6f}, PULSES_PER_REV={rot_config['PULSES_PER_REV']}, total_steps={rot_total_steps}")
             
             # Use the largest number of steps to determine the movement duration
             max_steps = max(x_total_steps, y_total_steps, z_total_steps, rot_total_steps)
@@ -552,8 +558,9 @@ class MotorController:
             z_step_ratio = z_total_steps / max_steps if max_steps > 0 else 0
             rot_step_ratio = rot_total_steps / max_steps if max_steps > 0 else 0
             
-            # Debug: Print step calculations
-            logger.info(f"Step calculations: X={x_total_steps}, Y={y_total_steps}, Z={z_total_steps}, ROT={rot_total_steps}, max_steps={max_steps}")
+            # Debug: Print step calculations (only if rotation is significant)
+            if rot_total_steps > 0:
+                logger.info(f"Step calculations: X={x_total_steps}, Y={y_total_steps}, Z={z_total_steps}, ROT={rot_total_steps}, max_steps={max_steps}")
             
             # Enhanced acceleration parameters for smoother motion
             # Use more aggressive acceleration for better 3D printer-like motion
@@ -570,7 +577,9 @@ class MotorController:
             z_step_counter = 0
             rot_step_counter = 0
             
-            logger.info(f"Starting coordinated movement: X={x_distance_mm:.2f}mm, Y={y_distance_mm:.2f}mm, Z={z_distance_mm:.2f}mm, ROT={rot_distance_mm:.2f}mm")
+            # Only log if rotation is significant
+            if abs(rot_distance_deg) > 0.1:
+                logger.info(f"Starting coordinated movement: X={x_distance_inch:.2f}in, Y={y_distance_inch:.2f}in, Z={z_distance_inch:.2f}in, ROT={rot_distance_deg:.2f}°")
             
             for i in range(max_steps):
                 # Check if stop was requested
@@ -595,13 +604,13 @@ class MotorController:
                 
                 # Check sensors before moving (X and Y only) - only if moving toward home
                 # During normal operation, sensors should only trigger when moving toward home
-                if x_distance_mm < 0 and self._check_sensor('X'):
+                if x_distance_inch < 0 and self._check_sensor('X'):
                     logger.warning("X sensor triggered during movement toward home - stopping")
                     break
-                if y_distance_mm < 0 and self._check_sensor('Y1'):
+                if y_distance_inch < 0 and self._check_sensor('Y1'):
                     logger.warning("Y1 sensor triggered during movement toward home - stopping")
                     break
-                if y_distance_mm < 0 and self._check_sensor('Y2'):
+                if y_distance_inch < 0 and self._check_sensor('Y2'):
                     logger.warning("Y2 sensor triggered during movement toward home - stopping")
                     break
                 
@@ -637,13 +646,13 @@ class MotorController:
                 
                 # Step motors with coordinated timing
                 if should_step_x:
-                    self._step_motor('X', x_distance_mm > 0, delay)
+                    self._step_motor('X', x_distance_inch > 0, delay)
                 if should_step_y:
-                    self._step_y_axis(y_distance_mm > 0, delay)
+                    self._step_y_axis(y_distance_inch > 0, delay)
                 if should_step_z:
-                    self._step_motor('Z', z_distance_mm > 0, delay)
+                    self._step_motor('Z', z_distance_inch > 0, delay)
                 if should_step_rot:
-                    self._step_motor('ROT', rot_distance_mm < 0, delay)  # Inverted for rotation
+                    self._step_motor('ROT', rot_distance_deg < 0, delay)  # Inverted for rotation
                 
                 # Progress logging (less frequent for performance)
                 if i % 5000 == 0 and i > 0:
@@ -670,12 +679,12 @@ class MotorController:
 
 
 
-    def _move_x(self, distance_mm):
+    def _move_x(self, distance_inch):
         """Move X axis the specified distance."""
         config = self.motors['X']
         
-        # Convert mm to steps (use absolute value for step count)
-        revolutions = abs(distance_mm) / config['MM_PER_REV']
+        # Convert inches to steps (use absolute value for step count)
+        revolutions = abs(distance_inch) / config['INCH_PER_REV']
         total_steps = int(revolutions * config['PULSES_PER_REV'])
         
         # Acceleration parameters
@@ -699,22 +708,22 @@ class MotorController:
                 delay = config['STEP_DELAY']
             
             # Check sensor before moving - only if moving toward home
-            if distance_mm < 0 and self._check_sensor('X'):
+            if distance_inch < 0 and self._check_sensor('X'):
                 logger.warning("X sensor triggered during movement toward home - stopping")
                 break
             
-            # Step motor (direction is determined by distance_mm > 0)
-            self._step_motor('X', distance_mm > 0, delay)
+            # Step motor (direction is determined by distance_inch > 0)
+            self._step_motor('X', distance_inch > 0, delay)
             
             # Comment out or remove per-step logger.info statements
             # logger.info(f"X Step {i}/{total_steps}")
 
-    def _move_y(self, distance_mm):
+    def _move_y(self, distance_inch):
         """Move Y axis the specified distance."""
         config = self.motors['Y1']  # Use Y1 config for calculations
         
-        # Convert mm to steps (use absolute value for step count)
-        revolutions = abs(distance_mm) / config['MM_PER_REV']
+        # Convert inches to steps (use absolute value for step count)
+        revolutions = abs(distance_inch) / config['INCH_PER_REV']
         total_steps = int(revolutions * config['PULSES_PER_REV'])
         
         # Acceleration parameters
@@ -738,39 +747,38 @@ class MotorController:
                 delay = config['STEP_DELAY']
             
             # Check sensors before moving - only if moving toward home
-            if distance_mm < 0 and (self._check_sensor('Y1') or self._check_sensor('Y2')):
+            if distance_inch < 0 and (self._check_sensor('Y1') or self._check_sensor('Y2')):
                 logger.warning("Y sensor triggered during movement toward home - stopping")
                 break
             
-            # Step both Y motors together (direction is determined by distance_mm > 0)
-            self._step_y_axis(distance_mm > 0, delay)
+            # Step both Y motors together (direction is determined by distance_inch > 0)
+            self._step_y_axis(distance_inch > 0, delay)
             
             # Comment out or remove per-step logger.info statements
             # logger.info(f"Y Step {i}/{total_steps}")
 
-    def _move_z(self, distance_mm):
+    def _move_z(self, distance_inch):
         """Move Z axis the specified distance."""
         config = self.motors['Z']
         
-        # Z-axis safety limits (in mm)
-        INCHES_TO_MM = 25.4
-        Z_UP_LIMIT_MM = 0.5 * INCHES_TO_MM     # 0.5 inches up
-        Z_DOWN_LIMIT_MM = -1.0 * INCHES_TO_MM  # 1.0 inches down
+        # Z-axis safety limits (in inches)
+        Z_UP_LIMIT_INCH = 0.5     # 0.5 inches up
+        Z_DOWN_LIMIT_INCH = -1.35  # 1.35 inches down
         
         # Check absolute position limits (not just distance)
-        current_z_mm = self._current_positions['Z']
-        target_z_mm = current_z_mm + distance_mm
+        current_z_inch = self._current_positions['Z']
+        target_z_inch = current_z_inch + distance_inch
         
         # Check if target position would exceed limits
-        if target_z_mm > Z_UP_LIMIT_MM:
-            logger.warning(f"Z target position {target_z_mm:.2f}mm ({target_z_mm/INCHES_TO_MM:.2f}in) exceeds up limit of {Z_UP_LIMIT_MM:.2f}mm - limiting movement")
-            distance_mm = Z_UP_LIMIT_MM - current_z_mm
-        elif target_z_mm < Z_DOWN_LIMIT_MM:
-            logger.warning(f"Z target position {target_z_mm:.2f}mm ({target_z_mm/INCHES_TO_MM:.2f}in) exceeds down limit of {Z_DOWN_LIMIT_MM:.2f}mm - limiting movement")
-            distance_mm = Z_DOWN_LIMIT_MM - current_z_mm
+        if target_z_inch > Z_UP_LIMIT_INCH:
+            logger.warning(f"Z target position {target_z_inch:.2f}in exceeds up limit of {Z_UP_LIMIT_INCH:.2f}in - limiting movement")
+            distance_inch = Z_UP_LIMIT_INCH - current_z_inch
+        elif target_z_inch < Z_DOWN_LIMIT_INCH:
+            logger.warning(f"Z target position {target_z_inch:.2f}in exceeds down limit of {Z_DOWN_LIMIT_INCH:.2f}in - limiting movement")
+            distance_inch = Z_DOWN_LIMIT_INCH - current_z_inch
         
-        # Convert mm to steps (use absolute value for step count)
-        revolutions = abs(distance_mm) / config['MM_PER_REV']
+        # Convert inches to steps (use absolute value for step count)
+        revolutions = abs(distance_inch) / config['INCH_PER_REV']
         total_steps = int(revolutions * config['PULSES_PER_REV'])
         
         # Check if sensor is triggered at start - allow movement away from home even if sensor is triggered
@@ -778,7 +786,7 @@ class MotorController:
         if sensor_triggered:
             logger.warning("Z sensor is triggered - allowing movement away from home")
             # Only prevent movement if trying to move toward home (negative distance for Z)
-            if distance_mm < 0:
+            if distance_inch < 0:
                 logger.error("Z sensor is triggered - cannot move Z toward home.")
                 return
         
@@ -803,19 +811,19 @@ class MotorController:
                 delay = config['STEP_DELAY']
             
             # Check sensor during movement - only stop if moving toward home and sensor is triggered
-            if distance_mm < 0 and self._check_sensor('Z'):
+            if distance_inch < 0 and self._check_sensor('Z'):
                 logger.warning("Z sensor triggered during movement toward home - stopping")
                 break
             
-            # Step motor (direction is determined by distance_mm > 0)
-            self._step_motor('Z', distance_mm > 0, delay)
+            # Step motor (direction is determined by distance_inch > 0)
+            self._step_motor('Z', distance_inch > 0, delay)
 
-    def _move_rot(self, distance_mm):
+    def _move_rot(self, distance_deg):
         """Move rotation axis the specified distance (degrees)."""
         config = self.motors['ROT']
         
         # Convert degrees to steps (use absolute value for step count)
-        revolutions = abs(distance_mm) / config['MM_PER_REV']  # MM_PER_REV is 360 for rotation
+        revolutions = abs(distance_deg) / config['INCH_PER_REV']  # INCH_PER_REV is 360 for rotation
         total_steps = int(revolutions * config['PULSES_PER_REV'])
         
         # Acceleration parameters
@@ -838,8 +846,8 @@ class MotorController:
             else:
                 delay = config['STEP_DELAY']
             
-            # Step motor (direction is determined by distance_mm > 0, inverted for rotation)
-            self._step_motor('ROT', distance_mm < 0, delay)
+            # Step motor (direction is determined by distance_deg > 0, inverted for rotation)
+            self._step_motor('ROT', distance_deg < 0, delay)
 
     def home_axis(self, axis='X'):
         """Home the specified axis."""
@@ -1088,44 +1096,29 @@ class MotorController:
             # if step_count % 1000 == 0:  # Log every 1000 steps
             #     logger.info(f"Z homing: {step_count} steps completed, sensor still not triggered")
         
-        logger.info(f"Z sensor triggered after {step_count} steps")
-        
         # Move back significantly to clear sensor
-        logger.info("Moving back to clear sensor...")
         for _ in range(1000):  # Much more aggressive back-off for Z axis to ensure sensors are cleared
             self._step_motor('Z', config['HOME_DIRECTION'] > 0, config['HOME_SPEED'])
         
         # Move forward very slowly until sensor is triggered again (fine approach)
-        logger.info("Fine approach to home position...")
         fine_speed = 0.005  # Much slower speed for fine approach (5ms between pulses)
         approach_step_count = 0
         while not self._check_sensor('Z'):
             self._step_motor('Z', config['HOME_DIRECTION'] < 0, fine_speed)
             approach_step_count += 1
-            if approach_step_count % 100 == 0:  # Log every 100 steps
-                logger.info(f"Z fine approach: {approach_step_count} steps completed")
-        
-        logger.info(f"Z fine approach completed after {approach_step_count} steps")
         
         # Move back slightly again to clear sensor for second approach
-        logger.info("Moving back for second approach...")
         for _ in range(100):  # Minimal back-off for second approach
             self._step_motor('Z', config['HOME_DIRECTION'] > 0, config['HOME_SPEED'])
         
         # Second fine approach to verify sensor position
-        logger.info("Second fine approach to verify home position...")
         second_approach_step_count = 0
         fast_fine_speed = 0.002  # Faster speed for second approach (2ms between pulses)
         while not self._check_sensor('Z'):
             self._step_motor('Z', config['HOME_DIRECTION'] < 0, fast_fine_speed)
             second_approach_step_count += 1
-            if second_approach_step_count % 100 == 0:  # Log every 100 steps
-                logger.info(f"Z second fine approach: {second_approach_step_count} steps completed")
-        
-        logger.info(f"Z second fine approach completed after {second_approach_step_count} steps")
         
         # Move away from home position to clear sensor and allow movement
-        logger.info("Moving away from home position...")
         for _ in range(2000):  # Much more aggressive final back-off for Z axis to provide maximum clearance
             self._step_motor('Z', config['HOME_DIRECTION'] > 0, config['HOME_SPEED'])
         
@@ -1146,29 +1139,24 @@ class MotorController:
             self._step_motor('ROT', config['HOME_DIRECTION'] < 0, config['HOME_SPEED'])
         
         # Move back slightly to clear sensor
-        logger.info("Moving back to clear sensor...")
         for _ in range(100):  # Reduced back-off to clear sensor
             self._step_motor('ROT', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
         
         # Move forward very slowly until sensor is triggered again (fine approach)
-        logger.info("Fine approach to home position...")
         fine_speed = 0.005  # Much slower speed for fine approach (5ms between pulses)
         while not self._check_sensor('ROT'):
             self._step_motor('ROT', config['HOME_DIRECTION'] < 0, fine_speed)
         
         # Move back slightly again to clear sensor for second approach
-        logger.info("Moving back for second approach...")
         for _ in range(100):  # Smaller back-off for second approach
             self._step_motor('ROT', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
         
         # Second fine approach to verify sensor position
-        logger.info("Second fine approach to verify home position...")
         while not self._check_sensor('ROT'):
             self._step_motor('ROT', config['HOME_DIRECTION'] < 0, fine_speed)
         
         # Move away from home position to clear sensor and allow movement
-        logger.info("Moving away from home position...")
-        for _ in range(355):  # Move 355 steps (80 degrees) away from home - updated for 1600 PULSES_PER_REV
+        for _ in range(728):  # Move 728 steps (82 degrees) away from home - updated for 3200 PULSES_PER_REV
             self._step_motor('ROT', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
         
         # Reset rotation position to 0 after homing
@@ -1181,7 +1169,7 @@ class MotorController:
         logger.info("Stop movement requested")
     
     def get_position(self):
-        """Get current position in mm/degrees."""
+        """Get current position in inches/degrees."""
         return self._current_positions.copy()
     
     def set_position(self, x=None, y=None, z=None, rot=None):
@@ -1209,20 +1197,19 @@ class MotorController:
             z: Target Z position in inches
             rot: Target rotation in degrees
         """
-        # Get current position (in mm)
+        # Get current position (in inches)
         current_pos = self.get_position()
         
-        # Convert target positions from inches to mm for distance calculation
-        INCHES_TO_MM = 25.4
-        x_mm = x * INCHES_TO_MM if x is not None else None
-        y_mm = y * INCHES_TO_MM if y is not None else None
-        z_mm = z * INCHES_TO_MM if z is not None else None
+        # Motor controller now works in inches directly
+        x_inch = x if x is not None else None
+        y_inch = y if y is not None else None
+        z_inch = z if z is not None else None
         rot_deg = rot  # Rotation stays in degrees
         
         # Calculate distances to move (in inches for move_coordinated)
-        x_distance = (x - current_pos['X']/INCHES_TO_MM) if x is not None else 0
-        y_distance = (y - current_pos['Y']/INCHES_TO_MM) if y is not None else 0
-        z_distance = (z - current_pos['Z']/INCHES_TO_MM) if z is not None else 0
+        x_distance = (x - current_pos['X']) if x is not None else 0
+        y_distance = (y - current_pos['Y']) if y is not None else 0
+        z_distance = (z - current_pos['Z']) if z is not None else 0
         rot_distance = (rot_deg - current_pos['ROT']) if rot_deg is not None else 0
         
         # Execute coordinated movement (pass distances in inches)

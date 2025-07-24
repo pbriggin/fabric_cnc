@@ -27,7 +27,7 @@ class MotorConfig:
     step_pin: int
     en_pin: int
     name: str
-    steps_per_mm: float
+    steps_per_inch: float
     direction_inverted: bool = False
     hall_pin: Optional[int] = None
 
@@ -57,7 +57,7 @@ class StepperMotor:
         self.gpio = gpio or GPIO
         self.simulation_mode = simulation_mode
         self._enabled = False
-        self._current_position = 0.0  # mm
+        self._current_position = 0.0  # inches
         
         if not self.simulation_mode and self.gpio:
             self._setup_gpio()
@@ -109,7 +109,7 @@ class StepperMotor:
                 time.sleep(0.001)  # 1ms delay
                 
                 # Update position
-                step_distance = 1.0 / self.config.steps_per_mm
+                step_distance = 1.0 / self.config.steps_per_inch
                 if direction:
                     self._current_position += step_distance
                 else:
@@ -121,24 +121,24 @@ class StepperMotor:
         else:
             logger.debug(f"Simulated step for {self.config.name} motor")
 
-    def move_mm(self, direction: bool, distance_mm: float, speed_mm_s: float) -> None:
+    def move_inch(self, direction: bool, distance_inch: float, speed_inch_s: float) -> None:
         """Move the motor by a specified distance.
         
         Args:
             direction: True for forward, False for reverse
-            distance_mm: Distance to move in millimeters
-            speed_mm_s: Speed in millimeters per second
+            distance_inch: Distance to move in inches
+            speed_inch_s: Speed in inches per second
         """
-        if distance_mm <= 0:
+        if distance_inch <= 0:
             raise ValueError("Distance must be positive")
             
-        if speed_mm_s <= 0:
+        if speed_inch_s <= 0:
             raise ValueError("Speed must be positive")
             
-        steps = int(distance_mm * self.config.steps_per_mm)
+        steps = int(distance_inch * self.config.steps_per_inch)
         logger.info(
             f"Moving {self.config.name} motor "
-            f"{'forward' if direction else 'reverse'} {distance_mm}mm "
+            f"{'forward' if direction else 'reverse'} {distance_inch}in "
             f"({steps} steps)"
         )
         
@@ -147,17 +147,17 @@ class StepperMotor:
             
         logger.info(
             f"Moved {self.config.name} motor "
-            f"{'forward' if direction else 'reverse'} {distance_mm}mm"
+            f"{'forward' if direction else 'reverse'} {distance_inch}in"
         )
 
     def get_position(self) -> float:
-        """Get current position in millimeters."""
+        """Get current position in inches."""
         return self._current_position
 
     def set_position(self, position: float) -> None:
-        """Set current position in millimeters."""
+        """Set current position in inches."""
         self._current_position = position
-        logger.info(f"Set {self.config.name} motor position to {position}mm")
+        logger.info(f"Set {self.config.name} motor position to {position}in")
 
     def cleanup(self) -> None:
         """Clean up GPIO resources."""
@@ -197,24 +197,24 @@ class YAxisController:
         self.y1_motor.step(direction)
         self.y2_motor.step(direction)
         
-    def move_mm(self, direction: bool, distance_mm: float, speed_mm_s: float) -> None:
+    def move_inch(self, direction: bool, distance_inch: float, speed_inch_s: float) -> None:
         """Move both motors by a specified distance.
         
         Args:
             direction: True for forward, False for reverse
-            distance_mm: Distance to move in millimeters
-            speed_mm_s: Speed in millimeters per second
+            distance_inch: Distance to move in inches
+            speed_inch_s: Speed in inches per second
         """
-        if distance_mm <= 0:
+        if distance_inch <= 0:
             raise ValueError("Distance must be positive")
             
-        if speed_mm_s <= 0:
+        if speed_inch_s <= 0:
             raise ValueError("Speed must be positive")
             
-        steps = int(distance_mm * self.y1_motor.config.steps_per_mm)
+        steps = int(distance_inch * self.y1_motor.config.steps_per_inch)
         logger.info(
             f"Moving Y-axis "
-            f"{'forward' if direction else 'reverse'} {distance_mm}mm "
+            f"{'forward' if direction else 'reverse'} {distance_inch}in "
             f"({steps} steps)"
         )
         
@@ -223,18 +223,18 @@ class YAxisController:
             
         logger.info(
             f"Moved Y-axis "
-            f"{'forward' if direction else 'reverse'} {distance_mm}mm"
+            f"{'forward' if direction else 'reverse'} {distance_inch}in"
         )
         
     def get_position(self) -> float:
-        """Get current Y-axis position in millimeters."""
+        """Get current Y-axis position in inches."""
         return (self.y1_motor.get_position() + self.y2_motor.get_position()) / 2
         
     def set_position(self, position: float) -> None:
-        """Set current Y-axis position in millimeters."""
+        """Set current Y-axis position in inches."""
         self.y1_motor.set_position(position)
         self.y2_motor.set_position(position)
-        logger.info(f"Set Y-axis position to {position}mm")
+        logger.info(f"Set Y-axis position to {position}in")
         
     def cleanup(self) -> None:
         """Clean up GPIO resources."""

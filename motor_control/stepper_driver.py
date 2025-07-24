@@ -63,7 +63,7 @@ class StepperDriver:
         self.simulation_mode = simulation_mode
         
         # Motor state
-        self.position = 0.0  # Current position in mm or degrees
+        self.position = 0.0  # Current position in inches or degrees
         self.state = MotorState.IDLE
         self.enabled = False
         self.last_error = None
@@ -169,7 +169,7 @@ class StepperDriver:
         
         if self.simulation_mode:
             # Update position in simulation
-            step_distance = 1.0 / self.config.steps_per_mm
+            step_distance = 1.0 / self.config.steps_per_inch
             if self.config.steps_per_deg:
                 step_distance = 1.0 / self.config.steps_per_deg
             
@@ -196,7 +196,7 @@ class StepperDriver:
                 time.sleep(delay / 2)
                 
                 # Update position
-                step_distance = 1.0 / self.config.steps_per_mm
+                step_distance = 1.0 / self.config.steps_per_inch
                 if self.config.steps_per_deg:
                     step_distance = 1.0 / self.config.steps_per_deg
                 
@@ -216,8 +216,8 @@ class StepperDriver:
         """Move to a target position.
         
         Args:
-            target_position: Target position in mm or degrees
-            speed: Speed in mm/s or deg/s
+            target_position: Target position in inches or degrees
+            speed: Speed in inches/s or deg/s
             callback: Optional callback function(status, progress)
         """
         if self._movement_thread and self._movement_thread.is_alive():
@@ -258,13 +258,13 @@ class StepperDriver:
                 steps_per_second = speed * self.config.steps_per_deg
             else:
                 # Linear movement
-                steps_per_second = speed * self.config.steps_per_mm
+                steps_per_second = speed * self.config.steps_per_inch
             
             step_delay = 1.0 / steps_per_second if steps_per_second > 0 else 0.001
             
             # Execute movement
             steps_executed = 0
-            total_steps = int(total_distance * (self.config.steps_per_mm or self.config.steps_per_deg))
+            total_steps = int(total_distance * (self.config.steps_per_inch or self.config.steps_per_deg))
             
             while steps_executed < total_steps and not self._stop_requested:
                 self.step(direction, 1, step_delay)
@@ -325,7 +325,7 @@ class StepperDriver:
         """Home the axis.
         
         Args:
-            speed: Homing speed in mm/s or deg/s
+            speed: Homing speed in inches/s or deg/s
             callback: Optional callback function(status, progress)
         """
         if self._movement_thread and self._movement_thread.is_alive():
@@ -353,7 +353,7 @@ class StepperDriver:
             
             # Move until hall sensor is triggered
             homing_direction = Direction.REVERSE  # Default homing direction
-            step_delay = 1.0 / (speed * (self.config.steps_per_mm or self.config.steps_per_deg))
+            step_delay = 1.0 / (speed * (self.config.steps_per_inch or self.config.steps_per_deg))
             
             while not self.read_hall_sensor() and not self._stop_requested:
                 self.step(homing_direction, 1, step_delay)
@@ -367,11 +367,12 @@ class StepperDriver:
                 return
             
             # Move offset distance
-            offset = config_manager.machine_config.homing.offset
+            from config import MACHINE_CONFIG
+            offset = MACHINE_CONFIG['HOMING_OFFSET']
             if self.config.steps_per_deg:
                 offset_steps = int(offset * self.config.steps_per_deg)
             else:
-                offset_steps = int(offset * self.config.steps_per_mm)
+                offset_steps = int(offset * self.config.steps_per_inch)
             
             for _ in range(offset_steps):
                 if self._stop_requested:

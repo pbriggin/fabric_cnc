@@ -44,6 +44,15 @@ class SmoothMotionExecutor:
             self.is_executing = True
             self.stop_requested = False
             
+            # Sync with actual motor controller position before parsing
+            logger.info("Attempting to sync with motor controller position...")
+            if hasattr(self.motor_controller, 'get_position'):
+                actual_pos = self.motor_controller.get_position()
+                self.current_position = actual_pos.copy()
+                logger.info(f"ROT position synced: {actual_pos['ROT']:.3f}°")
+            else:
+                logger.warning("Motor controller has no get_position method - using default position")
+            
             # Parse GCODE into motion segments
             motion_segments = self._parse_gcode_to_segments(gcode_lines)
             
@@ -101,21 +110,25 @@ class SmoothMotionExecutor:
                 }
                 
             elif command == 'G1':  # Linear interpolation (smooth motion)
-                if current_segment and current_segment['type'] == 'linear':
-                    # Continue current linear segment
-                    current_segment['target_pos'] = self._calculate_target_position(params)
-                else:
-                    # Start new linear segment
-                    if current_segment:
-                        segments.append(current_segment)
-                    
-                    current_segment = {
-                        'type': 'linear',
-                        'start_pos': self.current_position.copy(),
-                        'target_pos': self._calculate_target_position(params),
-                        'is_corner': False,  # G1 moves are smooth
-                        'line_number': line_num + 1
-                    }
+                # Always create a new segment for each G1 command
+                if current_segment:
+                    segments.append(current_segment)
+                
+                target_pos = self._calculate_target_position(params)
+                current_segment = {
+                    'type': 'linear',
+                    'start_pos': self.current_position.copy(),
+                    'target_pos': target_pos,
+                    'is_corner': False,  # G1 moves are smooth
+                    'line_number': line_num + 1
+                }
+                
+                # Debug: Log segment creation for rotation (only significant changes)
+                rot_delta = target_pos['ROT'] - self.current_position['ROT']
+                if abs(rot_delta) > 0.1:
+                    logger.info(f"Segment {line_num + 1}: ROT {self.current_position['ROT']:.3f}° -> {target_pos['ROT']:.3f}° (delta={rot_delta:.3f}°)")
+                elif 'A' in params:
+                    logger.info(f"Segment {line_num + 1}: ROT no change - current={self.current_position['ROT']:.3f}°, target={target_pos['ROT']:.3f}° (delta={rot_delta:.6f}°)")
             
             elif command == 'G28':  # Home
                 if current_segment:
@@ -190,8 +203,15 @@ class SmoothMotionExecutor:
                 continue
             elif axis == 'A':  # Map GCODE 'A' to internal 'ROT'
                 target_pos['ROT'] = value
+                logger.debug(f"GCODE A={value:.3f}° -> ROT={value:.3f}°")
             else:
                 target_pos[axis] = value
+        
+        # Log position changes for debugging (only significant changes)
+        if 'A' in params and abs(target_pos['ROT'] - self.current_position.get('ROT', 0)) > 0.1:
+            current_rot = self.current_position.get('ROT', 0)
+            rot_change = target_pos['ROT'] - current_rot
+            logger.info(f"Position calculation: Current ROT={current_rot:.3f}° -> Target ROT={target_pos['ROT']:.3f}° (change={rot_change:.3f}°)")
         
         return target_pos
     
@@ -267,6 +287,11 @@ class SmoothMotionExecutor:
             # Debug print for Z position comparison
             if abs(target_pos['Z'] - actual_pos['Z']) > 0.001:
                 print(f"*** Z POSITION MISMATCH: Target={target_pos['Z']:.3f}, Actual={actual_pos['Z']:.3f} ***")
+            
+            # Debug print for ROT position comparison
+            if abs(target_pos['ROT'] - actual_pos['ROT']) > 0.1:
+                print(f"*** ROT POSITION MISMATCH: Target={target_pos['ROT']:.3f}°, Actual={actual_pos['ROT']:.3f}° ***")
+                logger.warning(f"ROT position drift detected: Expected {target_pos['ROT']:.3f}°, Got {actual_pos['ROT']:.3f}°")
         else:
             self.current_position = target_pos.copy()
     
@@ -281,14 +306,20 @@ class SmoothMotionExecutor:
         delta_z = target_pos['Z'] - start_pos['Z']
         delta_rot = target_pos['ROT'] - start_pos['ROT']
         
-        logger.info(f"LINEAR: ({start_pos['X']:.1f},{start_pos['Y']:.1f},{start_pos['Z']:.1f},{start_pos['ROT']:.1f}) -> ({target_pos['X']:.1f},{target_pos['Y']:.1f},{target_pos['Z']:.1f},{target_pos['ROT']:.1f}) = delta({delta_x:.2f},{delta_y:.2f},{delta_z:.2f},{delta_rot:.2f})")
+        # Only log if rotation is significant
+        if abs(delta_rot) > 0.1:
+            logger.info(f"LINEAR: ({start_pos['X']:.1f},{start_pos['Y']:.1f},{start_pos['Z']:.1f},{start_pos['ROT']:.1f}) -> ({target_pos['X']:.1f},{target_pos['Y']:.1f},{target_pos['Z']:.1f},{target_pos['ROT']:.1f}) = delta({delta_x:.2f},{delta_y:.2f},{delta_z:.2f},{delta_rot:.2f})")
+        
+        # Debug: Log the deltas being passed to move_coordinated (only if rotation is significant)
+        if abs(delta_rot) > 0.1:
+            logger.info(f"LINEAR deltas: X={delta_x:.6f}, Y={delta_y:.6f}, Z={delta_z:.6f}, ROT={delta_rot:.6f}°")
         
         # Execute smooth coordinated movement
         self.motor_controller.move_coordinated(
-            x_distance_mm=delta_x,
-            y_distance_mm=delta_y,
-            z_distance_mm=delta_z,
-            rot_distance_mm=delta_rot
+            x_distance_inch=delta_x,
+            y_distance_inch=delta_y,
+            z_distance_inch=delta_z,
+            rot_distance_deg=delta_rot
         )
         
         # Sync with actual motor controller position after movement
@@ -300,6 +331,11 @@ class SmoothMotionExecutor:
             # Debug print for Z position comparison
             if abs(target_pos['Z'] - actual_pos['Z']) > 0.001:
                 print(f"*** Z POSITION MISMATCH: Target={target_pos['Z']:.3f}, Actual={actual_pos['Z']:.3f} ***")
+            
+            # Debug print for ROT position comparison
+            if abs(target_pos['ROT'] - actual_pos['ROT']) > 0.1:
+                print(f"*** ROT POSITION MISMATCH: Target={target_pos['ROT']:.3f}°, Actual={actual_pos['ROT']:.3f}° ***")
+                logger.warning(f"ROT position drift detected: Expected {target_pos['ROT']:.3f}°, Got {actual_pos['ROT']:.3f}°")
         else:
             self.current_position = target_pos.copy()
     

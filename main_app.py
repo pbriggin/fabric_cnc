@@ -153,11 +153,11 @@ class SimulatedMotorController:
 
     def _clamp(self, axis, value):
         if axis == 'X':
-            return max(-config.APP_CONFIG['X_MAX_MM'], min(value, config.APP_CONFIG['X_MAX_MM']))  # Allow negative X positions
+            return max(-config.APP_CONFIG['X_MAX_INCH'], min(value, config.APP_CONFIG['X_MAX_INCH']))  # Allow negative X positions
         elif axis == 'Y':
-            return max(-config.APP_CONFIG['Y_MAX_MM'], min(value, config.APP_CONFIG['Y_MAX_MM']))  # Allow negative Y positions
+            return max(-config.APP_CONFIG['Y_MAX_INCH'], min(value, config.APP_CONFIG['Y_MAX_INCH']))  # Allow negative Y positions
         elif axis == 'Z':
-            return max(0.0, min(value, config.APP_CONFIG['Z_MAX_MM']))  # Keep Z positive only
+            return max(0.0, min(value, config.APP_CONFIG['Z_MAX_INCH']))  # Keep Z positive only
         else:
             return value
 
@@ -165,7 +165,7 @@ class SimulatedMotorController:
         with self.lock:
             new_val = self.position[axis] + delta
             self.position[axis] = self._clamp(axis, new_val)
-            logger.info(f"Jogged {axis} by {delta}mm. New pos: {self.position[axis]:.2f}")
+            logger.info(f"Jogged {axis} by {delta}in. New pos: {self.position[axis]:.2f}")
 
     def home(self, axis):
         with self.lock:
@@ -222,13 +222,13 @@ class SimulatedMotorController:
     def stop_movement(self):
         pass
 
-    def move_coordinated(self, x_distance_mm=0, y_distance_mm=0, z_distance_mm=0, rot_distance_mm=0):
+    def move_coordinated(self, x_distance_inch=0, y_distance_inch=0, z_distance_inch=0, rot_distance_deg=0):
         """Execute coordinated movement across multiple axes (simulated)."""
         with self.lock:
-            self.position['X'] += x_distance_mm
-            self.position['Y'] += y_distance_mm
-            self.position['Z'] += z_distance_mm
-            self.position['ROT'] += rot_distance_mm
+            self.position['X'] += x_distance_inch
+            self.position['Y'] += y_distance_inch
+            self.position['Z'] += z_distance_inch
+            self.position['ROT'] += rot_distance_deg
             logger.info(f"Simulated coordinated movement: X={self.position['X']:.2f}, Y={self.position['Y']:.2f}, Z={self.position['Z']:.2f}, ROT={self.position['ROT']:.2f}")
 
 # --- Real Motor Controller Wrapper ---
@@ -241,11 +241,11 @@ class RealMotorController:
 
     def _clamp(self, axis, value):
         if axis == 'X':
-            return max(-config.APP_CONFIG['X_MAX_MM'], min(value, config.APP_CONFIG['X_MAX_MM']))  # Allow negative X positions
+            return max(-config.APP_CONFIG['X_MAX_INCH'], min(value, config.APP_CONFIG['X_MAX_INCH']))  # Allow negative X positions
         elif axis == 'Y':
-            return max(-config.APP_CONFIG['Y_MAX_MM'], min(value, config.APP_CONFIG['Y_MAX_MM']))  # Allow negative Y positions
+            return max(-config.APP_CONFIG['Y_MAX_INCH'], min(value, config.APP_CONFIG['Y_MAX_INCH']))  # Allow negative Y positions
         elif axis == 'Z':
-            return max(-config.APP_CONFIG['Z_MAX_MM'], min(value, config.APP_CONFIG['Z_MAX_MM']))  # Allow negative Z positions
+            return max(-config.APP_CONFIG['Z_MAX_INCH'], min(value, config.APP_CONFIG['Z_MAX_INCH']))  # Allow negative Z positions
         else:
             return value
 
@@ -265,7 +265,7 @@ class RealMotorController:
                     elif axis == 'ROT':
                         self.motor_controller.move_distance(move_delta, 'ROT')
                     self.position[axis] = clamped_val
-                    logger.info(f"Jogged {axis} by {move_delta}mm")
+                    logger.info(f"Jogged {axis} by {move_delta}in")
             except Exception as e:
                 logger.error(f"Jog error on {axis}: {e}")
 
@@ -328,14 +328,8 @@ class RealMotorController:
         # Use motor controller's actual position tracking
         if hasattr(self.motor_controller, 'get_position'):
             motor_pos = self.motor_controller.get_position()
-            # Motor controller tracks position in mm internally, but works with inches as input
-            # So we need to convert mm back to inches for consistency
-            return {
-                'X': motor_pos['X'] / 25.4,
-                'Y': motor_pos['Y'] / 25.4,
-                'Z': motor_pos['Z'] / 25.4,
-                'ROT': motor_pos['ROT']
-            }
+            # Motor controller now tracks position in inches internally
+            return motor_pos
         else:
             # Fallback to internal position tracking
             with self.lock:
@@ -407,17 +401,16 @@ class RealMotorController:
         # Use coordinated movement for X and Y, individual for Z and ROT
         if abs(delta_x) > 1e-6 or abs(delta_y) > 1e-6:
             self.move_coordinated(
-                x_distance_mm=delta_x,
-                y_distance_mm=delta_y,
-                z_distance_mm=delta_z,
-                rot_distance_mm=delta_rot
+                x_distance_inch=delta_x,
+                y_distance_inch=delta_y,
+                z_distance_inch=delta_z,
+                rot_distance_deg=delta_rot
             )
         else:
             # Only Z or ROT movement needed
             if abs(delta_z) > 1e-6:
-                # Convert inches to millimeters for move_distance
-                delta_z_mm = delta_z * 25.4
-                self.motor_controller.move_distance(delta_z_mm, 'Z')
+                # Motor controller now works in inches directly
+                self.motor_controller.move_distance(delta_z, 'Z')
             if abs(delta_rot) > 1e-6:
                 self.motor_controller.move_distance(delta_rot, 'ROT')
         
@@ -430,9 +423,9 @@ class RealMotorController:
                 self.position['Y'] = y
             if z is not None:
                 # Check if Z movement was limited by the motor controller
-                # If the target Z position is below -1.0 inches, limit it to -1.0 inches
-                if z < -1.0:  # -1.0 inch limit
-                    actual_z = -1.0  # Limit target to -1.0 inches
+                # If the target Z position is below -1.35 inches, limit it to -1.35 inches
+                if z < -1.35:  # -1.35 inch limit
+                    actual_z = -1.35  # Limit target to -1.35 inches
                     logger.warning(f"Z target limited: requested {z:.2f} inches, actual {actual_z:.2f} inches")
                     self.position['Z'] = actual_z
                 else:
@@ -440,28 +433,23 @@ class RealMotorController:
             if rot is not None:
                 self.position['ROT'] = rot
 
-    def move_coordinated(self, x_distance_mm=0, y_distance_mm=0, z_distance_mm=0, rot_distance_mm=0):
+    def move_coordinated(self, x_distance_inch=0, y_distance_inch=0, z_distance_inch=0, rot_distance_deg=0):
         """Execute coordinated movement across multiple axes."""
         try:
-            # Convert inch distances to millimeters for motor controller
-            x_distance_mm_actual = x_distance_mm * 25.4
-            y_distance_mm_actual = y_distance_mm * 25.4
-            z_distance_mm_actual = z_distance_mm * 25.4
-            rot_distance_mm_actual = rot_distance_mm  # Rotation stays in degrees
-            
+            # Motor controller now works in inches directly
             self.motor_controller.move_coordinated(
-                x_distance_mm=x_distance_mm_actual,
-                y_distance_mm=y_distance_mm_actual,
-                z_distance_mm=z_distance_mm_actual,
-                rot_distance_mm=rot_distance_mm_actual
+                x_distance_inch=x_distance_inch,
+                y_distance_inch=y_distance_inch,
+                z_distance_inch=z_distance_inch,
+                rot_distance_deg=rot_distance_deg
             )
             
             # Update position tracking (use lock only for position update)
             with self.lock:
-                self.position['X'] += x_distance_mm
-                self.position['Y'] += y_distance_mm
-                self.position['Z'] += z_distance_mm
-                self.position['ROT'] += rot_distance_mm
+                self.position['X'] += x_distance_inch
+                self.position['Y'] += y_distance_inch
+                self.position['Z'] += z_distance_inch
+                self.position['ROT'] += rot_distance_deg
             
         except Exception as e:
             logger.error(f"Coordinated movement error: {e}")
@@ -480,7 +468,7 @@ class FabricCNCApp:
             except:
                 pass
         self.root.configure(bg=UI_COLORS['BACKGROUND'])
-        self.jog_speed = 1.0 * config.APP_CONFIG['INCH_TO_MM']  # Default to 1 inch
+        self.jog_speed = 1.0  # Default to 1 inch
         self.jog_speed_var = ctk.DoubleVar(value=1.0)  # Default to 1 inch
         self._jog_slider_scale = 0.1  # Scale factor for slider (0.1 inch increments)
         self._arrow_key_state = {}
@@ -497,7 +485,7 @@ class FabricCNCApp:
         if DXF_TOOLPATH_IMPORTS_AVAILABLE:
             self.dxf_processor = DXFProcessor()
             self.toolpath_generator = ToolpathGenerator(
-                cutting_height=-1.0,  # Fixed: -1.0 inches to stay within machine limits
+                cutting_height=-1.35,  # Updated: -1.35 inches for deeper cuts
                 safe_height=-0.5,  # Safe height is -0.5 inches (above cutting height)
                 corner_angle_threshold=10.0,  # 10-degree threshold
                 feed_rate=1000.0,
@@ -526,6 +514,43 @@ class FabricCNCApp:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         # Force fullscreen after UI setup
         self.root.after(100, lambda: self.root.attributes('-fullscreen', True))
+
+    def _wrap_status_text(self, text, max_chars=20):
+        """Wrap status text at specified character limit to prevent horizontal expansion."""
+        if len(text) <= max_chars:
+            return text
+        
+        # First try word wrapping - try to break at word boundaries
+        words = text.split()
+        lines = []
+        current_line = ""
+        
+        for word in words:
+            # If a single word is longer than max_chars, we need to break it
+            if len(word) > max_chars:
+                # If we have content in current_line, add it to lines first
+                if current_line:
+                    lines.append(current_line)
+                    current_line = ""
+                
+                # Break the long word into chunks
+                for i in range(0, len(word), max_chars):
+                    chunk = word[i:i + max_chars]
+                    lines.append(chunk)
+            elif len(current_line) + len(word) + 1 <= max_chars:
+                if current_line:
+                    current_line += " " + word
+                else:
+                    current_line = word
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+        
+        if current_line:
+            lines.append(current_line)
+        
+        return "\n".join(lines)
 
     def _setup_ui(self):
         # App Bar
@@ -580,7 +605,7 @@ class FabricCNCApp:
         status_section.grid(row=1, column=0, sticky="ew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
         
         ctk.CTkLabel(status_section, text="Status:", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=UI_PADDING['SMALL'])
-        self.status_label = ctk.CTkLabel(status_section, text="Ready", font=("Arial", 16, "bold"), text_color=UI_COLORS['ON_SURFACE'])
+        self.status_label = ctk.CTkLabel(status_section, text="Ready", font=("Arial", 16, "bold"), text_color=UI_COLORS['ON_SURFACE'], wraplength=300)
         self.status_label.pack(pady=UI_PADDING['SMALL'])
 
         # === MIDDLE COLUMN: Plot Canvas ===
@@ -636,8 +661,8 @@ class FabricCNCApp:
         
         # Arrow buttons - stacked layout with equal widths
         self._add_compact_jog_button(motor_section, "↑", lambda: self._jog('Y', +self.jog_speed)).grid(row=1, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
-        self._add_compact_jog_button(motor_section, "←", lambda: self._jog('X', -self.jog_speed)).grid(row=2, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
-        self._add_compact_jog_button(motor_section, "→", lambda: self._jog('X', +self.jog_speed)).grid(row=2, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "←", lambda: self._jog('X', +self.jog_speed)).grid(row=2, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "→", lambda: self._jog('X', -self.jog_speed)).grid(row=2, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
         self._add_compact_jog_button(motor_section, "↓", lambda: self._jog('Y', -self.jog_speed)).grid(row=3, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
         
         # Z and ROT controls
@@ -719,10 +744,10 @@ class FabricCNCApp:
         delta = 0
         if key == 'Left':
             axis = 'X'
-            delta = -self.jog_speed
+            delta = +self.jog_speed
         elif key == 'Right':
             axis = 'X'
-            delta = self.jog_speed
+            delta = -self.jog_speed
         elif key == 'Up':
             axis = 'Y'
             delta = self.jog_speed
@@ -731,10 +756,10 @@ class FabricCNCApp:
             delta = -self.jog_speed
         elif key == 'Page_Up':
             axis = 'Z'
-            delta = 1.0 * config.APP_CONFIG['INCH_TO_MM']  # 1 inch up
+            delta = 1.0  # 1 inch up
         elif key == 'Page_Down':
             axis = 'Z'
-            delta = -1.0 * config.APP_CONFIG['INCH_TO_MM']  # 1 inch down
+            delta = -1.0  # 1 inch down
         elif key == 'Home':
             axis = 'ROT'
             delta = 5.0  # 5 degrees clockwise
@@ -803,8 +828,8 @@ class FabricCNCApp:
         # Draw current tool head position (all axes)
         pos = self.motor_ctrl.get_position()
         # Positions are already in inches, so clamp using inch limits
-        x_max_inches = config.APP_CONFIG['X_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']
-        y_max_inches = config.APP_CONFIG['Y_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']
+        x_max_inches = config.APP_CONFIG['X_MAX_INCH']
+        y_max_inches = config.APP_CONFIG['Y_MAX_INCH']
         x = max(0.0, min(pos['X'], x_max_inches))
         y = max(0.0, min(pos['Y'], y_max_inches))
         clamped_pos = {'X': x, 'Y': y}
@@ -883,8 +908,8 @@ class FabricCNCApp:
         inch_tick = 5
         
         # Configure plot dimensions from config file
-        plot_width_in = config.APP_CONFIG['X_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
-        plot_height_in = config.APP_CONFIG['Y_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
+        plot_width_in = config.APP_CONFIG['X_MAX_INCH']  # Already in inches
+        plot_height_in = config.APP_CONFIG['Y_MAX_INCH']  # Already in inches
         
         # Get buffer from config file
         buffer_px = config.APP_CONFIG['PLOT_BUFFER_PX']
@@ -966,8 +991,8 @@ class FabricCNCApp:
     def _inches_to_canvas(self, x_in, y_in):
         # Convert inches to canvas coordinates with home at bottom-left
         # Configure plot dimensions from config file
-        plot_width_in = config.APP_CONFIG['X_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
-        plot_height_in = config.APP_CONFIG['Y_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
+        plot_width_in = config.APP_CONFIG['X_MAX_INCH']  # Already in inches
+        plot_height_in = config.APP_CONFIG['Y_MAX_INCH']  # Already in inches
         
         # Get buffer from config file
         buffer_px = config.APP_CONFIG['PLOT_BUFFER_PX']
@@ -1218,7 +1243,7 @@ class FabricCNCApp:
         """Import DXF file using the new DXF processor."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("DXF processing modules not available. Please install required dependencies.")
-            self.status_label.configure(text="Missing DXF dependencies", text_color="red")
+            self.status_label.configure(text=self._wrap_status_text("Missing DXF dependencies"), text_color="red")
             return
         
         initial_dir = os.path.expanduser("~/Desktop/DXF")
@@ -1232,7 +1257,7 @@ class FabricCNCApp:
             
             if not self.processed_shapes:
                 logger.error("No shapes found in DXF file.")
-                self.status_label.configure(text="No shapes found in DXF", text_color="red")
+                self.status_label.configure(text=self._wrap_status_text("No shapes found in DXF"), text_color="red")
                 return
             
             # Store the file path for later use
@@ -1250,14 +1275,14 @@ class FabricCNCApp:
             logger.info(f"  - Shapes found: {len(self.processed_shapes)}")
             
             # Update status label
-            self.status_label.configure(text=f"DXF imported: {len(self.processed_shapes)} shapes", text_color="green")
+            self.status_label.configure(text=self._wrap_status_text(f"DXF imported: {len(self.processed_shapes)} shapes"), text_color="green")
             
             # Redraw canvas to show imported shapes
             self._draw_canvas()
             
         except Exception as e:
             logger.error(f"Failed to load DXF: {e}")
-            self.status_label.configure(text=f"DXF import failed: {str(e)}", text_color="red")
+            self.status_label.configure(text=self._wrap_status_text(f"DXF import failed: {str(e)}"), text_color="red")
     
 
 
@@ -1323,12 +1348,12 @@ class FabricCNCApp:
         """Generate toolpath using the new toolpath generator."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("Toolpath generation modules not available.")
-            self.status_label.configure(text="Missing toolpath dependencies", text_color="red")
+            self.status_label.configure(text=self._wrap_status_text("Missing toolpath dependencies"), text_color="red")
             return
         
         if not self.processed_shapes:
             logger.warning("No DXF imported. Import a DXF file first.")
-            self.status_label.configure(text="Import DXF first", text_color="orange")
+            self.status_label.configure(text=self._wrap_status_text("Import DXF first"), text_color="orange")
             return
         
         try:
@@ -1337,7 +1362,7 @@ class FabricCNCApp:
             
             if not self.generated_gcode:
                 logger.error("Failed to generate G-code.")
-                self.status_label.configure(text="Toolpath generation failed", text_color="red")
+                self.status_label.configure(text=self._wrap_status_text("Toolpath generation failed"), text_color="red")
                 return
             
             # Create timestamp for filename
@@ -1367,14 +1392,14 @@ class FabricCNCApp:
             logger.info(f"  - Corners detected: {corner_count}")
             
             # Update status label
-            self.status_label.configure(text=f"Toolpath generated: {total_lines} lines, {corner_count} corners", text_color="green")
+            self.status_label.configure(text=self._wrap_status_text(f"Toolpath generated: {total_lines} lines, {corner_count} corners"), text_color="green")
             
             # Redraw canvas to show toolpath
             self._draw_canvas()
             
         except Exception as e:
             logger.error(f"Failed to generate toolpath: {e}")
-            self.status_label.configure(text=f"Toolpath generation failed: {str(e)}", text_color="red")
+            self.status_label.configure(text=self._wrap_status_text(f"Toolpath generation failed: {str(e)}"), text_color="red")
     
     def _generate_toolpath_internal(self):
         """Internal method to generate toolpath without UI status updates."""
@@ -1506,12 +1531,12 @@ class FabricCNCApp:
         """Preview toolpath with arrows and corner analysis in the main GUI."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("G-code visualization modules not available.")
-            self.status_label.configure(text="Missing visualization dependencies", text_color="red")
+            self.status_label.configure(text=self._wrap_status_text("Missing visualization dependencies"), text_color="red")
             return
         
         if not self.processed_shapes:
             logger.warning("No DXF imported. Import a DXF file first.")
-            self.status_label.configure(text="Import DXF first", text_color="orange")
+            self.status_label.configure(text=self._wrap_status_text("Import DXF first"), text_color="orange")
             return
         
         try:
@@ -1528,11 +1553,11 @@ class FabricCNCApp:
             # Update status with preview info
             corner_count = len(self.toolpath_data.get('corners', []))
             point_count = len(self.toolpath_data.get('positions', []))
-            self.status_label.configure(text=f"Preview saved: {os.path.basename(self.gcode_file_path)}", text_color="green")
+            self.status_label.configure(text=self._wrap_status_text(f"Preview saved: {os.path.basename(self.gcode_file_path)}"), text_color="green")
             
         except Exception as e:
             logger.error(f"Failed to create toolpath preview: {e}")
-            self.status_label.configure(text=f"Preview failed: {str(e)}", text_color="red")
+            self.status_label.configure(text=self._wrap_status_text(f"Preview failed: {str(e)}"), text_color="red")
     
     def _parse_gcode_for_preview(self, gcode_file_path: str):
         """Parse GCODE file and extract toolpath data for canvas display."""
@@ -1605,12 +1630,12 @@ class FabricCNCApp:
         """Run toolpath using the new G-code executor."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("G-code execution modules not available.")
-            self.status_label.configure(text="Missing execution dependencies", text_color="red")
+            self.status_label.configure(text=self._wrap_status_text("Missing execution dependencies"), text_color="red")
             return
         
         if not self.gcode_file_path or not os.path.exists(self.gcode_file_path):
             logger.warning("No G-code file. Generate a toolpath first.")
-            self.status_label.configure(text="Generate toolpath first", text_color="orange")
+            self.status_label.configure(text=self._wrap_status_text("Generate toolpath first"), text_color="orange")
             return
         
         try:
@@ -1634,22 +1659,22 @@ class FabricCNCApp:
                     logger.info("Smooth motion execution completed successfully")
                     
                     # Update UI on completion
-                    self.root.after(0, lambda: self.status_label.configure(text="Execution completed", text_color="green"))
+                    self.root.after(0, lambda: self.status_label.configure(text=self._wrap_status_text("Execution completed"), text_color="green"))
                 except Exception as e:
                     logger.error(f"Error during smooth motion execution: {e}")
                     error_msg = str(e)
-                    self.root.after(0, lambda: self.status_label.configure(text=f"Execution failed: {error_msg}", text_color="red"))
+                    self.root.after(0, lambda: self.status_label.configure(text=self._wrap_status_text(f"Execution failed: {error_msg}"), text_color="red"))
             
             # Start execution thread
             execution_thread = threading.Thread(target=execute_gcode, daemon=True)
             execution_thread.start()
             
             # Update status to show execution started
-            self.status_label.configure(text="Toolpath execution started", text_color="blue")
+            self.status_label.configure(text=self._wrap_status_text("Toolpath execution started"), text_color="blue")
             
         except Exception as e:
             logger.error(f"Failed to start G-code execution: {e}")
-            self.status_label.configure(text=f"Failed to start execution: {str(e)}", text_color="red")
+            self.status_label.configure(text=self._wrap_status_text(f"Failed to start execution: {str(e)}"), text_color="red")
     
     def _add_gcode_debug_prints(self, gcode_lines):
         """Add debug prints to compare G-code positions with motor controller positions."""
@@ -1714,32 +1739,32 @@ class FabricCNCApp:
         """Stop G-code execution."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("G-code execution modules not available.")
-            self.status_label.configure(text="Missing execution dependencies", text_color="red")
+            self.status_label.configure(text=self._wrap_status_text("Missing execution dependencies"), text_color="red")
             return
         
         if not self.smooth_motion_executor or not self.smooth_motion_executor.is_executing:
             logger.info("No G-code execution is currently running.")
-            self.status_label.configure(text="No execution running", text_color="orange")
+            self.status_label.configure(text=self._wrap_status_text("No execution running"), text_color="orange")
             return
         
         try:
             self.smooth_motion_executor.stop_execution()
             logger.info("G-code execution stopped by user")
-            self.status_label.configure(text="Execution stopped", text_color="orange")
+            self.status_label.configure(text=self._wrap_status_text("Execution stopped"), text_color="orange")
         except Exception as e:
             logger.error(f"Failed to stop G-code execution: {e}")
-            self.status_label.configure(text=f"Stop failed: {str(e)}", text_color="red")
+            self.status_label.configure(text=self._wrap_status_text(f"Stop failed: {str(e)}"), text_color="red")
 
-    def _travel_to_start(self, x_mm, y_mm):
+    def _travel_to_start(self, x_inch, y_inch):
         """Travel from home to the start position of the toolpath."""
         # Move to start position with Z up
         if MOTOR_IMPORTS_AVAILABLE:
-            self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=config.APP_CONFIG['Z_UP_MM'], rot=0.0)
+            self.motor_ctrl.move_to(x=x_inch, y=y_inch, z=config.APP_CONFIG['Z_UP_INCH'], rot=0.0)
         
         # Update position and display
-        self._current_toolpath_pos['X'] = x_mm
-        self._current_toolpath_pos['Y'] = y_mm
-        self._current_toolpath_pos['Z'] = config.APP_CONFIG['Z_UP_MM']
+        self._current_toolpath_pos['X'] = x_inch
+        self._current_toolpath_pos['Y'] = y_inch
+        self._current_toolpath_pos['Z'] = config.APP_CONFIG['Z_UP_INCH']
         self._current_toolpath_pos['ROT'] = 0.0
         
         self._update_position_display()
@@ -1763,16 +1788,16 @@ class FabricCNCApp:
             return
         x, y, angle, z = path[step_idx]
         # Set toolpath position directly (no swap)
-        x_mm = x * config.APP_CONFIG['INCH_TO_MM']
-        y_mm = y * config.APP_CONFIG['INCH_TO_MM']
-        self._current_toolpath_pos['X'] = x_mm
-        self._current_toolpath_pos['Y'] = y_mm
-        self._current_toolpath_pos['Z'] = config.APP_CONFIG['Z_DOWN_MM'] if z == 0 else config.APP_CONFIG['Z_UP_MM']
+        x_inch = x  # Already in inches
+        y_inch = y  # Already in inches
+        self._current_toolpath_pos['X'] = x_inch
+        self._current_toolpath_pos['Y'] = y_inch
+        self._current_toolpath_pos['Z'] = config.APP_CONFIG['Z_DOWN_INCH'] if z == 0 else config.APP_CONFIG['Z_UP_INCH']
         # Use rotation angle directly - motor controller handles direction inversion
         self._current_toolpath_pos['ROT'] = math.degrees(angle)
         
-        # Debug: print toolpath coordinates in both units
-        print(f"[DEBUG] Toolpath step {step_idx}: X={x:.3f}in ({x_mm:.2f}mm), Y={y:.3f}in ({y_mm:.2f}mm)")
+        # Debug: print toolpath coordinates in inches
+        print(f"[DEBUG] Toolpath step {step_idx}: X={x:.3f}in, Y={y:.3f}in")
         
         if MOTOR_IMPORTS_AVAILABLE:
             self.motor_ctrl.move_to(
@@ -1786,8 +1811,8 @@ class FabricCNCApp:
         print(f"[DEBUG] Toolpath pos: X={self._current_toolpath_pos['X']:.2f} Y={self._current_toolpath_pos['Y']:.2f} | Motor pos: X={actual_pos['X']:.2f} Y={actual_pos['Y']:.2f}")
         
         # Check if coordinates are within machine limits
-        if abs(x_mm) > config.APP_CONFIG['X_MAX_MM'] or abs(y_mm) > config.APP_CONFIG['Y_MAX_MM']:
-            print(f"[WARNING] Coordinates beyond machine limits! X={x_mm:.2f}mm (limit: ±{config.APP_CONFIG['X_MAX_MM']:.2f}mm), Y={y_mm:.2f}mm (limit: ±{config.APP_CONFIG['Y_MAX_MM']:.2f}mm)")
+        if abs(x_inch) > config.APP_CONFIG['X_MAX_INCH'] or abs(y_inch) > config.APP_CONFIG['Y_MAX_INCH']:
+            print(f"[WARNING] Coordinates beyond machine limits! X={x_inch:.2f}in (limit: ±{config.APP_CONFIG['X_MAX_INCH']:.2f}in), Y={y_inch:.2f}in (limit: ±{config.APP_CONFIG['Y_MAX_INCH']:.2f}in)")
         self._update_position_display()  # Force update after each move
         self._draw_canvas()
         # Next step
@@ -1797,8 +1822,8 @@ class FabricCNCApp:
 
     def _draw_live_tool_head_inches(self, pos):
         # Draw a blue dot and orientation line at the current tool head position (in inches)
-        x_in = pos['X'] / config.APP_CONFIG['INCH_TO_MM']
-        y_in = pos['Y'] / config.APP_CONFIG['INCH_TO_MM']
+        x_in = pos['X']  # Already in inches
+        y_in = pos['Y']  # Already in inches
         rot_rad = math.radians(pos.get('ROT', 0.0))
         x_c, y_c = self._inches_to_canvas(x_in, y_in)
         r = config.APP_CONFIG['LIVE_TOOL_HEAD_RADIUS']
@@ -1859,24 +1884,24 @@ class FabricCNCApp:
     def _home(self, axis):
         success = self.motor_ctrl.home(axis)
         if success:
-            self.status_label.configure(text=f"{axis} axis homed", text_color="green")
+            self.status_label.configure(text=self._wrap_status_text(f"{axis} axis homed"), text_color="green")
         else:
-            self.status_label.configure(text=f"Failed to home {axis}", text_color="red")
+            self.status_label.configure(text=self._wrap_status_text(f"Failed to home {axis}"), text_color="red")
         self._draw_canvas()
         self._update_position_display()
         # Clear status after 2 seconds
-        self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
+        self.root.after(2000, lambda: self.status_label.configure(text=self._wrap_status_text("Ready"), text_color=UI_COLORS['ON_SURFACE']))
 
     def _home_all(self):
         success = self.motor_ctrl.home_all_synchronous()
         if success:
-            self.status_label.configure(text="All axes homed", text_color="green")
+            self.status_label.configure(text=self._wrap_status_text("All axes homed"), text_color="green")
         else:
-            self.status_label.configure(text="Homing failed", text_color="red")
+            self.status_label.configure(text=self._wrap_status_text("Homing failed"), text_color="red")
         self._draw_canvas()
         self._update_position_display()
         # Clear status after 2 seconds
-        self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
+        self.root.after(2000, lambda: self.status_label.configure(text=self._wrap_status_text("Ready"), text_color=UI_COLORS['ON_SURFACE']))
 
     def _stop_movement(self):
         """Stop all movement and cancel any pending arrow key operations."""
@@ -1894,9 +1919,9 @@ class FabricCNCApp:
 
     def _estop(self):
         self.motor_ctrl.estop()
-        self.status_label.configure(text="EMERGENCY STOP", text_color="red")
+        self.status_label.configure(text=self._wrap_status_text("EMERGENCY STOP"), text_color="red")
         # Clear status after 3 seconds
-        self.root.after(3000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
+        self.root.after(3000, lambda: self.status_label.configure(text=self._wrap_status_text("Ready"), text_color=UI_COLORS['ON_SURFACE']))
 
     def _update_position_display(self):
         pos = self.motor_ctrl.get_position()
@@ -1911,7 +1936,7 @@ class FabricCNCApp:
 
     def _update_jog_speed(self):
         try:
-            self.jog_speed = self.jog_speed_var.get() * config.APP_CONFIG['INCH_TO_MM']
+            self.jog_speed = self.jog_speed_var.get()
         except Exception:
             pass
 
@@ -1922,7 +1947,7 @@ class FabricCNCApp:
         # Update the display label
         self.jog_speed_label.configure(text=f"{speed_inches:.1f} in")
         # Update the actual jog speed
-        self.jog_speed = speed_inches * config.APP_CONFIG['INCH_TO_MM']
+        self.jog_speed = speed_inches
 
     def _toggle_fullscreen(self):
         """Toggle full screen mode."""
@@ -1980,13 +2005,13 @@ class GCodeExecutor:
         """
         self.motor_ctrl = motor_controller
         self.current_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
-        self.feed_rate = 1000.0  # mm/min
+        self.feed_rate = 39.37  # 1000 mm/min = 39.37 inches/min
         self.is_executing = False
         self.stop_requested = False
         
         # G-code state
         self.absolute_positioning = True
-        self.units_mm = True
+        self.units_inch = True
         
         logger.info("G-code executor initialized")
     
@@ -2092,7 +2117,7 @@ class GCodeExecutor:
         elif command == 'G1':  # Linear interpolation
             self._move_to_position(params, rapid=False)
         elif command == 'G21':  # Set units to millimeters
-            self.units_mm = True
+            self.units_inch = True  # Convert to inches internally
         elif command == 'G90':  # Absolute positioning
             self.absolute_positioning = True
         elif command == 'G91':  # Relative positioning
@@ -2137,29 +2162,29 @@ class GCodeExecutor:
                 target_pos[axis] += value
         
         # Convert to motor controller format
-        x_mm = target_pos.get('X', self.current_position['X'])
-        y_mm = target_pos.get('Y', self.current_position['Y'])
-        z_mm = target_pos.get('Z', self.current_position['Z'])
+        x_inch = target_pos.get('X', self.current_position['X'])
+        y_inch = target_pos.get('Y', self.current_position['Y'])
+        z_inch = target_pos.get('Z', self.current_position['Z'])
         a_deg = target_pos.get('A', self.current_position['ROT'])  # GCODE uses 'A', map to internal 'ROT'
         
         # Check if this is a Z-only movement (no X, Y, or A changes)
         is_z_only = (
-            abs(x_mm - self.current_position['X']) < 1e-6 and
-            abs(y_mm - self.current_position['Y']) < 1e-6 and
+            abs(x_inch - self.current_position['X']) < 1e-6 and
+            abs(y_inch - self.current_position['Y']) < 1e-6 and
             abs(a_deg - self.current_position['ROT']) < 1e-6 and
-            abs(z_mm - self.current_position['Z']) > 1e-6
+            abs(z_inch - self.current_position['Z']) > 1e-6
         )
         
         # Execute movement
         if MOTOR_IMPORTS_AVAILABLE:
             if is_z_only:
                 # For Z-only movements, use individual Z movement to ensure completion
-                z_distance_mm = z_mm - self.current_position['Z']
-                logger.debug(f"Z-only movement: Z={z_mm:.2f} (distance={z_distance_mm:.2f}mm)")
-                self.motor_ctrl.move_distance(z_distance_mm, 'Z')
+                z_distance_inch = z_inch - self.current_position['Z']
+                logger.debug(f"Z-only movement: Z={z_inch:.2f} (distance={z_distance_inch:.2f}in)")
+                self.motor_ctrl.move_distance(z_distance_inch, 'Z')
             else:
                 # For other movements, use coordinated movement
-                self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=z_mm, rot=a_deg)
+                self.motor_ctrl.move_to(x=x_inch, y=y_inch, z=z_inch, rot=a_deg)
         
         # Update current position (map 'A' back to 'ROT')
         self.current_position = target_pos.copy()
@@ -2167,7 +2192,7 @@ class GCodeExecutor:
             self.current_position['ROT'] = target_pos['A']
             del self.current_position['A']
         
-        logger.debug(f"Move to: X={x_mm:.2f}, Y={y_mm:.2f}, Z={z_mm:.2f}, A={a_deg:.2f}")
+        logger.debug(f"Move to: X={x_inch:.2f}, Y={y_inch:.2f}, Z={z_inch:.2f}, A={a_deg:.2f}")
     
     def _home_all_axes(self):
         """Home all axes."""
