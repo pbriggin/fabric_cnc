@@ -315,9 +315,7 @@ class RealMotorController:
                 self.position['ROT'] = 0.0
                 logger.info(f"Position reset after homing: {self.position}")
                 
-                # Debug sensor states after homing
-                from debug_sensor_states import debug_sensor_states
-                debug_sensor_states(self.motor_controller)
+                # Debug sensor states after homing - removed non-existent module
                 
                 self.is_homing = False
                 return True
@@ -1342,12 +1340,18 @@ class FabricCNCApp:
                 self.status_label.configure(text="Toolpath generation failed", text_color="red")
                 return
             
-            # Save G-code to file
-            base_name = os.path.splitext(os.path.basename(self.dxf_file_path))[0]
-            self.gcode_file_path = f"outputs/toolpath_{base_name}.gcode"
+            # Create timestamp for filename
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Ensure outputs directory exists
-            os.makedirs("outputs", exist_ok=True)
+            # Get original DXF filename without extension
+            base_name = os.path.splitext(os.path.basename(self.dxf_file_path))[0]
+            
+            # Save G-code to gcode folder with timestamp
+            self.gcode_file_path = f"gcode/{base_name}_{timestamp}.gcode"
+            
+            # Ensure gcode directory exists
+            os.makedirs("gcode", exist_ok=True)
             
             with open(self.gcode_file_path, 'w') as f:
                 f.write(self.generated_gcode)
@@ -1390,12 +1394,18 @@ class FabricCNCApp:
                 logger.error("Failed to generate G-code.")
                 raise Exception("Toolpath generation failed")
             
-            # Save G-code to file
-            base_name = os.path.splitext(os.path.basename(self.dxf_file_path))[0]
-            self.gcode_file_path = f"outputs/toolpath_{base_name}.gcode"
+            # Create timestamp for filename
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Ensure outputs directory exists
-            os.makedirs("outputs", exist_ok=True)
+            # Get original DXF filename without extension
+            base_name = os.path.splitext(os.path.basename(self.dxf_file_path))[0]
+            
+            # Save G-code to gcode folder with timestamp
+            self.gcode_file_path = f"gcode/{base_name}_{timestamp}.gcode"
+            
+            # Ensure gcode directory exists
+            os.makedirs("gcode", exist_ok=True)
             
             with open(self.gcode_file_path, 'w') as f:
                 f.write(self.generated_gcode)
@@ -1505,10 +1515,9 @@ class FabricCNCApp:
             return
         
         try:
-            # Generate toolpath if it doesn't exist
-            if not self.gcode_file_path or not os.path.exists(self.gcode_file_path):
-                logger.info("Generating toolpath for preview...")
-                self._generate_toolpath_internal()
+            # Always generate a new toolpath for preview (with timestamp)
+            logger.info("Generating toolpath for preview...")
+            self._generate_toolpath_internal()
             
             # Parse GCODE and extract toolpath data
             self._parse_gcode_for_preview(self.gcode_file_path)
@@ -1519,7 +1528,7 @@ class FabricCNCApp:
             # Update status with preview info
             corner_count = len(self.toolpath_data.get('corners', []))
             point_count = len(self.toolpath_data.get('positions', []))
-            self.status_label.configure(text="Preview", text_color="green")
+            self.status_label.configure(text=f"Preview saved: {os.path.basename(self.gcode_file_path)}", text_color="green")
             
         except Exception as e:
             logger.error(f"Failed to create toolpath preview: {e}")
