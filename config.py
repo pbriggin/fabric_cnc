@@ -227,13 +227,7 @@ MACHINE_CONFIG = {
     'VERIFICATION_DISTANCE': 0.394  # Distance to move for verification (10mm = 0.394 inches)
 }
 
-# GUI configuration
-GUI_CONFIG = {
-    'WINDOW_SIZE': (800, 600),
-    'UPDATE_RATE': 100,  # ms between updates
-    'MOVE_INCREMENT': 0.394,  # 10mm = 0.394 inches per button press
-    'HOMING_BUTTON_COLOR': '#FFA500'  # Orange color for homing button
-}
+
 
 # Application configuration
 APP_CONFIG = {

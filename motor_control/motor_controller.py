@@ -298,6 +298,154 @@ class MotorController:
         # Update position tracking
         self._update_position(motor, direction)
 
+    def _step_motor_smooth(self, motor, direction, delay):
+        """Step a single motor with smooth timing (no position update for homing)."""
+        config = self.motors[motor]
+        # Apply direction inversion based on motor configuration
+        if motor == 'X':
+            inverted = DIRECTION_INVERTED.get('X', False)
+        elif motor == 'Y1':
+            inverted = DIRECTION_INVERTED.get('Y1', False)
+        elif motor == 'Y2':
+            inverted = DIRECTION_INVERTED.get('Y2', False)
+        elif motor == 'Z':
+            inverted = DIRECTION_INVERTED.get('Z_LIFT', False)
+        elif motor == 'ROT':
+            inverted = DIRECTION_INVERTED.get('Z_ROTATE', False)
+        else:
+            inverted = False
+        
+        # Apply inversion if needed
+        if inverted:
+            direction = not direction
+            
+        self._ensure_output(config['DIR'])
+        GPIO.output(config['DIR'], GPIO.HIGH if direction else GPIO.LOW)
+        self._ensure_output(config['STEP'])
+        GPIO.output(config['STEP'], GPIO.HIGH)
+        time.sleep(delay/2)
+        GPIO.output(config['STEP'], GPIO.LOW)
+        time.sleep(delay/2)
+
+    def _move_smooth_steps(self, motor, direction, steps, base_delay):
+        """Move a specific number of steps with smooth acceleration/deceleration."""
+        config = self.motors[motor]
+        
+        # Acceleration parameters
+        accel_steps = min(steps // 4, 20)  # Shorter acceleration for homing
+        decel_steps = min(steps // 4, 20)
+        cruise_steps = steps - accel_steps - decel_steps
+        
+        # Movement loop with acceleration/deceleration
+        for i in range(steps):
+            # Calculate current delay based on position in movement
+            if i < accel_steps:
+                delay = base_delay * (1 + (accel_steps - i) / accel_steps)
+            elif i >= steps - decel_steps:
+                delay = base_delay * (1 + (i - (steps - decel_steps)) / decel_steps)
+            else:
+                delay = base_delay
+            
+            # Apply direction inversion based on motor configuration
+            if motor == 'X':
+                inverted = DIRECTION_INVERTED.get('X', False)
+            elif motor == 'Y1':
+                inverted = DIRECTION_INVERTED.get('Y1', False)
+            elif motor == 'Y2':
+                inverted = DIRECTION_INVERTED.get('Y2', False)
+            elif motor == 'Z':
+                inverted = DIRECTION_INVERTED.get('Z_LIFT', False)
+            elif motor == 'ROT':
+                inverted = DIRECTION_INVERTED.get('Z_ROTATE', False)
+            else:
+                inverted = False
+            
+            # Apply inversion if needed
+            actual_direction = not direction if inverted else direction
+            
+            # Step motor
+            self._ensure_output(config['DIR'])
+            GPIO.output(config['DIR'], GPIO.HIGH if actual_direction else GPIO.LOW)
+            self._ensure_output(config['STEP'])
+            GPIO.output(config['STEP'], GPIO.HIGH)
+            time.sleep(delay/2)
+            GPIO.output(config['STEP'], GPIO.LOW)
+            time.sleep(delay/2)
+
+    def _step_y_axis_individual_smooth(self, direction, delay, y1_homed, y2_homed):
+        """Step Y motors individually with smooth timing - only step motors that haven't found home."""
+        # Apply direction inversion based on motor configuration
+        y1_inverted = DIRECTION_INVERTED.get('Y1', False)
+        y2_inverted = DIRECTION_INVERTED.get('Y2', False)
+        
+        # Apply inversion if needed
+        y1_direction = not direction if y1_inverted else direction
+        y2_direction = not direction if y2_inverted else direction
+        
+        # Set directions for both Y motors
+        self._ensure_output(self.motors['Y1']['DIR'])
+        self._ensure_output(self.motors['Y2']['DIR'])
+        GPIO.output(self.motors['Y1']['DIR'], GPIO.HIGH if y1_direction else GPIO.LOW)
+        GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if y2_direction else GPIO.LOW)
+        
+        # Step motors - only step motors that haven't found home yet
+        if not y1_homed:
+            self._ensure_output(self.motors['Y1']['STEP'])
+            GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
+        if not y2_homed:
+            self._ensure_output(self.motors['Y2']['STEP'])
+            GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
+        
+        time.sleep(delay/2)
+        
+        if not y1_homed:
+            GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
+        if not y2_homed:
+            GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
+        
+        time.sleep(delay/2)
+
+    def _move_y_smooth_steps(self, direction, steps, base_delay):
+        """Move Y axis a specific number of steps with smooth acceleration/deceleration."""
+        # Acceleration parameters
+        accel_steps = min(steps // 4, 20)  # Shorter acceleration for homing
+        decel_steps = min(steps // 4, 20)
+        cruise_steps = steps - accel_steps - decel_steps
+        
+        # Apply direction inversion based on motor configuration
+        y1_inverted = DIRECTION_INVERTED.get('Y1', False)
+        y2_inverted = DIRECTION_INVERTED.get('Y2', False)
+        
+        # Apply inversion if needed
+        y1_direction = not direction if y1_inverted else direction
+        y2_direction = not direction if y2_inverted else direction
+        
+        # Movement loop with acceleration/deceleration
+        for i in range(steps):
+            # Calculate current delay based on position in movement
+            if i < accel_steps:
+                delay = base_delay * (1 + (accel_steps - i) / accel_steps)
+            elif i >= steps - decel_steps:
+                delay = base_delay * (1 + (i - (steps - decel_steps)) / decel_steps)
+            else:
+                delay = base_delay
+            
+            # Set directions for both Y motors
+            self._ensure_output(self.motors['Y1']['DIR'])
+            self._ensure_output(self.motors['Y2']['DIR'])
+            GPIO.output(self.motors['Y1']['DIR'], GPIO.HIGH if y1_direction else GPIO.LOW)
+            GPIO.output(self.motors['Y2']['DIR'], GPIO.HIGH if y2_direction else GPIO.LOW)
+            
+            # Step both motors together
+            self._ensure_output(self.motors['Y1']['STEP'])
+            self._ensure_output(self.motors['Y2']['STEP'])
+            GPIO.output(self.motors['Y1']['STEP'], GPIO.HIGH)
+            GPIO.output(self.motors['Y2']['STEP'], GPIO.HIGH)
+            time.sleep(delay/2)
+            GPIO.output(self.motors['Y1']['STEP'], GPIO.LOW)
+            GPIO.output(self.motors['Y2']['STEP'], GPIO.LOW)
+            time.sleep(delay/2)
+
     def _update_position(self, motor, direction):
         """Update position tracking for a motor step."""
         # Handle Y-axis case (which uses Y1 and Y2 motors)
@@ -953,58 +1101,50 @@ class MotorController:
                     logger.warning(f"Could not reset {motor} motor pins after homing: {pin_error}")
 
     def _home_x(self):
-        """Home the X axis."""
+        """Home the X axis with smooth motion."""
         config = self.motors['X']
         # Reset debounce state to prevent carryover issues
         self.reset_sensor_debounce_state_for_axis('X')
         
-        # Comment out or remove logger.info statements for homing routines
         # logger.info("Starting X axis homing sequence")
         
-        # Move until sensor is triggered
+        # Phase 1: Fast approach until sensor is triggered
         while not self._check_sensor('X'):
-            self._step_motor('X', config['HOME_DIRECTION'] < 0, config['HOME_SPEED'])
+            self._step_motor_smooth('X', config['HOME_DIRECTION'] < 0, config['HOME_SPEED'])
         
-        # Move back slightly to clear sensor
-        # logger.info("Moving back to clear sensor...")
-        for _ in range(200):  # Much more extreme back-off to ensure sensors are cleared
-            self._step_motor('X', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
+        # Phase 2: Move back to clear sensor (smooth deceleration)
+        self._move_smooth_steps('X', config['HOME_DIRECTION'] > 0, 200, config['VERIFY_SPEED'])
         
-        # Move forward very slowly until sensor is triggered again (fine approach)
-        # logger.info("Fine approach to home position...")
+        # Phase 3: Fine approach until sensor is triggered again
         fine_speed = 0.005  # Much slower speed for fine approach (5ms between pulses)
         while not self._check_sensor('X'):
-            self._step_motor('X', config['HOME_DIRECTION'] < 0, fine_speed)
+            self._step_motor_smooth('X', config['HOME_DIRECTION'] < 0, fine_speed)
         
-        # Move back slightly again to clear sensor for second approach
-        # logger.info("Moving back for second approach...")
-        for _ in range(100):  # Smaller back-off for second approach
-            self._step_motor('X', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
+        # Phase 4: Move back for second approach
+        self._move_smooth_steps('X', config['HOME_DIRECTION'] > 0, 100, config['VERIFY_SPEED'])
         
-        # Second fine approach to verify sensor position
+        # Phase 5: Second fine approach to verify sensor position
         logger.info("Second fine approach to verify home position...")
         while not self._check_sensor('X'):
-            self._step_motor('X', config['HOME_DIRECTION'] < 0, fine_speed)
+            self._step_motor_smooth('X', config['HOME_DIRECTION'] < 0, fine_speed)
         
-        # Move away from home position to clear sensor and allow movement
+        # Phase 6: Move away from home position (smooth acceleration)
         logger.info("Moving away from home position...")
-        for _ in range(100):  # Move 100 steps away from home
-            self._step_motor('X', config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'])
+        self._move_smooth_steps('X', config['HOME_DIRECTION'] > 0, 100, config['VERIFY_SPEED'])
         
         # Reset X position to 0 after homing
         self.set_position(x=0.0)
         logger.info("X axis homed successfully")
 
     def _home_y(self):
-        """Home the Y axis - stop each motor when its own sensor triggers."""
+        """Home the Y axis with smooth motion - stop each motor when its own sensor triggers."""
         config = self.motors['Y1']  # Use Y1 config for calculations
         # Reset debounce state to prevent carryover issues
         self.reset_sensor_debounce_state_for_axis('Y')
         
         # logger.info("Starting Y axis homing sequence")
         
-        # Step 1: Fast approach - Move until both sensors are triggered
-        # logger.info("Step 1: Fast approach to find home...")
+        # Phase 1: Fast approach - Move until both sensors are triggered
         y1_homed = False
         y2_homed = False
         
@@ -1019,15 +1159,12 @@ class MotorController:
             
             # Step motors - only step motors that haven't found home yet
             if not y1_homed or not y2_homed:
-                self._step_y_axis_individual(config['HOME_DIRECTION'] < 0, config['HOME_SPEED'], y1_homed, y2_homed)
+                self._step_y_axis_individual_smooth(config['HOME_DIRECTION'] < 0, config['HOME_SPEED'], y1_homed, y2_homed)
         
-        # Step 2: Back off to clear sensors
-        # logger.info("Step 2: Moving back to clear sensors...")
-        for _ in range(200):  # Much more extreme back-off to ensure sensors are cleared
-            self._step_y_axis_individual(config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'], False, False)
+        # Phase 2: Back off to clear sensors (smooth deceleration)
+        self._move_y_smooth_steps(config['HOME_DIRECTION'] > 0, 200, config['VERIFY_SPEED'])
         
-        # Step 3: Fine approach - Move very slowly until both sensors are triggered again
-        # logger.info("Step 3: Fine approach to home position...")
+        # Phase 3: Fine approach - Move very slowly until both sensors are triggered again
         y1_homed = False
         y2_homed = False
         
@@ -1045,15 +1182,13 @@ class MotorController:
             
             # Step motors - only step motors that haven't found home yet
             if not y1_homed or not y2_homed:
-                self._step_y_axis_individual(config['HOME_DIRECTION'] < 0, fine_speed, y1_homed, y2_homed)
+                self._step_y_axis_individual_smooth(config['HOME_DIRECTION'] < 0, fine_speed, y1_homed, y2_homed)
         
-        # Step 3.5: Move back slightly again to clear sensors for second approach
-        # logger.info("Step 3.5: Moving back for second approach...")
-        for _ in range(100):  # Smaller back-off for second approach
-            self._step_y_axis_individual(config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'], False, False)
+        # Phase 4: Move back for second approach
+        self._move_y_smooth_steps(config['HOME_DIRECTION'] > 0, 100, config['VERIFY_SPEED'])
         
-        # Step 4: Second fine approach to verify sensor positions
-        # logger.info("Step 4: Second fine approach to verify home position...")
+        # Phase 5: Second fine approach to verify sensor positions
+        logger.info("Second fine approach to verify home position...")
         y1_homed = False
         y2_homed = False
         
@@ -1068,12 +1203,11 @@ class MotorController:
             
             # Step motors - only step motors that haven't found home yet
             if not y1_homed or not y2_homed:
-                self._step_y_axis_individual(config['HOME_DIRECTION'] < 0, fine_speed, y1_homed, y2_homed)
+                self._step_y_axis_individual_smooth(config['HOME_DIRECTION'] < 0, fine_speed, y1_homed, y2_homed)
         
-        # Step 5: Final back off for clearance
-        # logger.info("Step 5: Moving away from home position for clearance...")
-        for _ in range(100):
-            self._step_y_axis_individual(config['HOME_DIRECTION'] > 0, config['VERIFY_SPEED'], False, False)
+        # Phase 6: Final back off for clearance (smooth acceleration)
+        logger.info("Moving away from home position for clearance...")
+        self._move_y_smooth_steps(config['HOME_DIRECTION'] > 0, 100, config['VERIFY_SPEED'])
         
         # Reset Y position to 0 after homing
         self.set_position(y=0.0)
