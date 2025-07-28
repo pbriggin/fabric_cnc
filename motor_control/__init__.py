@@ -3,7 +3,6 @@
 Motor control module for Fabric CNC.
 """
 
-from .motor_controller import MotorController
-from .smooth_motion_executor import SmoothMotionExecutor
+from .grbl_motor_controller import GrblMotorController
 
-__all__ = ['MotorController', 'SmoothMotionExecutor'] 
+__all__ = ['GrblMotorController'] 
