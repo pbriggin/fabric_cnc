@@ -10,16 +10,15 @@ G0 Z-0.5 ; Move to safe height
 ; Shape: merged_shape_0
 G0 X1.000 Y5.140 ; Move to start
 G0 A22.927 ; Set initial cutting wheel angle
-G0 Z-1.0 ; Plunge to cutting height
-G4 P0.1 ; Wait 0.1 seconds for plunge to complete
-G1 X2.751 Y1.000 F1000.0 ; Cut to next point
+G0 Z-1.35 ; Plunge to cutting height
+G1 X2.751 Y1.000 A22.927 F1000.0 ; Cut to next point
 G0 Z-0.5 ; Raise Z for corner
 G0 A135.854 ; Rotate Z for corner
-G0 Z-1.0 ; Lower Z to cutting height
+G0 Z-1.35 ; Lower Z to cutting height
 G0 X6.770 Y5.140 ; Move to next point
 G0 Z-0.5 ; Raise Z for corner
 G0 A270.000 ; Rotate Z for corner
-G0 Z-1.0 ; Lower Z to cutting height
+G0 Z-1.35 ; Lower Z to cutting height
 G0 X1.000 Y5.140 ; Move to next point
 G0 Z-0.5 ; Raise tool to safe height
 
