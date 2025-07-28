@@ -18,7 +18,6 @@ from typing import List, Dict
 # Try to import ezdxf for DXF parsing
 try:
     import ezdxf
-<<<<<<< HEAD
     EZDXF_AVAILABLE = True
 except ImportError:
     ezdxf = None
@@ -28,17 +27,8 @@ except ImportError:
 try:
     from motor_control.grbl_motor_controller import GrblMotorController
     MOTOR_IMPORTS_AVAILABLE = True
-=======
 except ImportError:
-    ezdxf = None
-
-# Import motor control modules
-try:
-    from motor_control.motor_controller import MotorController
-    from motor_control.smooth_motion_executor import SmoothMotionExecutor
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
-except ImportError:
-    pass
+    MOTOR_IMPORTS_AVAILABLE = False
 
 # Import new DXF processing and toolpath generation modules
 try:
@@ -49,12 +39,8 @@ try:
 except ImportError:
     DXF_TOOLPATH_IMPORTS_AVAILABLE = False
 
-<<<<<<< HEAD
 # Legacy toolpath imports no longer needed with GRBL
 TOOLPATH_IMPORTS_AVAILABLE = False
-=======
-
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
 
 # Import configuration
 import config
@@ -63,12 +49,8 @@ from config import (
     ON_RPI, SIMULATION_MODE
 )
 
-<<<<<<< HEAD
 # GPIO not needed with GRBL controller
 GPIO_AVAILABLE = False
-=======
-
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fabric_cnc.main_app")
@@ -76,7 +58,66 @@ logger = logging.getLogger("fabric_cnc.main_app")
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
+def calculate_angle_between_points(p1, p2, p3):
+    """Calculate the angle between three points (p1 -> p2 -> p3) in degrees."""
+    if p1 == p2 or p2 == p3:
+        return 0.0
+    
+    # Vector from p1 to p2
+    v1x = p2[0] - p1[0]
+    v1y = p2[1] - p1[1]
+    
+    # Vector from p2 to p3
+    v2x = p3[0] - p2[0]
+    v2y = p3[1] - p2[1]
+    
+    # Calculate dot product
+    dot_product = v1x * v2x + v1y * v2y
+    
+    # Calculate magnitudes
+    mag1 = math.sqrt(v1x * v1x + v1y * v1y)
+    mag2 = math.sqrt(v2x * v2x + v2y * v2y)
+    
+    if mag1 == 0 or mag2 == 0:
+        return 0.0
+    
+    # Calculate cosine of angle
+    cos_angle = dot_product / (mag1 * mag2)
+    
+    # Clamp to valid range
+    cos_angle = max(-1.0, min(1.0, cos_angle))
+    
+    # Convert to degrees
+    angle_rad = math.acos(cos_angle)
+    angle_deg = math.degrees(angle_rad)
+    
+    return angle_deg
 
+def flatten_spline_with_angle_limit(spline, max_angle_deg=2.0):
+    """Flatten a spline to points ensuring max angle between segments is below threshold."""
+    try:
+        # Get spline points with high precision
+        points = list(spline.flattening(0.001))
+        if len(points) < 3:
+            return points
+        
+        # Filter points to ensure max angle between segments
+        filtered_points = [points[0]]
+        for i in range(1, len(points) - 1):
+            angle = calculate_angle_between_points(
+                points[i-1], points[i], points[i+1]
+            )
+            if angle > max_angle_deg:
+                # Add intermediate points to reduce angle
+                # This is a simple approach - could be improved with more sophisticated interpolation
+                pass
+            filtered_points.append(points[i])
+        filtered_points.append(points[-1])
+        
+        return filtered_points
+    except Exception as e:
+        logger.error(f"Error flattening spline: {e}")
+        return []
 
 # Toolpath generation functions moved to toolpath_planning package
 
@@ -91,19 +132,11 @@ class SimulatedMotorController:
 
     def _clamp(self, axis, value):
         if axis == 'X':
-<<<<<<< HEAD
             return max(-68.0, min(value, 68.0))  # 68 inches max X travel
         elif axis == 'Y':
             return max(-45.0, min(value, 45.0))  # 45 inches max Y travel
         elif axis == 'Z':
             return max(-1.0, min(value, 0.5))  # Z: -1.0 to +0.5 inches
-=======
-            return max(-config.APP_CONFIG['X_MAX_INCH'], min(value, config.APP_CONFIG['X_MAX_INCH']))  # Allow negative X positions
-        elif axis == 'Y':
-            return max(-config.APP_CONFIG['Y_MAX_INCH'], min(value, config.APP_CONFIG['Y_MAX_INCH']))  # Allow negative Y positions
-        elif axis == 'Z':
-            return max(0.0, min(value, config.APP_CONFIG['Z_MAX_INCH']))  # Keep Z positive only
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
         else:
             return value
 
@@ -168,22 +201,14 @@ class SimulatedMotorController:
     def stop_movement(self):
         pass
 
-    def move_coordinated(self, x_distance_inch=0, y_distance_inch=0, z_distance_inch=0, rot_distance_deg=0):
+    def move_coordinated(self, x_distance_mm=0, y_distance_mm=0, z_distance_mm=0, rot_distance_mm=0):
         """Execute coordinated movement across multiple axes (simulated)."""
         with self.lock:
-<<<<<<< HEAD
             self.position['X'] += x_distance_mm
             self.position['Y'] += y_distance_mm
             self.position['Z'] += z_distance_mm
             self.position['ROT'] += rot_distance_mm
             logger.info(f"Simulated coordinated movement: X={self.position['X']:.2f}in, Y={self.position['Y']:.2f}in, Z={self.position['Z']:.2f}in, ROT={self.position['ROT']:.2f}°")
-=======
-            self.position['X'] += x_distance_inch
-            self.position['Y'] += y_distance_inch
-            self.position['Z'] += z_distance_inch
-            self.position['ROT'] += rot_distance_deg
-            logger.info(f"Simulated coordinated movement: X={self.position['X']:.2f}, Y={self.position['Y']:.2f}, Z={self.position['Z']:.2f}, ROT={self.position['ROT']:.2f}")
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
 
 # --- Real Motor Controller Wrapper ---
 class RealMotorController:
@@ -195,19 +220,11 @@ class RealMotorController:
 
     def _clamp(self, axis, value):
         if axis == 'X':
-<<<<<<< HEAD
             return max(-68.0, min(value, 68.0))  # 68 inches max X travel
         elif axis == 'Y':
             return max(-45.0, min(value, 45.0))  # 45 inches max Y travel
         elif axis == 'Z':
             return max(-1.0, min(value, 0.5))  # Z: -1.0 to +0.5 inches
-=======
-            return max(-config.APP_CONFIG['X_MAX_INCH'], min(value, config.APP_CONFIG['X_MAX_INCH']))  # Allow negative X positions
-        elif axis == 'Y':
-            return max(-config.APP_CONFIG['Y_MAX_INCH'], min(value, config.APP_CONFIG['Y_MAX_INCH']))  # Allow negative Y positions
-        elif axis == 'Z':
-            return max(-config.APP_CONFIG['Z_MAX_INCH'], min(value, config.APP_CONFIG['Z_MAX_INCH']))  # Allow negative Z positions
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
         else:
             return value
 
@@ -226,11 +243,7 @@ class RealMotorController:
                         move_delta_mm = move_delta * 25.4
                         self.motor_controller.jog(axis_map[axis], move_delta_mm, feedrate)
                     self.position[axis] = clamped_val
-<<<<<<< HEAD
                     logger.info(f"Jogged {axis} by {move_delta:.3f}in")
-=======
-                    logger.info(f"Jogged {axis} by {move_delta}in")
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
             except Exception as e:
                 logger.error(f"Jog error on {axis}: {e}")
 
@@ -279,7 +292,6 @@ class RealMotorController:
                 return False
 
     def get_position(self):
-<<<<<<< HEAD
         # Use GRBL position data (in mm) and convert to inches
         try:
             x, y, z, a = self.motor_controller.get_position()
@@ -291,15 +303,6 @@ class RealMotorController:
             }
         except:
             # Fallback to internal position tracking (already in inches)
-=======
-        # Use motor controller's actual position tracking
-        if hasattr(self.motor_controller, 'get_position'):
-            motor_pos = self.motor_controller.get_position()
-            # Motor controller now tracks position in inches internally
-            return motor_pos
-        else:
-            # Fallback to internal position tracking
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
             with self.lock:
                 return dict(self.position)
     
@@ -364,29 +367,11 @@ class RealMotorController:
         
         logger.info(f"MOVE_TO: current=({self.position['X']:.1f},{self.position['Y']:.1f},{self.position['Z']:.1f},{self.position['ROT']:.1f}) -> target=({x or self.position['X']:.1f},{y or self.position['Y']:.1f},{z or self.position['Z']:.1f},{rot or self.position['ROT']:.1f}) -> delta=({delta_x:.2f},{delta_y:.2f},{delta_z:.2f},{delta_rot:.2f})")
         
-<<<<<<< HEAD
         # Use G0 (rapid) movement to move to absolute position
         # Convert from inches to mm for GRBL
         x_mm = x * 25.4 if x is not None else None
         y_mm = y * 25.4 if y is not None else None
         z_mm = z * 25.4 if z is not None else None
-=======
-        # Use coordinated movement for X and Y, individual for Z and ROT
-        if abs(delta_x) > 1e-6 or abs(delta_y) > 1e-6:
-            self.move_coordinated(
-                x_distance_inch=delta_x,
-                y_distance_inch=delta_y,
-                z_distance_inch=delta_z,
-                rot_distance_deg=delta_rot
-            )
-        else:
-            # Only Z or ROT movement needed
-            if abs(delta_z) > 1e-6:
-                # Motor controller now works in inches directly
-                self.motor_controller.move_distance(delta_z, 'Z')
-            if abs(delta_rot) > 1e-6:
-                self.motor_controller.move_distance(delta_rot, 'ROT')
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
         
         # Build G0 command
         cmd_parts = ["G0"]
@@ -409,7 +394,6 @@ class RealMotorController:
             if y is not None:
                 self.position['Y'] = y
             if z is not None:
-<<<<<<< HEAD
                 # Apply Z limits
                 if z < -1.0:
                     actual_z = -1.0
@@ -418,20 +402,12 @@ class RealMotorController:
                 elif z > 0.5:
                     actual_z = 0.5
                     logger.warning(f"Z target limited: requested {z:.2f}in, actual {actual_z:.2f}in")
-=======
-                # Check if Z movement was limited by the motor controller
-                # If the target Z position is below -1.35 inches, limit it to -1.35 inches
-                if z < -1.35:  # -1.35 inch limit
-                    actual_z = -1.35  # Limit target to -1.35 inches
-                    logger.warning(f"Z target limited: requested {z:.2f} inches, actual {actual_z:.2f} inches")
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
                     self.position['Z'] = actual_z
                 else:
                     self.position['Z'] = z
             if rot is not None:
                 self.position['ROT'] = rot
 
-<<<<<<< HEAD
     def move_coordinated(self, x_distance_in=0, y_distance_in=0, z_distance_in=0, rot_distance_deg=0):
         """Execute coordinated movement across multiple axes using relative G1 movement."""
         try:
@@ -450,18 +426,6 @@ class RealMotorController:
                 cmd_parts.append(f"Z{z_mm:.3f}")
             if abs(rot_distance_deg) > 1e-6:
                 cmd_parts.append(f"A{rot_distance_deg:.3f}")
-=======
-    def move_coordinated(self, x_distance_inch=0, y_distance_inch=0, z_distance_inch=0, rot_distance_deg=0):
-        """Execute coordinated movement across multiple axes."""
-        try:
-            # Motor controller now works in inches directly
-            self.motor_controller.move_coordinated(
-                x_distance_inch=x_distance_inch,
-                y_distance_inch=y_distance_inch,
-                z_distance_inch=z_distance_inch,
-                rot_distance_deg=rot_distance_deg
-            )
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
             
             if len(cmd_parts) > 2:  # Only send if we have axes to move
                 cmd_parts.append("F1000")  # 1000 mm/min feedrate
@@ -470,15 +434,9 @@ class RealMotorController:
             
             # Update position tracking (all in inches)
             with self.lock:
-<<<<<<< HEAD
                 self.position['X'] += x_distance_in
                 self.position['Y'] += y_distance_in
                 self.position['Z'] += z_distance_in
-=======
-                self.position['X'] += x_distance_inch
-                self.position['Y'] += y_distance_inch
-                self.position['Z'] += z_distance_inch
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
                 self.position['ROT'] += rot_distance_deg
             
         except Exception as e:
@@ -503,7 +461,10 @@ class FabricCNCApp:
         self._jog_slider_scale = 0.1  # Scale factor for slider (0.1 inch increments)
         self._arrow_key_state = {}
         self._arrow_key_after_ids = {}
-
+        self._current_toolpath_idx = [0, 0]
+        self._toolpath_step_count = 0
+        self._current_toolpath_pos = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
+        self.toolpaths = []
         self.motor_ctrl = SimulatedMotorController() if SIMULATION_MODE else RealMotorController()
         self._jog_in_progress = {'X': False, 'Y': False, 'Z': False, 'ROT': False}
         self._arrow_key_repeat_delay = config.APP_CONFIG['ARROW_KEY_REPEAT_DELAY']
@@ -512,7 +473,7 @@ class FabricCNCApp:
         if DXF_TOOLPATH_IMPORTS_AVAILABLE:
             self.dxf_processor = DXFProcessor()
             self.toolpath_generator = ToolpathGenerator(
-                cutting_height=-1.35,  # Updated: -1.35 inches for deeper cuts
+                cutting_height=-1.0,  # Fixed: -1.0 inches to stay within machine limits
                 safe_height=-0.5,  # Safe height is -0.5 inches (above cutting height)
                 corner_angle_threshold=10.0,  # 10-degree threshold
                 feed_rate=1000.0,
@@ -527,7 +488,10 @@ class FabricCNCApp:
             self.smooth_motion_executor = None
             self.gcode_visualizer = None
         
-
+        # Initialize DXF-related attributes (legacy)
+        self.dxf_doc = None
+        self.dxf_entities = []
+        self.toolpath = []
         
         # New DXF processing attributes
         self.processed_shapes = {}
@@ -539,43 +503,6 @@ class FabricCNCApp:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         # Force fullscreen after UI setup
         self.root.after(100, lambda: self.root.attributes('-fullscreen', True))
-
-    def _wrap_status_text(self, text, max_chars=20):
-        """Wrap status text at specified character limit to prevent horizontal expansion."""
-        if len(text) <= max_chars:
-            return text
-        
-        # First try word wrapping - try to break at word boundaries
-        words = text.split()
-        lines = []
-        current_line = ""
-        
-        for word in words:
-            # If a single word is longer than max_chars, we need to break it
-            if len(word) > max_chars:
-                # If we have content in current_line, add it to lines first
-                if current_line:
-                    lines.append(current_line)
-                    current_line = ""
-                
-                # Break the long word into chunks
-                for i in range(0, len(word), max_chars):
-                    chunk = word[i:i + max_chars]
-                    lines.append(chunk)
-            elif len(current_line) + len(word) + 1 <= max_chars:
-                if current_line:
-                    current_line += " " + word
-                else:
-                    current_line = word
-            else:
-                if current_line:
-                    lines.append(current_line)
-                current_line = word
-        
-        if current_line:
-            lines.append(current_line)
-        
-        return "\n".join(lines)
 
     def _setup_ui(self):
         # App Bar
@@ -630,7 +557,7 @@ class FabricCNCApp:
         status_section.grid(row=1, column=0, sticky="ew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
         
         ctk.CTkLabel(status_section, text="Status:", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=UI_PADDING['SMALL'])
-        self.status_label = ctk.CTkLabel(status_section, text="Ready", font=("Arial", 16, "bold"), text_color=UI_COLORS['ON_SURFACE'], wraplength=300)
+        self.status_label = ctk.CTkLabel(status_section, text="Ready", font=("Arial", 16, "bold"), text_color=UI_COLORS['ON_SURFACE'])
         self.status_label.pack(pady=UI_PADDING['SMALL'])
 
         # === MIDDLE COLUMN: Plot Canvas ===
@@ -772,7 +699,7 @@ class FabricCNCApp:
             delta = -self.jog_speed
         elif key == 'Right':
             axis = 'X'
-            delta = +self.jog_speed
+            delta = self.jog_speed
         elif key == 'Up':
             axis = 'Y'
             delta = self.jog_speed
@@ -838,9 +765,13 @@ class FabricCNCApp:
         if self.processed_shapes:
             self._draw_processed_shapes()
         
-
+        # Draw legacy DXF entities if loaded
+        if self.dxf_doc and self.dxf_entities:
+            self._draw_dxf_entities_inches()
         
-
+        # Draw toolpath if generated
+        if self.toolpath:
+            self._draw_toolpath_inches()
         
         # Draw new toolpath preview if available
         if hasattr(self, 'toolpath_data') and self.toolpath_data:
@@ -849,13 +780,8 @@ class FabricCNCApp:
         # Draw current tool head position (all axes)
         pos = self.motor_ctrl.get_position()
         # Positions are already in inches, so clamp using inch limits
-<<<<<<< HEAD
         x_max_inches = 68.0  # 68 inches max X travel
         y_max_inches = 45.0  # 45 inches max Y travel
-=======
-        x_max_inches = config.APP_CONFIG['X_MAX_INCH']
-        y_max_inches = config.APP_CONFIG['Y_MAX_INCH']
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
         x = max(0.0, min(pos['X'], x_max_inches))
         y = max(0.0, min(pos['Y'], y_max_inches))
         clamped_pos = {'X': x, 'Y': y}
@@ -915,7 +841,18 @@ class FabricCNCApp:
         
         logger.debug(f"Drew {len(self.processed_shapes)} processed shapes with unique colors")
 
-
+    def _reload_config_and_redraw(self):
+        """Reload configuration and redraw the canvas to reflect changes."""
+        # Reload the config module
+        import importlib
+        importlib.reload(config)
+        
+        # Update the global APP_CONFIG reference
+        global APP_CONFIG
+        APP_CONFIG = config.APP_CONFIG
+        
+        # Redraw the canvas with new settings
+        self._draw_canvas()
 
     def _draw_axes_in_inches(self):
         # Draw full-height canvas with gridlines and numbers
@@ -923,13 +860,8 @@ class FabricCNCApp:
         inch_tick = 5
         
         # Configure plot dimensions from config file
-<<<<<<< HEAD
         plot_width_in = 68.0  # 68 inches work area width
         plot_height_in = 45.0  # 45 inches work area height
-=======
-        plot_width_in = config.APP_CONFIG['X_MAX_INCH']  # Already in inches
-        plot_height_in = config.APP_CONFIG['Y_MAX_INCH']  # Already in inches
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
         
         # Get buffer from config file
         buffer_px = config.APP_CONFIG['PLOT_BUFFER_PX']
@@ -1011,13 +943,8 @@ class FabricCNCApp:
     def _inches_to_canvas(self, x_in, y_in):
         # Convert inches to canvas coordinates with home at bottom-left
         # Configure plot dimensions from config file
-<<<<<<< HEAD
         plot_width_in = 68.0  # 68 inches work area width
         plot_height_in = 45.0  # 45 inches work area height
-=======
-        plot_width_in = config.APP_CONFIG['X_MAX_INCH']  # Already in inches
-        plot_height_in = config.APP_CONFIG['Y_MAX_INCH']  # Already in inches
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
         
         # Get buffer from config file
         buffer_px = config.APP_CONFIG['PLOT_BUFFER_PX']
@@ -1063,7 +990,112 @@ class FabricCNCApp:
         # Debug: log position for troubleshooting
         logger.debug(f"Tool head at canvas pos: ({x_c:.1f}, {y_c:.1f}), inches: ({x_in:.2f}, {y_in:.2f})")
 
+    def _draw_dxf_entities_inches(self):
+        # Draw DXF entities, converting mm to inches for plotting
+        if not (self.dxf_doc and self.dxf_entities):
+            logger.debug("No DXF entities to draw")
+            return
+        scale = getattr(self, 'dxf_unit_scale', 1.0)
+        
+        # Use the offset calculated during import
+        dx, dy = getattr(self, 'dxf_offset', (0, 0))
+        
+        logger.debug(f"Drawing DXF entities: scale={scale}, offset=({dx:.3f}, {dy:.3f}), entities={len(self.dxf_entities)}")
 
+        # If toolpaths exist, use their shapes for color grouping
+        color_cycle = [UI_COLORS['PRIMARY_COLOR'], UI_COLORS['PRIMARY_VARIANT'], UI_COLORS['SECONDARY_COLOR'], '#cc7700', '#aa00cc', '#cc2222', '#0a0', '#f0a', '#0af', '#fa0', '#a0f', '#0fa', '#af0', '#f00', '#00f', '#0ff', '#ff0', '#f0f', '#888', '#444']
+        if hasattr(self, 'toolpaths') and self.toolpaths:
+            for i, path in enumerate(self.toolpaths):
+                color = color_cycle[i % len(color_cycle)]
+                # Draw as a polyline of all (x, y) points in the shape
+                points = [(x, y) for x, y, angle, z in path if z == 0]
+                if len(points) < 2:
+                    continue
+                flat = []
+                for x, y in points:
+                    x_c, y_c = self._inches_to_canvas(x, y)
+                    flat.extend([x_c, y_c])
+                self.canvas.create_line(flat, fill=color, width=2)
+            return  # Don't double-plot entities if toolpaths are present
+
+        # Fallback: plot all entities in gray if toolpaths not yet generated
+        for e in self.dxf_entities:
+            t = e.dxftype()
+            if t == 'LINE':
+                x1, y1 = e.dxf.start.x, e.dxf.start.y
+                x2, y2 = e.dxf.end.x, e.dxf.end.y
+                # Apply scale and offset
+                x1_norm = x1 * scale - dx
+                y1_norm = y1 * scale - dy
+                x2_norm = x2 * scale - dx
+                y2_norm = y2 * scale - dy
+                x1c, y1c = self._inches_to_canvas(x1_norm, y1_norm)
+                x2c, y2c = self._inches_to_canvas(x2_norm, y2_norm)
+                self.canvas.create_line(x1c, y1c, x2c, y2c, fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
+            elif t == 'LWPOLYLINE':
+                points = [(p[0], p[1]) for p in e.get_points()]
+                flat = []
+                for x, y in points:
+                    # Apply scale and offset
+                    x_norm = x * scale - dx
+                    y_norm = y * scale - dy
+                    x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
+                    flat.extend([x_c, y_c])
+                self.canvas.create_line(flat, fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
+            elif t == 'POLYLINE':
+                points = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
+                flat = []
+                for x, y in points:
+                    # Apply scale and offset
+                    x_norm = x * scale - dx
+                    y_norm = y * scale - dy
+                    x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
+                    flat.extend([x_c, y_c])
+                self.canvas.create_line(flat, fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
+            elif t == 'SPLINE':
+                points = list(e.flattening(0.1))
+                flat = []
+                for x, y, *_ in points:
+                    # Apply scale and offset
+                    x_norm = x * scale - dx
+                    y_norm = y * scale - dy
+                    x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
+                    flat.extend([x_c, y_c])
+                self.canvas.create_line(flat, fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
+            elif t == 'ARC':
+                center = e.dxf.center
+                r = e.dxf.radius
+                start = math.radians(e.dxf.start_angle)
+                end = math.radians(e.dxf.end_angle)
+                if end < start:
+                    end += 2 * math.pi
+                n = 32
+                points = []
+                for i in range(n+1):
+                    angle = start + (end - start) * i / n
+                    x = center.x + r * math.cos(angle)
+                    y = center.y + r * math.sin(angle)
+                    # Apply scale and offset
+                    x_norm = x * scale - dx
+                    y_norm = y * scale - dy
+                    x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
+                    points.append((x_c, y_c))
+                self.canvas.create_line(*[coord for pt in points for coord in pt], fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
+            elif t == 'CIRCLE':
+                center = e.dxf.center
+                r = e.dxf.radius
+                n = 32
+                points = []
+                for i in range(n+1):
+                    angle = 2 * math.pi * i / n
+                    x = center.x + r * math.cos(angle)
+                    y = center.y + r * math.sin(angle)
+                    # Apply scale and offset
+                    x_norm = x * scale - dx
+                    y_norm = y * scale - dy
+                    x_c, y_c = self._inches_to_canvas(x_norm, y_norm)
+                    points.append((x_c, y_c))
+                self.canvas.create_line(*[coord for pt in points for coord in pt], fill=UI_COLORS['PRIMARY_VARIANT'], width=2)
 
     def _draw_toolpath_inches(self):
         """Draw toolpath with arrows and corner markers on the canvas."""
@@ -1163,7 +1195,7 @@ class FabricCNCApp:
         """Import DXF file using the new DXF processor."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("DXF processing modules not available. Please install required dependencies.")
-            self.status_label.configure(text=self._wrap_status_text("Missing DXF dependencies"), text_color="red")
+            self.status_label.configure(text="Missing DXF dependencies", text_color="red")
             return
         
         initial_dir = os.path.expanduser("~/Desktop/DXF")
@@ -1177,7 +1209,7 @@ class FabricCNCApp:
             
             if not self.processed_shapes:
                 logger.error("No shapes found in DXF file.")
-                self.status_label.configure(text=self._wrap_status_text("No shapes found in DXF"), text_color="red")
+                self.status_label.configure(text="No shapes found in DXF", text_color="red")
                 return
             
             # Store the file path for later use
@@ -1195,29 +1227,85 @@ class FabricCNCApp:
             logger.info(f"  - Shapes found: {len(self.processed_shapes)}")
             
             # Update status label
-            self.status_label.configure(text=self._wrap_status_text(f"DXF imported: {len(self.processed_shapes)} shapes"), text_color="green")
+            self.status_label.configure(text=f"DXF imported: {len(self.processed_shapes)} shapes", text_color="green")
             
             # Redraw canvas to show imported shapes
             self._draw_canvas()
             
         except Exception as e:
             logger.error(f"Failed to load DXF: {e}")
-            self.status_label.configure(text=self._wrap_status_text(f"DXF import failed: {str(e)}"), text_color="red")
+            self.status_label.configure(text=f"DXF import failed: {str(e)}", text_color="red")
     
 
 
-
+    def _get_dxf_extents_inches(self):
+        # Use normalized points for extents
+        scale = getattr(self, 'dxf_unit_scale', 1.0)
+        min_x, min_y = float('inf'), float('inf')
+        max_x, max_y = float('-inf'), float('-inf')
+        for e in self.dxf_entities:
+            t = e.dxftype()
+            if t == 'LINE':
+                xs = [e.dxf.start.x, e.dxf.end.x]
+                ys = [e.dxf.start.y, e.dxf.end.y]
+            elif t == 'LWPOLYLINE':
+                pts = [p[:2] for p in e.get_points()]
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
+            elif t == 'POLYLINE':
+                pts = [(v.dxf.x, v.dxf.y) for v in e.vertices()]
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
+            elif t == 'SPLINE':
+                max_angle_deg = 2.0
+                pts = flatten_spline_with_angle_limit(e, max_angle_deg)
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
+            elif t == 'ARC' or t == 'CIRCLE':
+                center = e.dxf.center
+                r = e.dxf.radius
+                # Calculate segments based on angle requirement
+                max_angle_deg = 2.0
+                if t == 'ARC':
+                    start = math.radians(e.dxf.start_angle)
+                    end = math.radians(e.dxf.end_angle)
+                    if end < start:
+                        end += 2 * math.pi
+                    arc_angle_rad = end - start
+                    arc_angle_deg = math.degrees(arc_angle_rad)
+                    min_segments = int(arc_angle_deg / max_angle_deg) + 1
+                    n = max(min_segments, 64)  # At least 64 segments
+                    n = min(n, 512)  # Max 512 segments
+                    pts = [(center.x + r * math.cos(start + (end - start) * i / n),
+                            center.y + r * math.sin(start + (end - start) * i / n)) for i in range(n+1)]
+                else:
+                    # For circles, angle between segments = 360 / n
+                    # We want angle < max_angle_deg, so n > 360 / max_angle_deg
+                    min_segments = int(360 / max_angle_deg) + 1
+                    n = max(min_segments, 128)  # At least 128 segments
+                    n = min(n, 512)  # Max 512 segments
+                    pts = [(center.x + r * math.cos(2 * math.pi * i / n),
+                            center.y + r * math.sin(2 * math.pi * i / n)) for i in range(n+1)]
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
+            xs = [(x * scale) - self.dxf_offset[0] for x in xs]
+            ys = [(y * scale) - self.dxf_offset[1] for y in ys]
+            min_x = min(min_x, min(xs))
+            max_x = max(max_x, max(xs))
+            min_y = min(min_y, min(ys))
+            max_y = max(max_y, max(ys))
+        return min_x, min_y, max_x, max_y
 
     def _generate_toolpath(self):
         """Generate toolpath using the new toolpath generator."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("Toolpath generation modules not available.")
-            self.status_label.configure(text=self._wrap_status_text("Missing toolpath dependencies"), text_color="red")
+            self.status_label.configure(text="Missing toolpath dependencies", text_color="red")
             return
         
         if not self.processed_shapes:
             logger.warning("No DXF imported. Import a DXF file first.")
-            self.status_label.configure(text=self._wrap_status_text("Import DXF first"), text_color="orange")
+            self.status_label.configure(text="Import DXF first", text_color="orange")
             return
         
         try:
@@ -1226,7 +1314,7 @@ class FabricCNCApp:
             
             if not self.generated_gcode:
                 logger.error("Failed to generate G-code.")
-                self.status_label.configure(text=self._wrap_status_text("Toolpath generation failed"), text_color="red")
+                self.status_label.configure(text="Toolpath generation failed", text_color="red")
                 return
             
             # Create timestamp for filename
@@ -1256,14 +1344,14 @@ class FabricCNCApp:
             logger.info(f"  - Corners detected: {corner_count}")
             
             # Update status label
-            self.status_label.configure(text=self._wrap_status_text(f"Toolpath generated: {total_lines} lines, {corner_count} corners"), text_color="green")
+            self.status_label.configure(text=f"Toolpath generated: {total_lines} lines, {corner_count} corners", text_color="green")
             
             # Redraw canvas to show toolpath
             self._draw_canvas()
             
         except Exception as e:
             logger.error(f"Failed to generate toolpath: {e}")
-            self.status_label.configure(text=self._wrap_status_text(f"Toolpath generation failed: {str(e)}"), text_color="red")
+            self.status_label.configure(text=f"Toolpath generation failed: {str(e)}", text_color="red")
     
     def _generate_toolpath_internal(self):
         """Internal method to generate toolpath without UI status updates."""
@@ -1313,8 +1401,56 @@ class FabricCNCApp:
             logger.error(f"Failed to generate toolpath: {e}")
             raise
     
+    def _detect_circle_from_splines(self, splines):
+        """
+        Detect if multiple splines form a circle and return center and radius.
+        Returns (center, radius) if detected, (None, None) otherwise.
+        """
+        try:
+            # Collect all points from all splines
+            all_points = []
+            for spline in splines:
+                try:
+                    points = list(spline.flattening(0.1))
+                    for point in points:
+                        if len(point) >= 2:
+                            all_points.append((point[0], point[1]))
+                except:
+                    continue
+            
+            if len(all_points) < 10:
+                return None, None
+            
+            # Calculate bounding box
+            x_coords = [p[0] for p in all_points]
+            y_coords = [p[1] for p in all_points]
+            min_x, max_x = min(x_coords), max(x_coords)
+            min_y, max_y = min(y_coords), max(y_coords)
+            
+            # Estimate center
+            center_x = (min_x + max_x) / 2
+            center_y = (min_y + max_y) / 2
+            
+            # Calculate average radius
+            radii = []
+            for x, y in all_points:
+                radius = math.sqrt((x - center_x)**2 + (y - center_y)**2)
+                radii.append(radius)
+            
+            avg_radius = sum(radii) / len(radii)
+            
+            # Check if points form a reasonable circle (radius variation < 10%)
+            radius_variation = max(radii) - min(radii)
+            if radius_variation / avg_radius < 0.1:  # Less than 10% variation
+                logger.info(f"Detected circle from splines: center=({center_x:.3f}, {center_y:.3f}), radius={avg_radius:.3f}")
+                return (center_x, center_y), avg_radius
+            
+            return None, None
+            
+        except Exception as e:
+            logger.error(f"Error detecting circle from splines: {e}")
+            return None, None
 
-<<<<<<< HEAD
     def _generate_continuous_spline_path(self, spline):
         """
         Generate a single continuous path for a spline with ultra-smooth motion.
@@ -1346,19 +1482,17 @@ class FabricCNCApp:
         """
         # Legacy toolpath generation disabled with GRBL integration
         return []
-=======
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
 
     def _preview_toolpath(self):
         """Preview toolpath with arrows and corner analysis in the main GUI."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("G-code visualization modules not available.")
-            self.status_label.configure(text=self._wrap_status_text("Missing visualization dependencies"), text_color="red")
+            self.status_label.configure(text="Missing visualization dependencies", text_color="red")
             return
         
         if not self.processed_shapes:
             logger.warning("No DXF imported. Import a DXF file first.")
-            self.status_label.configure(text=self._wrap_status_text("Import DXF first"), text_color="orange")
+            self.status_label.configure(text="Import DXF first", text_color="orange")
             return
         
         try:
@@ -1375,11 +1509,11 @@ class FabricCNCApp:
             # Update status with preview info
             corner_count = len(self.toolpath_data.get('corners', []))
             point_count = len(self.toolpath_data.get('positions', []))
-            self.status_label.configure(text=self._wrap_status_text(f"Preview saved: {os.path.basename(self.gcode_file_path)}"), text_color="green")
+            self.status_label.configure(text=f"Preview saved: {os.path.basename(self.gcode_file_path)}", text_color="green")
             
         except Exception as e:
             logger.error(f"Failed to create toolpath preview: {e}")
-            self.status_label.configure(text=self._wrap_status_text(f"Preview failed: {str(e)}"), text_color="red")
+            self.status_label.configure(text=f"Preview failed: {str(e)}", text_color="red")
     
     def _parse_gcode_for_preview(self, gcode_file_path: str):
         """Parse GCODE file and extract toolpath data for canvas display."""
@@ -1406,7 +1540,8 @@ class FabricCNCApp:
                 if not line or line.startswith(';'):
                     continue
                 
-                        # Extract coordinates using regex
+                # Extract coordinates using regex
+                import re
                 x_match = re.search(r'X([-\d.]+)', line)
                 y_match = re.search(r'Y([-\d.]+)', line)
                 z_match = re.search(r'Z([-\d.]+)', line)
@@ -1451,12 +1586,12 @@ class FabricCNCApp:
         """Run toolpath using the new G-code executor."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("G-code execution modules not available.")
-            self.status_label.configure(text=self._wrap_status_text("Missing execution dependencies"), text_color="red")
+            self.status_label.configure(text="Missing execution dependencies", text_color="red")
             return
         
         if not self.gcode_file_path or not os.path.exists(self.gcode_file_path):
             logger.warning("No G-code file. Generate a toolpath first.")
-            self.status_label.configure(text=self._wrap_status_text("Generate toolpath first"), text_color="orange")
+            self.status_label.configure(text="Generate toolpath first", text_color="orange")
             return
         
         try:
@@ -1488,22 +1623,22 @@ class FabricCNCApp:
                     logger.info("Smooth motion execution completed successfully")
                     
                     # Update UI on completion
-                    self.root.after(0, lambda: self.status_label.configure(text=self._wrap_status_text("Execution completed"), text_color="green"))
+                    self.root.after(0, lambda: self.status_label.configure(text="Execution completed", text_color="green"))
                 except Exception as e:
                     logger.error(f"Error during smooth motion execution: {e}")
                     error_msg = str(e)
-                    self.root.after(0, lambda: self.status_label.configure(text=self._wrap_status_text(f"Execution failed: {error_msg}"), text_color="red"))
+                    self.root.after(0, lambda: self.status_label.configure(text=f"Execution failed: {error_msg}", text_color="red"))
             
             # Start execution thread
             execution_thread = threading.Thread(target=execute_gcode, daemon=True)
             execution_thread.start()
             
             # Update status to show execution started
-            self.status_label.configure(text=self._wrap_status_text("Toolpath execution started"), text_color="blue")
+            self.status_label.configure(text="Toolpath execution started", text_color="blue")
             
         except Exception as e:
             logger.error(f"Failed to start G-code execution: {e}")
-            self.status_label.configure(text=self._wrap_status_text(f"Failed to start execution: {str(e)}"), text_color="red")
+            self.status_label.configure(text=f"Failed to start execution: {str(e)}", text_color="red")
     
     def _add_gcode_debug_prints(self, gcode_lines):
         """Add debug prints to compare G-code positions with motor controller positions."""
@@ -1519,6 +1654,7 @@ class FabricCNCApp:
                 continue
             
             # Parse G-code line for position updates
+            import re
             x_match = re.search(r'X([-\d.]+)', line)
             y_match = re.search(r'Y([-\d.]+)', line)
             z_match = re.search(r'Z([-\d.]+)', line)
@@ -1567,21 +1703,20 @@ class FabricCNCApp:
         """Stop G-code execution."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("G-code execution modules not available.")
-            self.status_label.configure(text=self._wrap_status_text("Missing execution dependencies"), text_color="red")
+            self.status_label.configure(text="Missing execution dependencies", text_color="red")
             return
         
         if not self.smooth_motion_executor or not self.smooth_motion_executor.is_executing:
             logger.info("No G-code execution is currently running.")
-            self.status_label.configure(text=self._wrap_status_text("No execution running"), text_color="orange")
+            self.status_label.configure(text="No execution running", text_color="orange")
             return
         
         try:
             self.smooth_motion_executor.stop_execution()
             logger.info("G-code execution stopped by user")
-            self.status_label.configure(text=self._wrap_status_text("Execution stopped"), text_color="orange")
+            self.status_label.configure(text="Execution stopped", text_color="orange")
         except Exception as e:
             logger.error(f"Failed to stop G-code execution: {e}")
-<<<<<<< HEAD
             self.status_label.configure(text=f"Stop failed: {str(e)}", text_color="red")
 
     def _travel_to_start(self, x_in, y_in):
@@ -1664,17 +1799,13 @@ class FabricCNCApp:
         y2 = y_in + r_dir * math.sin(rot_rad)
         x2_c, y2_c = self._inches_to_canvas(x2, y2)
         self.canvas.create_line(x_c, y_c, x2_c, y2_c, fill=UI_COLORS['SECONDARY_COLOR'], width=3)
-=======
-            self.status_label.configure(text=self._wrap_status_text(f"Stop failed: {str(e)}"), text_color="red")
 
 
 
-
-
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
-
-
-
+    def _add_jog_button(self, parent, text, cmd):
+        # Consistent font with rest of project
+        btn = ctk.CTkButton(parent, text=text, command=cmd, width=50, height=40, fg_color=UI_COLORS['BUTTON_PRIMARY'], text_color=UI_COLORS['BUTTON_TEXT'], hover_color=UI_COLORS['BUTTON_PRIMARY_HOVER'], corner_radius=8, font=("Arial", 16, "bold"))
+        return btn
 
     def _add_compact_jog_button(self, parent, text, cmd):
         # Compact version with consistent font styling
@@ -1719,24 +1850,24 @@ class FabricCNCApp:
     def _home(self, axis):
         success = self.motor_ctrl.home(axis)
         if success:
-            self.status_label.configure(text=self._wrap_status_text(f"{axis} axis homed"), text_color="green")
+            self.status_label.configure(text=f"{axis} axis homed", text_color="green")
         else:
-            self.status_label.configure(text=self._wrap_status_text(f"Failed to home {axis}"), text_color="red")
+            self.status_label.configure(text=f"Failed to home {axis}", text_color="red")
         self._draw_canvas()
         self._update_position_display()
         # Clear status after 2 seconds
-        self.root.after(2000, lambda: self.status_label.configure(text=self._wrap_status_text("Ready"), text_color=UI_COLORS['ON_SURFACE']))
+        self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
     def _home_all(self):
         success = self.motor_ctrl.home_all_synchronous()
         if success:
-            self.status_label.configure(text=self._wrap_status_text("All axes homed"), text_color="green")
+            self.status_label.configure(text="All axes homed", text_color="green")
         else:
-            self.status_label.configure(text=self._wrap_status_text("Homing failed"), text_color="red")
+            self.status_label.configure(text="Homing failed", text_color="red")
         self._draw_canvas()
         self._update_position_display()
         # Clear status after 2 seconds
-        self.root.after(2000, lambda: self.status_label.configure(text=self._wrap_status_text("Ready"), text_color=UI_COLORS['ON_SURFACE']))
+        self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
     def _stop_movement(self):
         """Stop all movement and cancel any pending arrow key operations."""
@@ -1754,9 +1885,9 @@ class FabricCNCApp:
 
     def _estop(self):
         self.motor_ctrl.estop()
-        self.status_label.configure(text=self._wrap_status_text("EMERGENCY STOP"), text_color="red")
+        self.status_label.configure(text="EMERGENCY STOP", text_color="red")
         # Clear status after 3 seconds
-        self.root.after(3000, lambda: self.status_label.configure(text=self._wrap_status_text("Ready"), text_color=UI_COLORS['ON_SURFACE']))
+        self.root.after(3000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
     def _update_position_display(self):
         pos = self.motor_ctrl.get_position()
@@ -1769,15 +1900,11 @@ class FabricCNCApp:
         self.coord_label.configure(text=text)
         self.root.after(200, self._update_position_display)
 
-<<<<<<< HEAD
     def _update_jog_speed(self):
         try:
             self.jog_speed = self.jog_speed_var.get()  # Already in inches
         except Exception:
             pass
-=======
-
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
 
     def _on_jog_slider(self, value):
         # Convert slider value to float inches
@@ -1786,11 +1913,7 @@ class FabricCNCApp:
         # Update the display label
         self.jog_speed_label.configure(text=f"{speed_inches:.1f} in")
         # Update the actual jog speed
-<<<<<<< HEAD
         self.jog_speed = speed_inches  # Already in inches
-=======
-        self.jog_speed = speed_inches
->>>>>>> 29040739c813d9d53c866e40cb59f62fb805378d
 
     def _toggle_fullscreen(self):
         """Toggle full screen mode."""
@@ -1828,6 +1951,7 @@ def main():
 
     # In main(), print debug info for simulation mode
     print(f"[DEBUG] ON_RPI={ON_RPI}")
+    print(f"[DEBUG] MOTOR_IMPORTS_AVAILABLE={MOTOR_IMPORTS_AVAILABLE}")
     print(f"[DEBUG] SIMULATION_MODE={SIMULATION_MODE}")
 
 # G-code generation functions moved to toolpath_planning package
@@ -1836,7 +1960,221 @@ def main():
 
 # G-code file operations moved to toolpath_planning package
 
-
+class GCodeExecutor:
+    """Executes G-code commands for smooth motor control."""
+    
+    def __init__(self, motor_controller):
+        """Initialize G-code executor.
+        
+        Args:
+            motor_controller: Motor controller instance
+        """
+        self.motor_ctrl = motor_controller
+        self.current_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
+        self.feed_rate = 1000.0  # mm/min
+        self.is_executing = False
+        self.stop_requested = False
+        
+        # G-code state
+        self.absolute_positioning = True
+        self.units_mm = True
+        
+        logger.info("G-code executor initialized")
+    
+    def execute_gcode_file(self, gcode_file_path: str, progress_callback=None):
+        """Execute G-code from file.
+        
+        Args:
+            gcode_file_path: Path to G-code file
+            progress_callback: Optional callback for progress updates
+        """
+        try:
+            with open(gcode_file_path, 'r') as f:
+                gcode_lines = f.readlines()
+            
+            self.execute_gcode_lines(gcode_lines, progress_callback)
+        except Exception as e:
+            logger.error(f"Error executing G-code file: {e}")
+            raise
+    
+    def execute_gcode_lines(self, gcode_lines: List[str], progress_callback=None):
+        """Execute G-code from list of lines.
+        
+        Args:
+            gcode_lines: List of G-code lines
+            progress_callback: Optional callback for progress updates
+        """
+        self.is_executing = True
+        self.stop_requested = False
+        
+        total_lines = len(gcode_lines)
+        executed_lines = 0
+        
+        try:
+            for line_num, line in enumerate(gcode_lines, 1):
+                if self.stop_requested:
+                    logger.info("G-code execution stopped by user")
+                    break
+                
+                line = line.strip()
+                if not line or line.startswith(';'):
+                    continue
+                
+                # Parse and execute the line
+                self._execute_gcode_line(line)
+                executed_lines += 1
+                
+                # Update progress
+                if progress_callback and total_lines > 0:
+                    progress = (executed_lines / total_lines) * 100
+                    progress_callback(progress, f"Line {line_num}/{total_lines}")
+                
+                # Small delay for smooth execution
+                time.sleep(0.001)
+        
+        except Exception as e:
+            logger.error(f"Error executing G-code at line {line_num}: {e}")
+            raise
+        finally:
+            self.is_executing = False
+    
+    def _execute_gcode_line(self, line: str):
+        """Execute a single G-code line.
+        
+        Args:
+            line: G-code line to execute
+        """
+        # Remove comments
+        line = line.split(';')[0].strip()
+        if not line:
+            return
+        
+        # Parse command
+        cmd_match = re.match(r'^([GM]\d+)(.*)$', line.upper())
+        if not cmd_match:
+            logger.warning(f"Invalid G-code line: {line}")
+            return
+        
+        command = cmd_match.group(1)
+        params = cmd_match.group(2)
+        
+        # Parse parameters
+        params_dict = {}
+        for param_match in re.finditer(r'([XYZAF])([+-]?\d*\.?\d*)', params):
+            axis = param_match.group(1)
+            value = float(param_match.group(2)) if param_match.group(2) else 0.0
+            params_dict[axis] = value
+        
+        # Execute command
+        if command.startswith('G'):
+            self._execute_g_command(command, params_dict)
+        elif command.startswith('M'):
+            self._execute_m_command(command, params_dict)
+    
+    def _execute_g_command(self, command: str, params: Dict[str, float]):
+        """Execute G command.
+        
+        Args:
+            command: G command (e.g., G0, G1, G21, G90)
+            params: Command parameters
+        """
+        if command == 'G0':  # Rapid positioning
+            self._move_to_position(params, rapid=True)
+        elif command == 'G1':  # Linear interpolation
+            self._move_to_position(params, rapid=False)
+        elif command == 'G21':  # Set units to millimeters
+            self.units_mm = True
+        elif command == 'G90':  # Absolute positioning
+            self.absolute_positioning = True
+        elif command == 'G91':  # Relative positioning
+            self.absolute_positioning = False
+        elif command == 'G28':  # Home all axes
+            self._home_all_axes()
+        else:
+            logger.warning(f"Unsupported G command: {command}")
+    
+    def _execute_m_command(self, command: str, params: Dict[str, float]):
+        """Execute M command.
+        
+        Args:
+            command: M command
+            params: Command parameters
+        """
+        if command == 'M3':  # Spindle on
+            logger.info("Spindle on")
+        elif command == 'M5':  # Spindle off
+            logger.info("Spindle off")
+        else:
+            logger.warning(f"Unsupported M command: {command}")
+    
+    def _move_to_position(self, params: Dict[str, float], rapid: bool = False):
+        """Move to specified position.
+        
+        Args:
+            params: Position parameters (X, Y, Z, A, F)
+            rapid: Whether this is a rapid move
+        """
+        # Calculate target position
+        target_pos = self.current_position.copy()
+        
+        for axis, value in params.items():
+            if axis == 'F':  # Feed rate
+                self.feed_rate = value
+                continue
+            
+            if self.absolute_positioning:
+                target_pos[axis] = value
+            else:
+                target_pos[axis] += value
+        
+        # Convert to motor controller format
+        x_mm = target_pos.get('X', self.current_position['X'])
+        y_mm = target_pos.get('Y', self.current_position['Y'])
+        z_mm = target_pos.get('Z', self.current_position['Z'])
+        a_deg = target_pos.get('A', self.current_position['ROT'])  # GCODE uses 'A', map to internal 'ROT'
+        
+        # Check if this is a Z-only movement (no X, Y, or A changes)
+        is_z_only = (
+            abs(x_mm - self.current_position['X']) < 1e-6 and
+            abs(y_mm - self.current_position['Y']) < 1e-6 and
+            abs(a_deg - self.current_position['ROT']) < 1e-6 and
+            abs(z_mm - self.current_position['Z']) > 1e-6
+        )
+        
+        # Execute movement
+        if MOTOR_IMPORTS_AVAILABLE:
+            if is_z_only:
+                # For Z-only movements, use individual Z movement to ensure completion
+                z_distance_mm = z_mm - self.current_position['Z']
+                logger.debug(f"Z-only movement: Z={z_mm:.2f} (distance={z_distance_mm:.2f}mm)")
+                self.motor_ctrl.move_distance(z_distance_mm, 'Z')
+            else:
+                # For other movements, use coordinated movement
+                self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=z_mm, rot=a_deg)
+        
+        # Update current position (map 'A' back to 'ROT')
+        self.current_position = target_pos.copy()
+        if 'A' in target_pos:
+            self.current_position['ROT'] = target_pos['A']
+            del self.current_position['A']
+        
+        logger.debug(f"Move to: X={x_mm:.2f}, Y={y_mm:.2f}, Z={z_mm:.2f}, A={a_deg:.2f}")
+    
+    def _home_all_axes(self):
+        """Home all axes."""
+        if MOTOR_IMPORTS_AVAILABLE:
+            self.motor_ctrl.home_all_synchronous()
+        
+        # Reset position to home
+        self.current_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
+        logger.info("Homed all axes")
+    
+    def stop_execution(self):
+        """Stop G-code execution."""
+        self.stop_requested = True
+        if MOTOR_IMPORTS_AVAILABLE:
+            self.motor_ctrl.stop_movement()
+        logger.info("G-code execution stopped")
 
 if __name__ == "__main__":
     main() 
