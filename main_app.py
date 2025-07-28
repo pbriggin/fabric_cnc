@@ -6,32 +6,26 @@ Runs in simulation mode on non-RPi systems (no GPIO required).
 """
 
 import os
-import sys
 import logging
 import customtkinter as ctk
 import threading
-import platform
 import time
 import math
 import tkinter.filedialog as filedialog
 import re
-from typing import List, Tuple, Optional, Dict
+from typing import List, Dict
 
 # Try to import ezdxf for DXF parsing
 try:
-    from ezdxf.filemanagement import readfile
     import ezdxf
     EZDXF_AVAILABLE = True
-    from ezdxf.math import Vec3
 except ImportError:
     ezdxf = None
     EZDXF_AVAILABLE = False
-    Vec3 = None
 
 # Import motor control modules
 try:
-    from motor_control.motor_controller import MotorController
-    from motor_control.smooth_motion_executor import SmoothMotionExecutor
+    from motor_control.grbl_motor_controller import GrblMotorController
     MOTOR_IMPORTS_AVAILABLE = True
 except ImportError:
     MOTOR_IMPORTS_AVAILABLE = False
@@ -45,33 +39,18 @@ try:
 except ImportError:
     DXF_TOOLPATH_IMPORTS_AVAILABLE = False
 
-# Import toolpath planning modules (legacy)
-try:
-    from toolpath_planning import (
-        ContinuousToolpathGenerator,
-        generate_continuous_circle_toolpath,
-        generate_continuous_spline_toolpath,
-        generate_continuous_polyline_toolpath,
-        generate_continuous_line_toolpath,
-        generate_gcode_continuous_motion
-    )
-    TOOLPATH_IMPORTS_AVAILABLE = True
-except ImportError:
-    TOOLPATH_IMPORTS_AVAILABLE = False
+# Legacy toolpath imports no longer needed with GRBL
+TOOLPATH_IMPORTS_AVAILABLE = False
 
 # Import configuration
 import config
 from config import (
-    UI_COLORS, TOOLPATH_CONFIG, UI_PADDING,
+    UI_COLORS, UI_PADDING,
     ON_RPI, SIMULATION_MODE
 )
 
-# Import GPIO only if on Raspberry Pi
-try:
-    import RPi.GPIO as GPIO
-    GPIO_AVAILABLE = True
-except ImportError:
-    GPIO_AVAILABLE = False
+# GPIO not needed with GRBL controller
+GPIO_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fabric_cnc.main_app")
@@ -153,11 +132,11 @@ class SimulatedMotorController:
 
     def _clamp(self, axis, value):
         if axis == 'X':
-            return max(-config.APP_CONFIG['X_MAX_MM'], min(value, config.APP_CONFIG['X_MAX_MM']))  # Allow negative X positions
+            return max(-68.0, min(value, 68.0))  # 68 inches max X travel
         elif axis == 'Y':
-            return max(-config.APP_CONFIG['Y_MAX_MM'], min(value, config.APP_CONFIG['Y_MAX_MM']))  # Allow negative Y positions
+            return max(-45.0, min(value, 45.0))  # 45 inches max Y travel
         elif axis == 'Z':
-            return max(0.0, min(value, config.APP_CONFIG['Z_MAX_MM']))  # Keep Z positive only
+            return max(-1.0, min(value, 0.5))  # Z: -1.0 to +0.5 inches
         else:
             return value
 
@@ -165,7 +144,7 @@ class SimulatedMotorController:
         with self.lock:
             new_val = self.position[axis] + delta
             self.position[axis] = self._clamp(axis, new_val)
-            logger.info(f"Jogged {axis} by {delta}mm. New pos: {self.position[axis]:.2f}")
+            logger.info(f"Jogged {axis} by {delta}in. New pos: {self.position[axis]:.2f}")
 
     def home(self, axis):
         with self.lock:
@@ -217,7 +196,7 @@ class SimulatedMotorController:
                 self.position['Z'] = self._clamp('Z', z)
             if rot is not None:
                 self.position['ROT'] = rot
-            logger.info(f"Simulated move_to: X={self.position['X']:.2f}, Y={self.position['Y']:.2f}, Z={self.position['Z']:.2f}, ROT={self.position['ROT']:.2f}")
+            logger.info(f"Simulated move_to: X={self.position['X']:.2f}in, Y={self.position['Y']:.2f}in, Z={self.position['Z']:.2f}in, ROT={self.position['ROT']:.2f}°")
 
     def stop_movement(self):
         pass
@@ -229,23 +208,23 @@ class SimulatedMotorController:
             self.position['Y'] += y_distance_mm
             self.position['Z'] += z_distance_mm
             self.position['ROT'] += rot_distance_mm
-            logger.info(f"Simulated coordinated movement: X={self.position['X']:.2f}, Y={self.position['Y']:.2f}, Z={self.position['Z']:.2f}, ROT={self.position['ROT']:.2f}")
+            logger.info(f"Simulated coordinated movement: X={self.position['X']:.2f}in, Y={self.position['Y']:.2f}in, Z={self.position['Z']:.2f}in, ROT={self.position['ROT']:.2f}°")
 
 # --- Real Motor Controller Wrapper ---
 class RealMotorController:
     def __init__(self):
-        self.motor_controller = MotorController()
+        self.motor_controller = GrblMotorController()
         self.lock = threading.Lock()
         self.is_homing = False
         self.position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}  # Track position manually
 
     def _clamp(self, axis, value):
         if axis == 'X':
-            return max(-config.APP_CONFIG['X_MAX_MM'], min(value, config.APP_CONFIG['X_MAX_MM']))  # Allow negative X positions
+            return max(-68.0, min(value, 68.0))  # 68 inches max X travel
         elif axis == 'Y':
-            return max(-config.APP_CONFIG['Y_MAX_MM'], min(value, config.APP_CONFIG['Y_MAX_MM']))  # Allow negative Y positions
+            return max(-45.0, min(value, 45.0))  # 45 inches max Y travel
         elif axis == 'Z':
-            return max(-config.APP_CONFIG['Z_MAX_MM'], min(value, config.APP_CONFIG['Z_MAX_MM']))  # Allow negative Z positions
+            return max(-1.0, min(value, 0.5))  # Z: -1.0 to +0.5 inches
         else:
             return value
 
@@ -256,16 +235,15 @@ class RealMotorController:
                 clamped_val = self._clamp(axis, new_val)
                 move_delta = clamped_val - self.position[axis]
                 if abs(move_delta) > 1e-6:
-                    if axis == 'X':
-                        self.motor_controller.move_distance(move_delta, 'X')
-                    elif axis == 'Y':
-                        self.motor_controller.move_distance(move_delta, 'Y')
-                    elif axis == 'Z':
-                        self.motor_controller.move_distance(move_delta, 'Z')
-                    elif axis == 'ROT':
-                        self.motor_controller.move_distance(move_delta, 'ROT')
+                    # Map axis names and use appropriate feedrate
+                    axis_map = {'X': 'X', 'Y': 'Y', 'Z': 'Z', 'ROT': 'A'}
+                    feedrate = 1000  # mm/min for jog moves
+                    if axis in axis_map:
+                        # Convert inches to mm for GRBL
+                        move_delta_mm = move_delta * 25.4
+                        self.motor_controller.jog(axis_map[axis], move_delta_mm, feedrate)
                     self.position[axis] = clamped_val
-                    logger.info(f"Jogged {axis} by {move_delta}mm")
+                    logger.info(f"Jogged {axis} by {move_delta:.3f}in")
             except Exception as e:
                 logger.error(f"Jog error on {axis}: {e}")
 
@@ -275,20 +253,11 @@ class RealMotorController:
                 return False
             self.is_homing = True
             try:
-                if axis == 'X':
-                    self.motor_controller.home_axis('X')
+                if axis in ['X', 'Y', 'Z', 'ROT']:
+                    self.motor_controller.home_all()  # GRBL homes all axes at once
                     self.position['X'] = 0.0
-                    success = True
-                elif axis == 'Y':
-                    self.motor_controller.home_axis('Y')
                     self.position['Y'] = 0.0
-                    success = True
-                elif axis == 'Z':
-                    self.motor_controller.home_axis('Z')
                     self.position['Z'] = 0.0
-                    success = True
-                elif axis == 'ROT':
-                    self.motor_controller.home_axis('ROT')
                     self.position['ROT'] = 0.0
                     success = True
                 else:
@@ -307,15 +276,13 @@ class RealMotorController:
                 return False
             self.is_homing = True
             try:
-                self.motor_controller.home_all_synchronous()
+                self.motor_controller.home_all()
                 # Reset all positions to 0 after successful homing
                 self.position['X'] = 0.0
                 self.position['Y'] = 0.0
                 self.position['Z'] = 0.0
                 self.position['ROT'] = 0.0
                 logger.info(f"Position reset after homing: {self.position}")
-                
-                # Debug sensor states after homing - removed non-existent module
                 
                 self.is_homing = False
                 return True
@@ -325,19 +292,17 @@ class RealMotorController:
                 return False
 
     def get_position(self):
-        # Use motor controller's actual position tracking
-        if hasattr(self.motor_controller, 'get_position'):
-            motor_pos = self.motor_controller.get_position()
-            # Motor controller tracks position in mm internally, but works with inches as input
-            # So we need to convert mm back to inches for consistency
+        # Use GRBL position data (in mm) and convert to inches
+        try:
+            x, y, z, a = self.motor_controller.get_position()
             return {
-                'X': motor_pos['X'] / 25.4,
-                'Y': motor_pos['Y'] / 25.4,
-                'Z': motor_pos['Z'] / 25.4,
-                'ROT': motor_pos['ROT']
+                'X': x / 25.4,  # Convert mm to inches
+                'Y': y / 25.4,  # Convert mm to inches
+                'Z': z / 25.4,  # Convert mm to inches
+                'ROT': a        # A-axis is already in degrees
             }
-        else:
-            # Fallback to internal position tracking
+        except:
+            # Fallback to internal position tracking (already in inches)
             with self.lock:
                 return dict(self.position)
     
@@ -357,31 +322,29 @@ class RealMotorController:
             logger.warning(f"Could not sync position: {e}")
     
     def get_sensor_states(self):
-        """Get current sensor states for debugging."""
-        with self.lock:
-            return self.motor_controller.get_sensor_states()
+        """Get current sensor states for debugging (not applicable for GRBL)."""
+        return {}
 
     def estop(self):
         try:
-            # Emergency stop - stop movement and disable all motors
-            self.motor_controller.stop_movement()
-            self.motor_controller.cleanup()
-            logger.warning("EMERGENCY STOP triggered - all motors disabled")
+            # Emergency stop - send reset/stop to GRBL
+            self.motor_controller.send_immediate("\x18")  # Ctrl+X soft reset
+            logger.warning("EMERGENCY STOP triggered - GRBL reset")
         except Exception as e:
             logger.error(f"E-stop error: {e}")
 
     def stop_movement(self):
         """Stop any ongoing movement immediately."""
         try:
-            self.motor_controller.stop_movement()
+            self.motor_controller.send_immediate("!")  # Feed hold
             logger.info("Movement stopped")
         except Exception as e:
             logger.error(f"Stop movement error: {e}")
 
     def cleanup(self):
         try:
-            # Use the motor controller's cleanup method to disable motors
-            self.motor_controller.cleanup()
+            # Close GRBL connection
+            self.motor_controller.close()
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
 
@@ -404,64 +367,77 @@ class RealMotorController:
         
         logger.info(f"MOVE_TO: current=({self.position['X']:.1f},{self.position['Y']:.1f},{self.position['Z']:.1f},{self.position['ROT']:.1f}) -> target=({x or self.position['X']:.1f},{y or self.position['Y']:.1f},{z or self.position['Z']:.1f},{rot or self.position['ROT']:.1f}) -> delta=({delta_x:.2f},{delta_y:.2f},{delta_z:.2f},{delta_rot:.2f})")
         
-        # Use coordinated movement for X and Y, individual for Z and ROT
-        if abs(delta_x) > 1e-6 or abs(delta_y) > 1e-6:
-            self.move_coordinated(
-                x_distance_mm=delta_x,
-                y_distance_mm=delta_y,
-                z_distance_mm=delta_z,
-                rot_distance_mm=delta_rot
-            )
-        else:
-            # Only Z or ROT movement needed
-            if abs(delta_z) > 1e-6:
-                # Convert inches to millimeters for move_distance
-                delta_z_mm = delta_z * 25.4
-                self.motor_controller.move_distance(delta_z_mm, 'Z')
-            if abs(delta_rot) > 1e-6:
-                self.motor_controller.move_distance(delta_rot, 'ROT')
+        # Use G0 (rapid) movement to move to absolute position
+        # Convert from inches to mm for GRBL
+        x_mm = x * 25.4 if x is not None else None
+        y_mm = y * 25.4 if y is not None else None
+        z_mm = z * 25.4 if z is not None else None
         
-        # Update position tracking with ACTUAL achieved positions (not requested)
-        # The motor controller may limit movements, so we need to track what was actually achieved
+        # Build G0 command
+        cmd_parts = ["G0"]
+        if x_mm is not None:
+            cmd_parts.append(f"X{x_mm:.3f}")
+        if y_mm is not None:
+            cmd_parts.append(f"Y{y_mm:.3f}")
+        if z_mm is not None:
+            cmd_parts.append(f"Z{z_mm:.3f}")
+        if rot is not None:
+            cmd_parts.append(f"A{rot:.3f}")
+        
+        if len(cmd_parts) > 1:  # Only send if we have axes to move
+            self.motor_controller.send(" ".join(cmd_parts))
+        
+        # Update position tracking (all values already in inches)
         with self.lock:
             if x is not None:
                 self.position['X'] = x
             if y is not None:
                 self.position['Y'] = y
             if z is not None:
-                # Check if Z movement was limited by the motor controller
-                # If the target Z position is below -1.0 inches, limit it to -1.0 inches
-                if z < -1.0:  # -1.0 inch limit
-                    actual_z = -1.0  # Limit target to -1.0 inches
-                    logger.warning(f"Z target limited: requested {z:.2f} inches, actual {actual_z:.2f} inches")
+                # Apply Z limits
+                if z < -1.0:
+                    actual_z = -1.0
+                    logger.warning(f"Z target limited: requested {z:.2f}in, actual {actual_z:.2f}in")
+                    self.position['Z'] = actual_z
+                elif z > 0.5:
+                    actual_z = 0.5
+                    logger.warning(f"Z target limited: requested {z:.2f}in, actual {actual_z:.2f}in")
                     self.position['Z'] = actual_z
                 else:
                     self.position['Z'] = z
             if rot is not None:
                 self.position['ROT'] = rot
 
-    def move_coordinated(self, x_distance_mm=0, y_distance_mm=0, z_distance_mm=0, rot_distance_mm=0):
-        """Execute coordinated movement across multiple axes."""
+    def move_coordinated(self, x_distance_in=0, y_distance_in=0, z_distance_in=0, rot_distance_deg=0):
+        """Execute coordinated movement across multiple axes using relative G1 movement."""
         try:
-            # Convert inch distances to millimeters for motor controller
-            x_distance_mm_actual = x_distance_mm * 25.4
-            y_distance_mm_actual = y_distance_mm * 25.4
-            z_distance_mm_actual = z_distance_mm * 25.4
-            rot_distance_mm_actual = rot_distance_mm  # Rotation stays in degrees
+            # Convert inch distances to mm for GRBL
+            x_mm = x_distance_in * 25.4
+            y_mm = y_distance_in * 25.4
+            z_mm = z_distance_in * 25.4
             
-            self.motor_controller.move_coordinated(
-                x_distance_mm=x_distance_mm_actual,
-                y_distance_mm=y_distance_mm_actual,
-                z_distance_mm=z_distance_mm_actual,
-                rot_distance_mm=rot_distance_mm_actual
-            )
+            # Build G1 relative movement command
+            cmd_parts = ["G91", "G1"]  # G91 = relative mode, G1 = linear interpolation
+            if abs(x_mm) > 1e-6:
+                cmd_parts.append(f"X{x_mm:.3f}")
+            if abs(y_mm) > 1e-6:
+                cmd_parts.append(f"Y{y_mm:.3f}")
+            if abs(z_mm) > 1e-6:
+                cmd_parts.append(f"Z{z_mm:.3f}")
+            if abs(rot_distance_deg) > 1e-6:
+                cmd_parts.append(f"A{rot_distance_deg:.3f}")
             
-            # Update position tracking (use lock only for position update)
+            if len(cmd_parts) > 2:  # Only send if we have axes to move
+                cmd_parts.append("F1000")  # 1000 mm/min feedrate
+                self.motor_controller.send(" ".join(cmd_parts))
+                self.motor_controller.send("G90")  # Return to absolute mode
+            
+            # Update position tracking (all in inches)
             with self.lock:
-                self.position['X'] += x_distance_mm
-                self.position['Y'] += y_distance_mm
-                self.position['Z'] += z_distance_mm
-                self.position['ROT'] += rot_distance_mm
+                self.position['X'] += x_distance_in
+                self.position['Y'] += y_distance_in
+                self.position['Z'] += z_distance_in
+                self.position['ROT'] += rot_distance_deg
             
         except Exception as e:
             logger.error(f"Coordinated movement error: {e}")
@@ -480,7 +456,7 @@ class FabricCNCApp:
             except:
                 pass
         self.root.configure(bg=UI_COLORS['BACKGROUND'])
-        self.jog_speed = 1.0 * config.APP_CONFIG['INCH_TO_MM']  # Default to 1 inch
+        self.jog_speed = 1.0  # Default to 1 inch
         self.jog_speed_var = ctk.DoubleVar(value=1.0)  # Default to 1 inch
         self._jog_slider_scale = 0.1  # Scale factor for slider (0.1 inch increments)
         self._arrow_key_state = {}
@@ -503,7 +479,8 @@ class FabricCNCApp:
                 feed_rate=1000.0,
                 plunge_rate=200.0
             )
-            self.smooth_motion_executor = SmoothMotionExecutor(self.motor_ctrl)
+            # Smooth motion executor not needed with GRBL - GRBL handles smooth motion internally
+            self.smooth_motion_executor = None
             self.gcode_visualizer = GCodeVisualizer()
         else:
             self.dxf_processor = None
@@ -731,10 +708,10 @@ class FabricCNCApp:
             delta = -self.jog_speed
         elif key == 'Page_Up':
             axis = 'Z'
-            delta = 1.0 * config.APP_CONFIG['INCH_TO_MM']  # 1 inch up
+            delta = 1.0  # 1 inch up
         elif key == 'Page_Down':
             axis = 'Z'
-            delta = -1.0 * config.APP_CONFIG['INCH_TO_MM']  # 1 inch down
+            delta = -1.0  # 1 inch down
         elif key == 'Home':
             axis = 'ROT'
             delta = 5.0  # 5 degrees clockwise
@@ -803,8 +780,8 @@ class FabricCNCApp:
         # Draw current tool head position (all axes)
         pos = self.motor_ctrl.get_position()
         # Positions are already in inches, so clamp using inch limits
-        x_max_inches = config.APP_CONFIG['X_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']
-        y_max_inches = config.APP_CONFIG['Y_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']
+        x_max_inches = 68.0  # 68 inches max X travel
+        y_max_inches = 45.0  # 45 inches max Y travel
         x = max(0.0, min(pos['X'], x_max_inches))
         y = max(0.0, min(pos['Y'], y_max_inches))
         clamped_pos = {'X': x, 'Y': y}
@@ -883,8 +860,8 @@ class FabricCNCApp:
         inch_tick = 5
         
         # Configure plot dimensions from config file
-        plot_width_in = config.APP_CONFIG['X_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
-        plot_height_in = config.APP_CONFIG['Y_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
+        plot_width_in = 68.0  # 68 inches work area width
+        plot_height_in = 45.0  # 45 inches work area height
         
         # Get buffer from config file
         buffer_px = config.APP_CONFIG['PLOT_BUFFER_PX']
@@ -966,8 +943,8 @@ class FabricCNCApp:
     def _inches_to_canvas(self, x_in, y_in):
         # Convert inches to canvas coordinates with home at bottom-left
         # Configure plot dimensions from config file
-        plot_width_in = config.APP_CONFIG['X_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
-        plot_height_in = config.APP_CONFIG['Y_MAX_MM'] / config.APP_CONFIG['INCH_TO_MM']  # Convert mm to inches
+        plot_width_in = 68.0  # 68 inches work area width
+        plot_height_in = 45.0  # 45 inches work area height
         
         # Get buffer from config file
         buffer_px = config.APP_CONFIG['PLOT_BUFFER_PX']
@@ -1479,28 +1456,32 @@ class FabricCNCApp:
         Generate a single continuous path for a spline with ultra-smooth motion.
         Returns: List of (x, y, angle, z) tuples for continuous motion
         """
-        return generate_continuous_spline_toolpath(spline, step_size=0.05)
+        # Legacy toolpath generation disabled with GRBL integration
+        return []
     
     def _generate_continuous_circle_path(self, center, radius, start_angle=0, end_angle=2*math.pi):
         """
         Generate a single continuous path for a circle/arc with ultra-smooth motion.
         Returns: List of (x, y, angle, z) tuples for continuous motion
         """
-        return generate_continuous_circle_toolpath(center, radius, start_angle, end_angle, step_size=0.05)
+        # Legacy toolpath generation disabled with GRBL integration
+        return []
     
     def _generate_continuous_polyline_path(self, polyline):
         """
         Generate a single continuous path for a polyline with smooth transitions.
         Returns: List of (x, y, angle, z) tuples for continuous motion
         """
-        return generate_continuous_polyline_toolpath(polyline, step_size=0.05)
+        # Legacy toolpath generation disabled with GRBL integration
+        return []
     
     def _generate_continuous_line_path(self, line):
         """
         Generate a single continuous path for a line with smooth motion.
         Returns: List of (x, y, angle, z) tuples for continuous motion
         """
-        return generate_continuous_line_toolpath(line, step_size=0.05)
+        # Legacy toolpath generation disabled with GRBL integration
+        return []
 
     def _preview_toolpath(self):
         """Preview toolpath with arrows and corner analysis in the main GUI."""
@@ -1630,7 +1611,15 @@ class FabricCNCApp:
                     # Add debug prints for G-code vs motor controller position comparison
                     self._add_gcode_debug_prints(gcode_lines)
                     
-                    self.smooth_motion_executor.execute_toolpath_from_gcode(gcode_lines, progress_callback)
+                    # Use GRBL to execute G-code directly
+                    if not SIMULATION_MODE:
+                        self.motor_ctrl.motor_controller.run_gcode_file(self.gcode_file_path)
+                    else:
+                        # For simulation, just log the lines
+                        for i, line in enumerate(gcode_lines):
+                            if progress_callback:
+                                progress_callback(i / len(gcode_lines) * 100, f"Line {i+1}/{len(gcode_lines)}")
+                            time.sleep(0.01)  # Simulate execution time
                     logger.info("Smooth motion execution completed successfully")
                     
                     # Update UI on completion
@@ -1730,16 +1719,16 @@ class FabricCNCApp:
             logger.error(f"Failed to stop G-code execution: {e}")
             self.status_label.configure(text=f"Stop failed: {str(e)}", text_color="red")
 
-    def _travel_to_start(self, x_mm, y_mm):
+    def _travel_to_start(self, x_in, y_in):
         """Travel from home to the start position of the toolpath."""
         # Move to start position with Z up
         if MOTOR_IMPORTS_AVAILABLE:
-            self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=config.APP_CONFIG['Z_UP_MM'], rot=0.0)
+            self.motor_ctrl.move_to(x=x_in, y=y_in, z=-0.5, rot=0.0)  # Move to safe height (-0.5 inches)
         
         # Update position and display
-        self._current_toolpath_pos['X'] = x_mm
-        self._current_toolpath_pos['Y'] = y_mm
-        self._current_toolpath_pos['Z'] = config.APP_CONFIG['Z_UP_MM']
+        self._current_toolpath_pos['X'] = x_in
+        self._current_toolpath_pos['Y'] = y_in
+        self._current_toolpath_pos['Z'] = -0.5  # Safe height in inches
         self._current_toolpath_pos['ROT'] = 0.0
         
         self._update_position_display()
@@ -1763,16 +1752,17 @@ class FabricCNCApp:
             return
         x, y, angle, z = path[step_idx]
         # Set toolpath position directly (no swap)
-        x_mm = x * config.APP_CONFIG['INCH_TO_MM']
-        y_mm = y * config.APP_CONFIG['INCH_TO_MM']
-        self._current_toolpath_pos['X'] = x_mm
-        self._current_toolpath_pos['Y'] = y_mm
-        self._current_toolpath_pos['Z'] = config.APP_CONFIG['Z_DOWN_MM'] if z == 0 else config.APP_CONFIG['Z_UP_MM']
+        # Coordinates are already in inches, no conversion needed
+        x_in = x
+        y_in = y
+        self._current_toolpath_pos['X'] = x_in
+        self._current_toolpath_pos['Y'] = y_in
+        self._current_toolpath_pos['Z'] = -1.0 if z == 0 else -0.5  # Cutting (-1.0in) or safe (-0.5in) height
         # Use rotation angle directly - motor controller handles direction inversion
         self._current_toolpath_pos['ROT'] = math.degrees(angle)
         
-        # Debug: print toolpath coordinates in both units
-        print(f"[DEBUG] Toolpath step {step_idx}: X={x:.3f}in ({x_mm:.2f}mm), Y={y:.3f}in ({y_mm:.2f}mm)")
+        # Debug: print toolpath coordinates
+        print(f"[DEBUG] Toolpath step {step_idx}: X={x:.3f}in, Y={y:.3f}in")
         
         if MOTOR_IMPORTS_AVAILABLE:
             self.motor_ctrl.move_to(
@@ -1786,8 +1776,8 @@ class FabricCNCApp:
         print(f"[DEBUG] Toolpath pos: X={self._current_toolpath_pos['X']:.2f} Y={self._current_toolpath_pos['Y']:.2f} | Motor pos: X={actual_pos['X']:.2f} Y={actual_pos['Y']:.2f}")
         
         # Check if coordinates are within machine limits
-        if abs(x_mm) > config.APP_CONFIG['X_MAX_MM'] or abs(y_mm) > config.APP_CONFIG['Y_MAX_MM']:
-            print(f"[WARNING] Coordinates beyond machine limits! X={x_mm:.2f}mm (limit: ±{config.APP_CONFIG['X_MAX_MM']:.2f}mm), Y={y_mm:.2f}mm (limit: ±{config.APP_CONFIG['Y_MAX_MM']:.2f}mm)")
+        if abs(x_in) > 68.0 or abs(y_in) > 45.0:
+            print(f"[WARNING] Coordinates beyond machine limits! X={x_in:.2f}in (limit: ±68.0in), Y={y_in:.2f}in (limit: ±45.0in)")
         self._update_position_display()  # Force update after each move
         self._draw_canvas()
         # Next step
@@ -1797,8 +1787,9 @@ class FabricCNCApp:
 
     def _draw_live_tool_head_inches(self, pos):
         # Draw a blue dot and orientation line at the current tool head position (in inches)
-        x_in = pos['X'] / config.APP_CONFIG['INCH_TO_MM']
-        y_in = pos['Y'] / config.APP_CONFIG['INCH_TO_MM']
+        # Position is already in inches
+        x_in = pos['X']
+        y_in = pos['Y']
         rot_rad = math.radians(pos.get('ROT', 0.0))
         x_c, y_c = self._inches_to_canvas(x_in, y_in)
         r = config.APP_CONFIG['LIVE_TOOL_HEAD_RADIUS']
@@ -1905,13 +1896,13 @@ class FabricCNCApp:
         y_disp = pos['Y']
         z_disp = pos['Z']
         rot_disp = pos['ROT']
-        text = f"X:{x_disp:.1f}\nY:{y_disp:.1f}\nZ:{z_disp:.1f}\nR:{rot_disp:.0f}°"
+        text = f"X:{x_disp:.1f}in\nY:{y_disp:.1f}in\nZ:{z_disp:.1f}in\nR:{rot_disp:.0f}°"
         self.coord_label.configure(text=text)
         self.root.after(200, self._update_position_display)
 
     def _update_jog_speed(self):
         try:
-            self.jog_speed = self.jog_speed_var.get() * config.APP_CONFIG['INCH_TO_MM']
+            self.jog_speed = self.jog_speed_var.get()  # Already in inches
         except Exception:
             pass
 
@@ -1922,7 +1913,7 @@ class FabricCNCApp:
         # Update the display label
         self.jog_speed_label.configure(text=f"{speed_inches:.1f} in")
         # Update the actual jog speed
-        self.jog_speed = speed_inches * config.APP_CONFIG['INCH_TO_MM']
+        self.jog_speed = speed_inches  # Already in inches
 
     def _toggle_fullscreen(self):
         """Toggle full screen mode."""
