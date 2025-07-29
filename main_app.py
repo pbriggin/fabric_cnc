@@ -241,7 +241,8 @@ class RealMotorController:
 
     def jog(self, axis, delta):
         try:
-            print(f"[JOG] Request: {axis} by {delta:.3f}in")
+            if self._debug_prints_enabled:
+                print(f"[JOG] Request: {axis} by {delta:.3f}in")
             
             # Get current position from GRBL
             current_pos = self.get_position()
@@ -252,7 +253,8 @@ class RealMotorController:
             clamped_val = self._clamp(axis, target_val)
             actual_delta = clamped_val - current_val
             
-            print(f"[JOG] Current: {current_val:.3f}in, Target: {target_val:.3f}in, Clamped: {clamped_val:.3f}in, Delta: {actual_delta:.3f}in")
+            if self._debug_prints_enabled:
+                print(f"[JOG] Current: {current_val:.3f}in, Target: {target_val:.3f}in, Clamped: {clamped_val:.3f}in, Delta: {actual_delta:.3f}in")
             
             if abs(actual_delta) > 1e-6:
                 # Map axis names - GRBL controller now expects inches directly
@@ -263,11 +265,13 @@ class RealMotorController:
                     if axis == 'ROT':
                         # Rotation axis in degrees
                         delta_grbl = actual_delta
-                        print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.3f}°")
+                        if self._debug_prints_enabled:
+                            print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.3f}°")
                     else:
                         # Linear axes - send inches directly to GRBL
                         delta_grbl = actual_delta
-                        print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.3f}in")
+                        if self._debug_prints_enabled:
+                            print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.3f}in")
                     
                     self.motor_controller.jog(axis_map[axis], delta_grbl, feedrate)
                     time.sleep(0.2)  # Wait for GRBL to process
@@ -323,10 +327,12 @@ class RealMotorController:
                 'Z': z / 25.4,  # Convert mm to inches
                 'ROT': a        # A-axis is already in degrees
             }
-            print(f"[POSITION] GRBL raw: [{x:.3f}, {y:.3f}, {z:.3f}, {a:.3f}]mm -> GUI: [{pos['X']:.3f}, {pos['Y']:.3f}, {pos['Z']:.3f}, {pos['ROT']:.1f}]in")
+            if self._debug_prints_enabled:
+                print(f"[POSITION] GRBL raw: [{x:.3f}, {y:.3f}, {z:.3f}, {a:.3f}]mm -> GUI: [{pos['X']:.3f}, {pos['Y']:.3f}, {pos['Z']:.3f}, {pos['ROT']:.1f}]in")
             return pos
         except Exception as e:
-            print(f"[POSITION ERROR] Could not get GRBL position: {e}")
+            if self._debug_prints_enabled:
+                print(f"[POSITION ERROR] Could not get GRBL position: {e}")
             # Return zeros if GRBL unavailable
             return {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
     
@@ -451,6 +457,12 @@ class FabricCNCApp:
         self._jog_in_progress = {'X': False, 'Y': False, 'Z': False, 'ROT': False}
         self._arrow_key_repeat_delay = config.APP_CONFIG['ARROW_KEY_REPEAT_DELAY']
         
+        # Performance optimization: Canvas redraw debouncing
+        self._canvas_redraw_pending = False
+        self._last_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
+        self._position_update_threshold = 0.01  # Only update if position changes by > 0.01 inches
+        self._debug_prints_enabled = False  # Toggle for debug output
+        
         # Initialize new DXF processing and toolpath generation
         if DXF_TOOLPATH_IMPORTS_AVAILABLE:
             self.dxf_processor = DXFProcessor()
@@ -564,7 +576,7 @@ class FabricCNCApp:
         self.canvas_offset = (0, 0)
         
         # Draw initial canvas
-        self._draw_canvas()
+        self._schedule_canvas_redraw()
 
         # === RIGHT COLUMN: Motor Controls ===
         self.right_column = ctk.CTkFrame(self.main_container, fg_color=UI_COLORS['SURFACE'], corner_radius=12)
@@ -736,8 +748,19 @@ class FabricCNCApp:
     def _on_canvas_resize(self, event):
         self.canvas_width = event.width
         self.canvas_height = event.height
-        self._draw_canvas()
+        self._schedule_canvas_redraw()
 
+    def _schedule_canvas_redraw(self, pos=None):
+        """Schedule a canvas redraw with debouncing to prevent excessive redraws."""
+        if not self._canvas_redraw_pending:
+            self._canvas_redraw_pending = True
+            self.root.after_idle(lambda: self._draw_canvas_debounced(pos))
+    
+    def _draw_canvas_debounced(self, pos=None):
+        """Debounced canvas redraw that only executes once per idle cycle."""
+        self._canvas_redraw_pending = False
+        self._draw_canvas(pos)
+    
     def _draw_canvas(self, pos=None):
         self.canvas.delete("all")
         # Draw axes in inches
@@ -834,7 +857,7 @@ class FabricCNCApp:
         APP_CONFIG = config.APP_CONFIG
         
         # Redraw the canvas with new settings
-        self._draw_canvas()
+        self._schedule_canvas_redraw()
 
     def _draw_axes_in_inches(self):
         # Draw full-height canvas with gridlines and numbers
@@ -1212,7 +1235,7 @@ class FabricCNCApp:
             self.status_label.configure(text=f"DXF imported: {len(self.processed_shapes)} shapes", text_color="green")
             
             # Redraw canvas to show imported shapes
-            self._draw_canvas()
+            self._schedule_canvas_redraw()
             
         except Exception as e:
             logger.error(f"Failed to load DXF: {e}")
@@ -1329,7 +1352,7 @@ class FabricCNCApp:
             self.status_label.configure(text=f"Toolpath generated: {total_lines} lines, {corner_count} corners", text_color="green")
             
             # Redraw canvas to show toolpath
-            self._draw_canvas()
+            self._schedule_canvas_redraw()
             
         except Exception as e:
             logger.error(f"Failed to generate toolpath: {e}")
@@ -1486,7 +1509,7 @@ class FabricCNCApp:
             self._parse_gcode_for_preview(self.gcode_file_path)
             
             # Redraw canvas to show toolpath
-            self._draw_canvas()
+            self._schedule_canvas_redraw()
             
             # Update status with preview info
             corner_count = len(self.toolpath_data.get('corners', []))
@@ -1713,8 +1736,9 @@ class FabricCNCApp:
         self._current_toolpath_pos['Z'] = -0.5  # Safe height in inches
         self._current_toolpath_pos['ROT'] = 0.0
         
-        self._update_position_and_canvas()
-        self._draw_canvas()
+        # Position update loop and canvas redraw will be handled automatically
+        self._last_position = self.motor_ctrl.get_position().copy()
+        self._schedule_canvas_redraw()
         
         # Wait a moment, then start the toolpath
         self.root.after(500, self._run_toolpath_step)
@@ -1744,7 +1768,8 @@ class FabricCNCApp:
         self._current_toolpath_pos['ROT'] = math.degrees(angle)
         
         # Debug: print toolpath coordinates
-        print(f"[DEBUG] Toolpath step {step_idx}: X={x:.3f}in, Y={y:.3f}in")
+        if self._debug_prints_enabled:
+            print(f"[DEBUG] Toolpath step {step_idx}: X={x:.3f}in, Y={y:.3f}in")
         
         if MOTOR_IMPORTS_AVAILABLE:
             self.motor_ctrl.move_to(
@@ -1755,13 +1780,19 @@ class FabricCNCApp:
             )
         # Debug: print both toolpath and actual motor position
         actual_pos = self.motor_ctrl.get_position()
-        print(f"[DEBUG] Toolpath pos: X={self._current_toolpath_pos['X']:.2f} Y={self._current_toolpath_pos['Y']:.2f} | Motor pos: X={actual_pos['X']:.2f} Y={actual_pos['Y']:.2f}")
+        if self._debug_prints_enabled:
+            print(f"[DEBUG] Toolpath pos: X={self._current_toolpath_pos['X']:.2f} Y={self._current_toolpath_pos['Y']:.2f} | Motor pos: X={actual_pos['X']:.2f} Y={actual_pos['Y']:.2f}")
         
         # Check if coordinates are within machine limits
         if abs(x_in) > 68.0 or abs(y_in) > 45.0:
-            print(f"[WARNING] Coordinates beyond machine limits! X={x_in:.2f}in (limit: ±68.0in), Y={y_in:.2f}in (limit: ±45.0in)")
-        self._update_position_and_canvas()  # Force update after each move
-        self._draw_canvas()
+            if self._debug_prints_enabled:
+                print(f"[WARNING] Coordinates beyond machine limits! X={x_in:.2f}in (limit: ±68.0in), Y={y_in:.2f}in (limit: ±45.0in)")
+            logger.warning(f"Coordinates beyond machine limits! X={x_in:.2f}in, Y={y_in:.2f}in")
+        
+        # Update position tracking and schedule canvas redraw
+        self._last_position = self.motor_ctrl.get_position().copy()
+        self._schedule_canvas_redraw()
+        
         # Next step
         self._current_toolpath_idx[1] += 1
         self._toolpath_step_count += 1
@@ -1826,8 +1857,7 @@ class FabricCNCApp:
 
     def _jog(self, axis, delta):
         self.motor_ctrl.jog(axis, delta)
-        self._draw_canvas()
-        self._update_position_and_canvas()
+        # Position update loop will handle canvas redraw automatically
 
     def _home(self, axis):
         success = self.motor_ctrl.home(axis)
@@ -1835,8 +1865,7 @@ class FabricCNCApp:
             self.status_label.configure(text=f"{axis} axis homed", text_color="green")
         else:
             self.status_label.configure(text=f"Failed to home {axis}", text_color="red")
-        self._draw_canvas()
-        self._update_position_and_canvas()
+        # Position update loop will handle canvas redraw automatically
         # Clear status after 2 seconds
         self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
@@ -1846,8 +1875,7 @@ class FabricCNCApp:
             self.status_label.configure(text="All axes homed", text_color="green")
         else:
             self.status_label.configure(text="Homing failed", text_color="red")
-        self._draw_canvas()
-        self._update_position_and_canvas()
+        # Position update loop will handle canvas redraw automatically
         # Clear status after 2 seconds
         self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
@@ -1873,9 +1901,22 @@ class FabricCNCApp:
 
     def _update_position_and_canvas(self):
         pos = self.motor_ctrl.get_position()
+        
+        # Check if position has changed significantly
+        position_changed = any(
+            abs(pos[axis] - self._last_position[axis]) > self._position_update_threshold
+            for axis in ['X', 'Y', 'Z', 'ROT']
+        )
+        
+        # Always update the position display
         self._update_position_display(pos)
-        self._draw_canvas(pos)
-        self.root.after(500, self._update_position_and_canvas)  # Update every 500ms instead of 200ms
+        
+        # Only redraw canvas if position changed significantly
+        if position_changed:
+            self._last_position = pos.copy()
+            self._schedule_canvas_redraw(pos)
+        
+        self.root.after(500, self._update_position_and_canvas)  # Update every 500ms
 
     def _update_position_display(self, pos=None):
         if pos is None:
@@ -1937,9 +1978,10 @@ def main():
     root.mainloop()
 
     # In main(), print debug info for simulation mode
-    print(f"[DEBUG] ON_RPI={ON_RPI}")
-    print(f"[DEBUG] MOTOR_IMPORTS_AVAILABLE={MOTOR_IMPORTS_AVAILABLE}")
-    print(f"[DEBUG] SIMULATION_MODE={SIMULATION_MODE}")
+    if __name__ == "__main__":  # Only print on startup
+        print(f"[DEBUG] ON_RPI={ON_RPI}")
+        print(f"[DEBUG] MOTOR_IMPORTS_AVAILABLE={MOTOR_IMPORTS_AVAILABLE}")
+        print(f"[DEBUG] SIMULATION_MODE={SIMULATION_MODE}")
 
 # G-code generation functions moved to toolpath_planning package
 
