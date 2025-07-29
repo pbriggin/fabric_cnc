@@ -81,6 +81,9 @@ class SimpleHallSwitchTester:
                 'x_limit': 'X' in pins,
                 'y_limit': 'Y' in pins,
                 'z_limit': 'Z' in pins,
+                'a_limit': 'A' in pins,  # A-axis (rotation)
+                'probe': 'P' in pins,    # Probe pin
+                'pins_raw': pins,
                 'status_raw': status_line
             }
         else:
@@ -88,14 +91,17 @@ class SimpleHallSwitchTester:
                 'x_limit': False,
                 'y_limit': False,
                 'z_limit': False,
+                'a_limit': False,
+                'probe': False,
+                'pins_raw': '',
                 'status_raw': status_line
             }
     
-    def test_hall_switch(self):
-        """Test the X-axis hall effect switch."""
-        print("\n" + "="*60)
-        print("X-AXIS HALL EFFECT SWITCH TEST")
-        print("="*60)
+    def test_all_hall_switches(self):
+        """Test all hall effect switches."""
+        print("\n" + "="*70)
+        print("ALL HALL EFFECT SWITCHES TEST")
+        print("="*70)
         
         if not self.connect():
             return False
@@ -105,21 +111,33 @@ class SimpleHallSwitchTester:
         info = self.send_command('$I')
         if info:
             for line in info:
-                if 'FIRMWARE' in line or 'VER:' in line:
+                if 'FIRMWARE' in line or 'VER:' in line or 'AXS:' in line:
                     print(f"  {line}")
         
-        print("\nTesting hall effect switch...")
+        print("\nTesting all hall effect switches...")
         print("\nINSTRUCTIONS:")
-        print("1. Watch the 'X Limit' status below")
-        print("2. Manually trigger the X-axis hall effect sensor")
-        print("3. You should see 'X Limit' change from OFF to ON")
+        print("1. Watch the switch status display below")
+        print("2. Manually trigger each hall effect sensor one at a time")
+        print("3. You should see the corresponding switch change from OFF to ON")
         print("4. Release the sensor - it should change back to OFF")
-        print("5. Press Ctrl+C to exit when done")
+        print("5. Test all axes: X, Y, Z, and A (rotation)")
+        print("6. Press Ctrl+C to exit when done")
         
-        print("\nMonitoring switch status (press Ctrl+C to exit):")
-        print("-" * 50)
+        print("\nMonitoring all switches (press Ctrl+C to exit):")
+        print("-" * 70)
         
-        last_x_state = None
+        # Track last states for all switches
+        last_states = {
+            'x_limit': None,
+            'y_limit': None, 
+            'z_limit': None,
+            'a_limit': None,
+            'probe': None
+        }
+        
+        # Display header
+        print("X-Limit | Y-Limit | Z-Limit | A-Limit | Probe | Raw Pins")
+        print("-" * 70)
         
         try:
             while True:
@@ -127,23 +145,43 @@ class SimpleHallSwitchTester:
                 if status:
                     parsed = self.parse_status(status)
                     if parsed:
-                        x_state = parsed['x_limit']
+                        current_states = {
+                            'x_limit': parsed['x_limit'],
+                            'y_limit': parsed['y_limit'],
+                            'z_limit': parsed['z_limit'],
+                            'a_limit': parsed['a_limit'],
+                            'probe': parsed['probe']
+                        }
                         
-                        # Only print when state changes or every 20 iterations
-                        if x_state != last_x_state:
-                            state_text = "ON " if x_state else "OFF"
-                            symbol = "●" if x_state else "○"
-                            print(f"X Limit: {symbol} {state_text}  ", end="")
+                        # Check if any state changed
+                        state_changed = any(current_states[key] != last_states[key] for key in current_states)
+                        
+                        if state_changed or all(v is None for v in last_states.values()):
+                            # Format display
+                            x_display = "●  ON " if current_states['x_limit'] else "○ OFF "
+                            y_display = "●  ON " if current_states['y_limit'] else "○ OFF "
+                            z_display = "●  ON " if current_states['z_limit'] else "○ OFF "
+                            a_display = "●  ON " if current_states['a_limit'] else "○ OFF "
+                            p_display = "●  ON " if current_states['probe'] else "○ OFF "
                             
-                            if x_state != last_x_state and last_x_state is not None:
-                                if x_state:
-                                    print("← SENSOR TRIGGERED!")
-                                else:
-                                    print("← SENSOR RELEASED!")
-                            else:
-                                print()
+                            pins_display = parsed['pins_raw'] if parsed['pins_raw'] else "none"
                             
-                            last_x_state = x_state
+                            print(f"{x_display} | {y_display} | {z_display} | {a_display} | {p_display} | {pins_display}")
+                            
+                            # Show what changed
+                            changes = []
+                            for key in current_states:
+                                if last_states[key] is not None and current_states[key] != last_states[key]:
+                                    axis_name = key.replace('_limit', '').replace('probe', 'Probe').upper()
+                                    if current_states[key]:
+                                        changes.append(f"{axis_name} TRIGGERED")
+                                    else:
+                                        changes.append(f"{axis_name} RELEASED")
+                            
+                            if changes:
+                                print(f"  → {', '.join(changes)}")
+                            
+                            last_states = current_states.copy()
                 
                 time.sleep(0.1)  # Check 10 times per second
                 
@@ -154,6 +192,10 @@ class SimpleHallSwitchTester:
             if self.serial:
                 self.serial.close()
                 print("Disconnected from GRBL")
+    
+    def test_hall_switch(self):
+        """Test the X-axis hall effect switch (legacy method)."""
+        return self.test_all_hall_switches()
     
     def quick_status_check(self):
         """Quick check of current limit switch status."""
