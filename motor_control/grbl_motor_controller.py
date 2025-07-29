@@ -23,7 +23,7 @@ class GrblMotorController:
         
         # Initialize GRBL settings and reset work coordinates
         time.sleep(2)  # Wait for GRBL to initialize
-        self.send("G21")  # Keep GRBL in mm mode (we'll convert inches to mm)
+        self.send("G20")  # Set GRBL to inches mode
         self.send("G90")  # Set absolute positioning
         self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Reset work coordinates to 0,0,0,0
         self.send("G54")  # Select work coordinate system 1
@@ -75,8 +75,8 @@ class GrblMotorController:
     def jog(self, axis, delta, feedrate=100):
         if axis not in "XYZA":
             raise ValueError("Invalid axis")
-        # Use G21 for mm (delta should already be in mm)
-        self.send(f"$J=G91 G21 {axis}{delta:.3f} F{feedrate}")
+        # Use G20 for inches (delta should already be in inches)
+        self.send(f"$J=G91 G20 {axis}{delta:.3f} F{feedrate}")
 
     def home_all(self):
         self.send("$H")
