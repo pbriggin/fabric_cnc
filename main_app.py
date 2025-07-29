@@ -374,6 +374,18 @@ class RealMotorController:
             self.motor_controller.close()
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
+    
+    def check_limit_switches(self):
+        """Check the current status of limit switches."""
+        self.motor_controller.check_limit_switches()
+    
+    def get_grbl_settings(self):
+        """Query and display current GRBL settings."""
+        self.motor_controller.get_grbl_settings()
+    
+    def get_grbl_info(self):
+        """Get GRBL version and build info.""" 
+        self.motor_controller.get_grbl_info()
 
     def move_to(self, x=None, y=None, z=None, rot=None):
         # Get current position from GRBL for logging

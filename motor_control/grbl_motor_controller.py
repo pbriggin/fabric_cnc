@@ -326,15 +326,21 @@ class GrblMotorController:
         if axis not in "XYZA":
             raise ValueError(f"Invalid axis: {axis}")
         
+        # Pre-homing diagnostics
+        logger.info(f"Preparing to home {axis} axis...")
+        self.get_grbl_info()
+        self.check_limit_switches()
+        
         command = f"$H{axis}"
-        logger.info(f"Attempting to home {axis} axis with command: {command}")
+        logger.info(f"Sending homing command: {command}")
+        logger.warning(f"Ensure {axis}-axis limit switch is connected and working before homing!")
         
         if self.debug_mode:
             logger.info(f"Note: Ensure limit switch for {axis} axis is properly connected and configured")
         
         self.send(command)
         # Wait for homing to complete (individual axis is faster)
-        time.sleep(3)  # Longer wait to ensure homing completes
+        time.sleep(5)  # Longer wait to ensure homing completes or fails properly
         
         # Reset work coordinate for this axis only
         if axis == 'X':
@@ -354,6 +360,41 @@ class GrblMotorController:
             self.position[axis_index] = 0.0
             
         logger.info(f"Homing sequence completed for {axis} axis")
+
+    def check_limit_switches(self):
+        """Check the current status of limit switches."""
+        try:
+            logger.info("Checking limit switch status...")
+            # Send real-time status request
+            self.send_immediate("?")
+            time.sleep(0.1)
+            
+            # Also check pin states if available
+            self.send("$P")  # Check pin states
+            time.sleep(0.5)
+            
+        except Exception as e:
+            logger.error(f"Failed to check limit switches: {e}")
+    
+    def get_grbl_settings(self):
+        """Query and display current GRBL settings."""
+        try:
+            logger.info("Querying GRBL settings...")
+            self.send("$$")  # Request all settings
+            time.sleep(1)  # Wait for response
+            
+        except Exception as e:
+            logger.error(f"Failed to get GRBL settings: {e}")
+    
+    def get_grbl_info(self):
+        """Get GRBL version and build info."""
+        try:
+            logger.info("Getting GRBL version info...")
+            self.send("$I")  # Request build info
+            time.sleep(0.5)
+            
+        except Exception as e:
+            logger.error(f"Failed to get GRBL info: {e}")
 
     def run_gcode_file(self, filepath):
         with open(filepath, 'r') as f:
