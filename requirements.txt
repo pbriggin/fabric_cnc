@@ -4,6 +4,8 @@ ezdxf>=1.0.0
 numpy>=1.21.0
 customtkinter>=5.0.0
 matplotlib>=3.0.0
+pyserial>=3.5
+psutil>=5.8.0
 
 # Development dependencies (optional)
 # pytest>=7.0.0
