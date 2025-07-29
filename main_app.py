@@ -255,9 +255,9 @@ class RealMotorController:
             print(f"[JOG] Current: {current_val:.3f}in, Target: {target_val:.3f}in, Clamped: {clamped_val:.3f}in, Delta: {actual_delta:.3f}in")
             
             if abs(actual_delta) > 1e-6:
-                # Map axis names and convert to mm
+                # Map axis names - GRBL controller now expects inches directly
                 axis_map = {'X': 'X', 'Y': 'Y', 'Z': 'Z', 'ROT': 'A'}
-                feedrate = 1000  # mm/min for jog moves
+                feedrate = 100  # inches/min for jog moves
                 
                 if axis in axis_map:
                     if axis == 'ROT':
@@ -265,9 +265,9 @@ class RealMotorController:
                         delta_grbl = actual_delta
                         print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.3f}°")
                     else:
-                        # Linear axes - convert inches to mm
-                        delta_grbl = actual_delta * 25.4
-                        print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.3f}mm ({actual_delta:.3f}in)")
+                        # Linear axes - send inches directly to GRBL
+                        delta_grbl = actual_delta
+                        print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.3f}in")
                     
                     self.motor_controller.jog(axis_map[axis], delta_grbl, feedrate)
                     time.sleep(0.2)  # Wait for GRBL to process
@@ -481,7 +481,7 @@ class FabricCNCApp:
         self.gcode_file_path = ""
         self._setup_ui()
         self._bind_arrow_keys()
-        self._update_position_display()
+        self._update_position_and_canvas()  # Start the synchronized update loop
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         # Force fullscreen after UI setup
         self.root.after(100, lambda: self.root.attributes('-fullscreen', True))
@@ -738,7 +738,7 @@ class FabricCNCApp:
         self.canvas_height = event.height
         self._draw_canvas()
 
-    def _draw_canvas(self):
+    def _draw_canvas(self, pos=None):
         self.canvas.delete("all")
         # Draw axes in inches
         self._draw_axes_in_inches()
@@ -760,8 +760,8 @@ class FabricCNCApp:
             self._draw_toolpath_inches()
         
         # Draw current tool head position (all axes)
-        pos = self.motor_ctrl.get_position()
-        # Positions are already in inches, so clamp using inch limits
+        if pos is None:
+            pos = self.motor_ctrl.get_position()
         x_max_inches = 68.0  # 68 inches max X travel
         y_max_inches = 45.0  # 45 inches max Y travel
         x = max(0.0, min(pos['X'], x_max_inches))
@@ -1713,7 +1713,7 @@ class FabricCNCApp:
         self._current_toolpath_pos['Z'] = -0.5  # Safe height in inches
         self._current_toolpath_pos['ROT'] = 0.0
         
-        self._update_position_display()
+        self._update_position_and_canvas()
         self._draw_canvas()
         
         # Wait a moment, then start the toolpath
@@ -1760,7 +1760,7 @@ class FabricCNCApp:
         # Check if coordinates are within machine limits
         if abs(x_in) > 68.0 or abs(y_in) > 45.0:
             print(f"[WARNING] Coordinates beyond machine limits! X={x_in:.2f}in (limit: ±68.0in), Y={y_in:.2f}in (limit: ±45.0in)")
-        self._update_position_display()  # Force update after each move
+        self._update_position_and_canvas()  # Force update after each move
         self._draw_canvas()
         # Next step
         self._current_toolpath_idx[1] += 1
@@ -1827,7 +1827,7 @@ class FabricCNCApp:
     def _jog(self, axis, delta):
         self.motor_ctrl.jog(axis, delta)
         self._draw_canvas()
-        self._update_position_display()
+        self._update_position_and_canvas()
 
     def _home(self, axis):
         success = self.motor_ctrl.home(axis)
@@ -1836,7 +1836,7 @@ class FabricCNCApp:
         else:
             self.status_label.configure(text=f"Failed to home {axis}", text_color="red")
         self._draw_canvas()
-        self._update_position_display()
+        self._update_position_and_canvas()
         # Clear status after 2 seconds
         self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
@@ -1847,7 +1847,7 @@ class FabricCNCApp:
         else:
             self.status_label.configure(text="Homing failed", text_color="red")
         self._draw_canvas()
-        self._update_position_display()
+        self._update_position_and_canvas()
         # Clear status after 2 seconds
         self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
@@ -1871,16 +1871,21 @@ class FabricCNCApp:
         # Clear status after 3 seconds
         self.root.after(3000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
-    def _update_position_display(self):
+    def _update_position_and_canvas(self):
         pos = self.motor_ctrl.get_position()
-        # Positions are already in inches from RealMotorController.get_position()
+        self._update_position_display(pos)
+        self._draw_canvas(pos)
+        self.root.after(200, self._update_position_and_canvas)
+
+    def _update_position_display(self, pos=None):
+        if pos is None:
+            pos = self.motor_ctrl.get_position()
         x_disp = pos['X']
         y_disp = pos['Y']
         z_disp = pos['Z']
         rot_disp = pos['ROT']
         text = f"X:{x_disp:.1f}in\nY:{y_disp:.1f}in\nZ:{z_disp:.1f}in\nR:{rot_disp:.0f}°"
         self.coord_label.configure(text=text)
-        self.root.after(200, self._update_position_display)
 
     def _update_jog_speed(self):
         try:
