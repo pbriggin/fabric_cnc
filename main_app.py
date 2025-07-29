@@ -252,12 +252,15 @@ class RealMotorController:
                 if abs(move_delta) > 1e-6:
                     # Map axis names and use appropriate feedrate
                     axis_map = {'X': 'X', 'Y': 'Y', 'Z': 'Z', 'ROT': 'A'}
-                    feedrate = 40  # inches/min for jog moves
+                    feedrate = 1000  # mm/min for jog moves
                     if axis in axis_map:
-                        # Send inches directly to GRBL (no conversion needed)
-                        print(f"[MAIN DEBUG] Sending to GRBL: {axis_map[axis]} by {move_delta}in")
-                        self.motor_controller.jog(axis_map[axis], move_delta, feedrate)
-                    self.position[axis] = clamped_val
+                        # Convert inches to mm for GRBL
+                        move_delta_mm = move_delta * 25.4
+                        print(f"[MAIN DEBUG] Converting {move_delta}in to {move_delta_mm}mm")
+                        print(f"[MAIN DEBUG] Sending to GRBL: {axis_map[axis]} by {move_delta_mm}mm")
+                        self.motor_controller.jog(axis_map[axis], move_delta_mm, feedrate)
+                        # Don't update internal position - let get_position() sync from GRBL
+                        time.sleep(0.1)  # Give GRBL time to process
                     logger.info(f"Jogged {axis} by {move_delta:.3f}in")
             except Exception as e:
                 logger.error(f"Jog error on {axis}: {e}")
@@ -307,18 +310,22 @@ class RealMotorController:
                 return False
 
     def get_position(self):
-        # Use GRBL position data (already in inches)
+        # Use GRBL position data (in mm) and convert to inches
         try:
             x, y, z, a = self.motor_controller.get_position()
             pos = {
-                'X': x,  # GRBL reports in inches
-                'Y': y,  # GRBL reports in inches
-                'Z': z,  # GRBL reports in inches
-                'ROT': a # A-axis is already in degrees
+                'X': x / 25.4,  # Convert mm to inches
+                'Y': y / 25.4,  # Convert mm to inches
+                'Z': z / 25.4,  # Convert mm to inches
+                'ROT': a        # A-axis is already in degrees
             }
-            print(f"[MAIN DEBUG] get_position() returning: {pos}")
+            print(f"[MAIN DEBUG] Raw GRBL pos: [{x}, {y}, {z}, {a}]mm, converted: {pos}")
+            # Update internal position tracking to match GRBL
+            with self.lock:
+                self.position.update(pos)
             return pos
-        except:
+        except Exception as e:
+            print(f"[MAIN DEBUG] get_position() error: {e}")
             # Fallback to internal position tracking (already in inches)
             with self.lock:
                 fallback_pos = dict(self.position)
@@ -387,16 +394,19 @@ class RealMotorController:
         logger.info(f"MOVE_TO: current=({self.position['X']:.1f},{self.position['Y']:.1f},{self.position['Z']:.1f},{self.position['ROT']:.1f}) -> target=({x or self.position['X']:.1f},{y or self.position['Y']:.1f},{z or self.position['Z']:.1f},{rot or self.position['ROT']:.1f}) -> delta=({delta_x:.2f},{delta_y:.2f},{delta_z:.2f},{delta_rot:.2f})")
         
         # Use G0 (rapid) movement to move to absolute position
-        # Send inches directly to GRBL (no conversion needed)
+        # Convert from inches to mm for GRBL
+        x_mm = x * 25.4 if x is not None else None
+        y_mm = y * 25.4 if y is not None else None
+        z_mm = z * 25.4 if z is not None else None
         
         # Build G0 command
         cmd_parts = ["G0"]
-        if x is not None:
-            cmd_parts.append(f"X{x:.3f}")
-        if y is not None:
-            cmd_parts.append(f"Y{y:.3f}")
-        if z is not None:
-            cmd_parts.append(f"Z{z:.3f}")
+        if x_mm is not None:
+            cmd_parts.append(f"X{x_mm:.3f}")
+        if y_mm is not None:
+            cmd_parts.append(f"Y{y_mm:.3f}")
+        if z_mm is not None:
+            cmd_parts.append(f"Z{z_mm:.3f}")
         if rot is not None:
             cmd_parts.append(f"A{rot:.3f}")
         
@@ -427,21 +437,24 @@ class RealMotorController:
     def move_coordinated(self, x_distance_in=0, y_distance_in=0, z_distance_in=0, rot_distance_deg=0):
         """Execute coordinated movement across multiple axes using relative G1 movement."""
         try:
-            # Send inch distances directly to GRBL (no conversion needed)
+            # Convert inch distances to mm for GRBL
+            x_mm = x_distance_in * 25.4
+            y_mm = y_distance_in * 25.4
+            z_mm = z_distance_in * 25.4
             
             # Build G1 relative movement command
             cmd_parts = ["G91", "G1"]  # G91 = relative mode, G1 = linear interpolation
-            if abs(x_distance_in) > 1e-6:
-                cmd_parts.append(f"X{x_distance_in:.3f}")
-            if abs(y_distance_in) > 1e-6:
-                cmd_parts.append(f"Y{y_distance_in:.3f}")
-            if abs(z_distance_in) > 1e-6:
-                cmd_parts.append(f"Z{z_distance_in:.3f}")
+            if abs(x_mm) > 1e-6:
+                cmd_parts.append(f"X{x_mm:.3f}")
+            if abs(y_mm) > 1e-6:
+                cmd_parts.append(f"Y{y_mm:.3f}")
+            if abs(z_mm) > 1e-6:
+                cmd_parts.append(f"Z{z_mm:.3f}")
             if abs(rot_distance_deg) > 1e-6:
                 cmd_parts.append(f"A{rot_distance_deg:.3f}")
             
             if len(cmd_parts) > 2:  # Only send if we have axes to move
-                cmd_parts.append("F40")  # 40 inches/min feedrate
+                cmd_parts.append("F1000")  # 1000 mm/min feedrate
                 self.motor_controller.send(" ".join(cmd_parts))
                 self.motor_controller.send("G90")  # Return to absolute mode
             
