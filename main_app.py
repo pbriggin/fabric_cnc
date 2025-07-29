@@ -216,20 +216,18 @@ class RealMotorController:
         self.motor_controller = GrblMotorController()
         self.lock = threading.Lock()
         self.is_homing = False
-        self.position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}  # Track position manually
+        # No internal position tracking - GRBL is single source of truth
         # Reset work coordinates on startup
         time.sleep(1)  # Let GRBL initialize
-        self.reset_position()
+        self.reset_work_coordinates()
 
-    def reset_position(self):
+    def reset_work_coordinates(self):
         """Reset work coordinates to 0,0,0,0"""
         try:
             self.motor_controller.send("G10 P1 L20 X0 Y0 Z0 A0")  # Reset work coordinates
-            with self.lock:
-                self.position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
             logger.info("Reset work coordinates to 0,0,0,0")
         except Exception as e:
-            logger.error(f"Failed to reset position: {e}")
+            logger.error(f"Failed to reset work coordinates: {e}")
 
     def _clamp(self, axis, value):
         if axis == 'X':
@@ -242,28 +240,42 @@ class RealMotorController:
             return value
 
     def jog(self, axis, delta):
-        with self.lock:
-            try:
-                print(f"[MAIN DEBUG] Jog request: {axis} by {delta}in")
-                new_val = self.position[axis] + delta
-                clamped_val = self._clamp(axis, new_val)
-                move_delta = clamped_val - self.position[axis]
-                print(f"[MAIN DEBUG] After clamping: move_delta = {move_delta}in")
-                if abs(move_delta) > 1e-6:
-                    # Map axis names and use appropriate feedrate
-                    axis_map = {'X': 'X', 'Y': 'Y', 'Z': 'Z', 'ROT': 'A'}
-                    feedrate = 1000  # mm/min for jog moves
-                    if axis in axis_map:
-                        # Convert inches to mm for GRBL
-                        move_delta_mm = move_delta * 25.4
-                        print(f"[MAIN DEBUG] Converting {move_delta}in to {move_delta_mm}mm")
-                        print(f"[MAIN DEBUG] Sending to GRBL: {axis_map[axis]} by {move_delta_mm}mm")
-                        self.motor_controller.jog(axis_map[axis], move_delta_mm, feedrate)
-                        # Don't update internal position - let get_position() sync from GRBL
-                        time.sleep(0.1)  # Give GRBL time to process
-                    logger.info(f"Jogged {axis} by {move_delta:.3f}in")
-            except Exception as e:
-                logger.error(f"Jog error on {axis}: {e}")
+        try:
+            print(f"[JOG] Request: {axis} by {delta:.3f}in")
+            
+            # Get current position from GRBL
+            current_pos = self.get_position()
+            current_val = current_pos.get(axis, 0.0)
+            
+            # Calculate target and clamp
+            target_val = current_val + delta
+            clamped_val = self._clamp(axis, target_val)
+            actual_delta = clamped_val - current_val
+            
+            print(f"[JOG] Current: {current_val:.3f}in, Target: {target_val:.3f}in, Clamped: {clamped_val:.3f}in, Delta: {actual_delta:.3f}in")
+            
+            if abs(actual_delta) > 1e-6:
+                # Map axis names and convert to mm
+                axis_map = {'X': 'X', 'Y': 'Y', 'Z': 'Z', 'ROT': 'A'}
+                feedrate = 1000  # mm/min for jog moves
+                
+                if axis in axis_map:
+                    if axis == 'ROT':
+                        # Rotation axis in degrees
+                        delta_grbl = actual_delta
+                        print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.3f}°")
+                    else:
+                        # Linear axes - convert inches to mm
+                        delta_grbl = actual_delta * 25.4
+                        print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.3f}mm ({actual_delta:.3f}in)")
+                    
+                    self.motor_controller.jog(axis_map[axis], delta_grbl, feedrate)
+                    time.sleep(0.2)  # Wait for GRBL to process
+                    
+            logger.info(f"Jogged {axis} by {actual_delta:.3f}in")
+            
+        except Exception as e:
+            logger.error(f"Jog error on {axis}: {e}")
 
     def home(self, axis):
         with self.lock:
@@ -273,10 +285,6 @@ class RealMotorController:
             try:
                 if axis in ['X', 'Y', 'Z', 'ROT']:
                     self.motor_controller.home_all()  # GRBL homes all axes at once
-                    self.position['X'] = 0.0
-                    self.position['Y'] = 0.0
-                    self.position['Z'] = 0.0
-                    self.position['ROT'] = 0.0
                     success = True
                 else:
                     success = False
@@ -295,12 +303,8 @@ class RealMotorController:
             self.is_homing = True
             try:
                 self.motor_controller.home_all()
-                # Reset all positions to 0 after successful homing
-                self.position['X'] = 0.0
-                self.position['Y'] = 0.0
-                self.position['Z'] = 0.0
-                self.position['ROT'] = 0.0
-                logger.info(f"Position reset after homing: {self.position}")
+                # Position reset handled by GRBL work coordinate reset
+                logger.info("Homing completed - position reset by GRBL")
                 
                 self.is_homing = False
                 return True
@@ -310,7 +314,7 @@ class RealMotorController:
                 return False
 
     def get_position(self):
-        # Use GRBL position data (in mm) and convert to inches
+        # GRBL is the ONLY source of truth for position
         try:
             x, y, z, a = self.motor_controller.get_position()
             pos = {
@@ -319,33 +323,16 @@ class RealMotorController:
                 'Z': z / 25.4,  # Convert mm to inches
                 'ROT': a        # A-axis is already in degrees
             }
-            print(f"[MAIN DEBUG] Raw GRBL pos: [{x}, {y}, {z}, {a}]mm, converted: {pos}")
-            # Update internal position tracking to match GRBL
-            with self.lock:
-                self.position.update(pos)
+            print(f"[POSITION] GRBL raw: [{x:.3f}, {y:.3f}, {z:.3f}, {a:.3f}]mm -> GUI: [{pos['X']:.3f}, {pos['Y']:.3f}, {pos['Z']:.3f}, {pos['ROT']:.1f}]in")
             return pos
         except Exception as e:
-            print(f"[MAIN DEBUG] get_position() error: {e}")
-            # Fallback to internal position tracking (already in inches)
-            with self.lock:
-                fallback_pos = dict(self.position)
-                print(f"[MAIN DEBUG] get_position() fallback: {fallback_pos}")
-                return fallback_pos
+            print(f"[POSITION ERROR] Could not get GRBL position: {e}")
+            # Return zeros if GRBL unavailable
+            return {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
     
     def sync_position(self):
-        """Sync position tracking with actual motor controller position."""
-        try:
-            # Since motor controller doesn't track position, just reset to 0 after homing
-            with self.lock:
-                self.position = {
-                    'X': 0.0,
-                    'Y': 0.0, 
-                    'Z': 0.0,
-                    'ROT': 0.0
-                }
-            logger.info(f"Position synced to home: {self.position}")
-        except Exception as e:
-            logger.warning(f"Could not sync position: {e}")
+        """Position syncing now handled by get_position() from GRBL"""
+        logger.info("Position sync - GRBL is single source of truth")
     
     def get_sensor_states(self):
         """Get current sensor states for debugging (not applicable for GRBL)."""
@@ -375,23 +362,14 @@ class RealMotorController:
             logger.error(f"Cleanup error: {e}")
 
     def move_to(self, x=None, y=None, z=None, rot=None):
-        # Calculate deltas for all axes (get current position with lock)
-        with self.lock:
-            delta_x = 0
-            delta_y = 0
-            delta_z = 0
-            delta_rot = 0
-            
-            if x is not None:
-                delta_x = x - self.position['X']
-            if y is not None:
-                delta_y = y - self.position['Y']
-            if z is not None:
-                delta_z = z - self.position['Z']
-            if rot is not None:
-                delta_rot = rot - self.position['ROT']
+        # Get current position from GRBL for logging
+        current_pos = self.get_position()
+        current_x = current_pos.get('X', 0.0)
+        current_y = current_pos.get('Y', 0.0) 
+        current_z = current_pos.get('Z', 0.0)
+        current_rot = current_pos.get('ROT', 0.0)
         
-        logger.info(f"MOVE_TO: current=({self.position['X']:.1f},{self.position['Y']:.1f},{self.position['Z']:.1f},{self.position['ROT']:.1f}) -> target=({x or self.position['X']:.1f},{y or self.position['Y']:.1f},{z or self.position['Z']:.1f},{rot or self.position['ROT']:.1f}) -> delta=({delta_x:.2f},{delta_y:.2f},{delta_z:.2f},{delta_rot:.2f})")
+        logger.info(f"MOVE_TO: current=({current_x:.1f},{current_y:.1f},{current_z:.1f},{current_rot:.1f}) -> target=({x or current_x:.1f},{y or current_y:.1f},{z or current_z:.1f},{rot or current_rot:.1f})")
         
         # Use G0 (rapid) movement to move to absolute position
         # Convert from inches to mm for GRBL
@@ -413,26 +391,8 @@ class RealMotorController:
         if len(cmd_parts) > 1:  # Only send if we have axes to move
             self.motor_controller.send(" ".join(cmd_parts))
         
-        # Update position tracking (all values already in inches)
-        with self.lock:
-            if x is not None:
-                self.position['X'] = x
-            if y is not None:
-                self.position['Y'] = y
-            if z is not None:
-                # Apply Z limits
-                if z < -1.0:
-                    actual_z = -1.0
-                    logger.warning(f"Z target limited: requested {z:.2f}in, actual {actual_z:.2f}in")
-                    self.position['Z'] = actual_z
-                elif z > 0.5:
-                    actual_z = 0.5
-                    logger.warning(f"Z target limited: requested {z:.2f}in, actual {actual_z:.2f}in")
-                    self.position['Z'] = actual_z
-                else:
-                    self.position['Z'] = z
-            if rot is not None:
-                self.position['ROT'] = rot
+        # Position tracking now handled by get_position() from GRBL
+        time.sleep(0.1)  # Give GRBL time to process movement
 
     def move_coordinated(self, x_distance_in=0, y_distance_in=0, z_distance_in=0, rot_distance_deg=0):
         """Execute coordinated movement across multiple axes using relative G1 movement."""
@@ -458,12 +418,8 @@ class RealMotorController:
                 self.motor_controller.send(" ".join(cmd_parts))
                 self.motor_controller.send("G90")  # Return to absolute mode
             
-            # Update position tracking (all in inches)
-            with self.lock:
-                self.position['X'] += x_distance_in
-                self.position['Y'] += y_distance_in
-                self.position['Z'] += z_distance_in
-                self.position['ROT'] += rot_distance_deg
+            # Position tracking now handled by get_position() from GRBL
+            time.sleep(0.1)  # Give GRBL time to process movement
             
         except Exception as e:
             logger.error(f"Coordinated movement error: {e}")
