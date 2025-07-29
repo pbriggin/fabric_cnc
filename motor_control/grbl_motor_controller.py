@@ -65,6 +65,7 @@ class GrblMotorController:
         if match:
             with self.status_lock:
                 self.position = [float(match.group(i)) for i in range(1, 5)]
+                print(f"[GRBL DEBUG] Raw position from GRBL: {self.position}")
 
     def send(self, gcode_line):
         self.command_queue.put(gcode_line)
@@ -76,7 +77,9 @@ class GrblMotorController:
         if axis not in "XYZA":
             raise ValueError("Invalid axis")
         # Use G20 for inches (delta should already be in inches)
-        self.send(f"$J=G91 G20 {axis}{delta:.3f} F{feedrate}")
+        command = f"$J=G91 G20 {axis}{delta:.3f} F{feedrate}"
+        print(f"[GRBL DEBUG] Sending jog command: {command}")
+        self.send(command)
 
     def home_all(self):
         self.send("$H")

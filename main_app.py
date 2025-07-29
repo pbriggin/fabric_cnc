@@ -244,15 +244,18 @@ class RealMotorController:
     def jog(self, axis, delta):
         with self.lock:
             try:
+                print(f"[MAIN DEBUG] Jog request: {axis} by {delta}in")
                 new_val = self.position[axis] + delta
                 clamped_val = self._clamp(axis, new_val)
                 move_delta = clamped_val - self.position[axis]
+                print(f"[MAIN DEBUG] After clamping: move_delta = {move_delta}in")
                 if abs(move_delta) > 1e-6:
                     # Map axis names and use appropriate feedrate
                     axis_map = {'X': 'X', 'Y': 'Y', 'Z': 'Z', 'ROT': 'A'}
                     feedrate = 40  # inches/min for jog moves
                     if axis in axis_map:
                         # Send inches directly to GRBL (no conversion needed)
+                        print(f"[MAIN DEBUG] Sending to GRBL: {axis_map[axis]} by {move_delta}in")
                         self.motor_controller.jog(axis_map[axis], move_delta, feedrate)
                     self.position[axis] = clamped_val
                     logger.info(f"Jogged {axis} by {move_delta:.3f}in")
@@ -307,16 +310,20 @@ class RealMotorController:
         # Use GRBL position data (already in inches)
         try:
             x, y, z, a = self.motor_controller.get_position()
-            return {
+            pos = {
                 'X': x,  # GRBL reports in inches
                 'Y': y,  # GRBL reports in inches
                 'Z': z,  # GRBL reports in inches
                 'ROT': a # A-axis is already in degrees
             }
+            print(f"[MAIN DEBUG] get_position() returning: {pos}")
+            return pos
         except:
             # Fallback to internal position tracking (already in inches)
             with self.lock:
-                return dict(self.position)
+                fallback_pos = dict(self.position)
+                print(f"[MAIN DEBUG] get_position() fallback: {fallback_pos}")
+                return fallback_pos
     
     def sync_position(self):
         """Sync position tracking with actual motor controller position."""
