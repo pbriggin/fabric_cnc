@@ -123,8 +123,3 @@ class GrblMotorController:
     def close(self):
         self.running = False
         self.serial.close()
-
-    def set_current_position_as_zero(self):
-        """Set the current position as the new work coordinate system origin (all axes zero)."""
-        self.send("G10 P1 L20 X0 Y0 Z0 A0")
-        print("[GRBL] Set current position as WCS origin (all axes zero)")

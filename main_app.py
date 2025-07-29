@@ -219,8 +219,6 @@ class RealMotorController:
         # No internal position tracking - GRBL is single source of truth
         # Reset work coordinates on startup
         time.sleep(1)  # Let GRBL initialize
-        self.motor_controller.set_current_position_as_zero()
-        logger.info("Set current position as WCS origin (all axes zero) at startup")
         self.reset_work_coordinates()
 
     def reset_work_coordinates(self):
@@ -1877,7 +1875,7 @@ class FabricCNCApp:
         pos = self.motor_ctrl.get_position()
         self._update_position_display(pos)
         self._draw_canvas(pos)
-        self.root.after(200, self._update_position_and_canvas)
+        self.root.after(500, self._update_position_and_canvas)  # Update every 500ms instead of 200ms
 
     def _update_position_display(self, pos=None):
         if pos is None:
