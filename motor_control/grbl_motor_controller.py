@@ -35,6 +35,7 @@ class GrblMotorController:
         
         # Initialize GRBL settings and reset work coordinates
         time.sleep(2)  # Wait for GRBL to initialize
+        self._configure_grbl_settings()
         self.send("G20")  # Set GRBL to inches mode
         self.send("G90")  # Set absolute positioning
         self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Reset work coordinates to 0,0,0,0
@@ -160,6 +161,31 @@ class GrblMotorController:
         except Exception as e:
             logger.warning(f"USB reset failed: {e}")
 
+    def _configure_grbl_settings(self):
+        """Configure essential GRBL settings for proper operation.""" 
+        try:
+            # Enable homing cycle ($22=1)
+            self.send("$22=1")
+            if self.debug_mode:
+                logger.info("Enabled GRBL homing cycle ($22=1)")
+            
+            # Set homing seek rate to reasonable speed ($24=100 mm/min)
+            self.send("$24=100")
+            
+            # Set homing feed rate to slower speed for precision ($25=25 mm/min)
+            self.send("$25=25")
+            
+            # Enable hard limits ($21=1) - required for homing
+            self.send("$21=1")
+            if self.debug_mode:
+                logger.info("Enabled GRBL hard limits ($21=1)")
+            
+            # Wait a moment for settings to be processed
+            time.sleep(0.5)
+            
+        except Exception as e:
+            logger.error(f"Failed to configure GRBL settings: {e}")
+
     def _read_loop(self):
         buffer = b""
         while self.running:
@@ -216,6 +242,7 @@ class GrblMotorController:
         self.send(command)
 
     def home_all(self):
+        """Home all axes using $H command."""
         self.send("$H")
         # After homing, reset work coordinates to 0,0,0,0
         time.sleep(2)  # Wait for homing to complete
@@ -224,6 +251,36 @@ class GrblMotorController:
         # Reset position tracking
         with self.status_lock:
             self.position = [0.0, 0.0, 0.0, 0.0]
+    
+    def home_axis(self, axis):
+        """Home a single axis using $H<axis> command (grblHAL)."""
+        if axis not in "XYZA":
+            raise ValueError(f"Invalid axis: {axis}")
+        
+        command = f"$H{axis}"
+        if self.debug_mode:
+            logger.info(f"Homing {axis} axis with command: {command}")
+        
+        self.send(command)
+        # Wait for homing to complete (individual axis is faster)
+        time.sleep(1)
+        
+        # Reset work coordinate for this axis only
+        if axis == 'X':
+            self.send("G10 P1 L20 X0")
+        elif axis == 'Y':
+            self.send("G10 P1 L20 Y0")
+        elif axis == 'Z':
+            self.send("G10 P1 L20 Z0")
+        elif axis == 'A':
+            self.send("G10 P1 L20 A0")
+        
+        self.send("G54")  # Select work coordinate system 1
+        
+        # Update position tracking for this axis
+        with self.status_lock:
+            axis_index = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3}[axis]
+            self.position[axis_index] = 0.0
 
     def run_gcode_file(self, filepath):
         with open(filepath, 'r') as f:

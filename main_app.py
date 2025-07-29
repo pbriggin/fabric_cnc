@@ -152,10 +152,12 @@ class SimulatedMotorController:
             if self.is_homing:
                 return False
             self.is_homing = True
-            # Simulate homing delay
-            time.sleep(2)
-            if axis == 'X' or axis == 'Y':
+            # Simulate homing delay (shorter for individual axis)
+            time.sleep(1)
+            if axis in ['X', 'Y', 'Z', 'ROT']:
                 self.position[axis] = 0.0
+                if self._debug_prints_enabled:
+                    logger.info(f"Simulated homing of {axis} axis")
             self.is_homing = False
             logger.info(f"Homed {axis} axis.")
             return True
@@ -290,8 +292,12 @@ class RealMotorController:
             self.is_homing = True
             try:
                 if axis in ['X', 'Y', 'Z', 'ROT']:
-                    self.motor_controller.home_all()  # GRBL homes all axes at once
+                    # Map ROT to A axis for GRBL
+                    grbl_axis = axis if axis != 'ROT' else 'A'
+                    self.motor_controller.home_axis(grbl_axis)
                     success = True
+                    if self._debug_prints_enabled:
+                        logger.info(f"Homed {axis} axis individually")
                 else:
                     success = False
                 self.is_homing = False
