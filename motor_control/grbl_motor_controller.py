@@ -164,27 +164,92 @@ class GrblMotorController:
     def _configure_grbl_settings(self):
         """Configure essential GRBL settings for proper operation.""" 
         try:
+            # Enable hard limits ($21=1) - must be set before homing
+            self.send("$21=1")
+            if self.debug_mode:
+                logger.info("Enabled GRBL hard limits ($21=1)")
+            
             # Enable homing cycle ($22=1)
             self.send("$22=1")
             if self.debug_mode:
                 logger.info("Enabled GRBL homing cycle ($22=1)")
             
-            # Set homing seek rate to reasonable speed ($24=100 mm/min)
-            self.send("$24=100")
+            # Set homing direction mask - customize based on your limit switch setup
+            # $23=0 means all axes home in negative direction (typical)
+            self.send("$23=0")
             
-            # Set homing feed rate to slower speed for precision ($25=25 mm/min)
-            self.send("$25=25")
+            # Set homing seek rate - GRBL uses mm/min internally, convert from inches
+            # 20 inches/min = ~508 mm/min for initial search
+            self.send("$24=508")
             
-            # Enable hard limits ($21=1) - required for homing
-            self.send("$21=1")
+            # Set homing feed rate - slower for precision
+            # 2 inches/min = ~51 mm/min for final approach
+            self.send("$25=51")
+            
+            # Set homing debounce delay ($26=250 ms)
+            self.send("$26=250")
+            
+            # Set homing pull-off distance - GRBL uses mm internally
+            # 0.04 inches = ~1.0 mm back off from limit after homing
+            self.send("$27=1.0")
+            
+            # Set travel limits based on your fabric CNC machine dimensions
+            # Your machine: 68" x 45" work area, convert to mm for GRBL
+            # 68 inches = ~1727 mm, 45 inches = ~1143 mm
+            self.send("$130=1727.0")  # X max travel (68 inches in mm)
+            self.send("$131=1143.0")  # Y max travel (45 inches in mm)  
+            self.send("$132=127.0")   # Z max travel (~5 inches in mm) - adjust for your Z travel
+            
             if self.debug_mode:
-                logger.info("Enabled GRBL hard limits ($21=1)")
+                logger.info("Configured GRBL homing settings")
             
-            # Wait a moment for settings to be processed
-            time.sleep(0.5)
+            # Wait longer for settings to be processed
+            time.sleep(1.0)
             
         except Exception as e:
             logger.error(f"Failed to configure GRBL settings: {e}")
+
+    def _interpret_grbl_error(self, error_str):
+        """Interpret GRBL error codes for better debugging."""
+        error_codes = {
+            "error:1": "G-code words consist of a letter and a value. Letter was not found.",
+            "error:2": "Numeric value format is not valid or missing an expected value.",
+            "error:3": "Grbl '$' system command was not recognized or supported.",
+            "error:4": "Negative value received for an expected positive value.",
+            "error:5": "Homing cycle not completed due to limit switch not triggered within search distance.",
+            "error:6": "Minimum step pulse time must be greater than 3usec",
+            "error:7": "EEPROM read/write failed.",
+            "error:8": "Grbl '$' command cannot be used unless Grbl is IDLE.",
+            "error:9": "G-code locked out during alarm or jog state",
+            "error:10": "Soft limits cannot be enabled without homing also enabled.",
+            "error:11": "Max characters per line exceeded. Line was not processed and executed.",
+            "error:12": "Grbl '$' setting value exceeds the maximum step rate supported.",
+            "error:13": "Safety door detected as opened and door state initiated.",
+            "error:14": "Build info or startup line exceeded EEPROM line length limit.",
+            "error:15": "Jog target exceeds machine travel. Command ignored.",
+            "error:16": "Jog command with no '=' or contains prohibited g-code.",
+            "error:17": "Laser mode requires PWM output.",
+            "error:20": "Unsupported or invalid g-code command found in block.",
+            "error:21": "More than one g-code command from same modal group found in block.",
+            "error:22": "Feed rate has not yet been set or is undefined.",
+            "error:23": "G-code command in block requires an integer value.",
+            "error:24": "Two G-code commands that both require the use of the XYZ axis words were detected in the block.",
+            "error:25": "A G-code word was repeated in the block.",
+            "error:26": "A G-code command implicitly or explicitly requires XYZ axis words in the block, but none were detected.",
+            "error:27": "N line number value is not within the valid range of 1 - 9,999,999.",
+            "error:28": "A G-code command was sent, but is missing some required P or L value words in the line.",
+            "error:29": "Grbl supports six work coordinate systems G54-G59. G59.1, G59.2, and G59.3 are not supported.",
+            "error:30": "The G53 G-code command requires either a G0 seek or G1 feed motion mode to be active. A different motion was active.",
+            "error:31": "There are unused axis words in the block and G80 motion mode cancel is active.",
+            "error:32": "A G2 or G3 arc was commanded but there are no XYZ axis words in the selected plane to trace the arc.",
+            "error:33": "The motion command has an invalid target. G2, G3, and G38.2 generates this error, if the arc is impossible to generate or if the probe target is the current position.",
+            "error:34": "A G2 or G3 arc, traced with the radius definition, had a mathematical error when computing the arc geometry. Try either breaking up the arc into semi-circles or quadrants, or redefine them with the arc offset definition.",
+            "error:35": "A G2 or G3 arc, traced with the offset definition, is missing the IJK offset word in the selected plane to trace the arc.",
+            "error:36": "There are unused, leftover G-code words that aren't used by any command in the block.",
+            "error:37": "The G43.1 dynamic tool length offset command cannot apply an offset to an axis other than its configured axis. The Grbl default axis is the Z-axis."
+        }
+        
+        return error_codes.get(error_str, "Unknown GRBL error")
 
     def _read_loop(self):
         buffer = b""
@@ -201,7 +266,11 @@ class GrblMotorController:
                         if self.debug_mode:
                             print(f"[GRBL RESP] {decoded}")
                         elif not decoded.strip() == "ok":  # Only log non-"ok" responses in non-debug mode
-                            logger.info(f"GRBL: {decoded}")
+                            if decoded.startswith("error:"):
+                                error_msg = self._interpret_grbl_error(decoded)
+                                logger.error(f"GRBL {decoded}: {error_msg}")
+                            else:
+                                logger.info(f"GRBL: {decoded}")
             time.sleep(0.01)
 
     def _write_loop(self):
@@ -258,12 +327,14 @@ class GrblMotorController:
             raise ValueError(f"Invalid axis: {axis}")
         
         command = f"$H{axis}"
+        logger.info(f"Attempting to home {axis} axis with command: {command}")
+        
         if self.debug_mode:
-            logger.info(f"Homing {axis} axis with command: {command}")
+            logger.info(f"Note: Ensure limit switch for {axis} axis is properly connected and configured")
         
         self.send(command)
         # Wait for homing to complete (individual axis is faster)
-        time.sleep(1)
+        time.sleep(3)  # Longer wait to ensure homing completes
         
         # Reset work coordinate for this axis only
         if axis == 'X':
@@ -281,6 +352,8 @@ class GrblMotorController:
         with self.status_lock:
             axis_index = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3}[axis]
             self.position[axis_index] = 0.0
+            
+        logger.info(f"Homing sequence completed for {axis} axis")
 
     def run_gcode_file(self, filepath):
         with open(filepath, 'r') as f:
