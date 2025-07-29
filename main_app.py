@@ -219,6 +219,8 @@ class RealMotorController:
         # No internal position tracking - GRBL is single source of truth
         # Reset work coordinates on startup
         time.sleep(1)  # Let GRBL initialize
+        self.motor_controller.set_current_position_as_zero()
+        logger.info("Set current position as WCS origin (all axes zero) at startup")
         self.reset_work_coordinates()
 
     def reset_work_coordinates(self):

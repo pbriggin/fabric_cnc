@@ -76,8 +76,8 @@ class GrblMotorController:
     def jog(self, axis, delta, feedrate=100):
         if axis not in "XYZA":
             raise ValueError("Invalid axis")
-        # Use G20 for inches (delta should already be in inches)
-        command = f"$J=G91 G20 {axis}{delta:.3f} F{feedrate}"
+        # Use G91 for relative movement, let GRBL use current unit mode
+        command = f"$J=G91 {axis}{delta:.3f} F{feedrate}"
         print(f"[GRBL DEBUG] Sending jog command: {command}")
         self.send(command)
 
@@ -123,3 +123,8 @@ class GrblMotorController:
     def close(self):
         self.running = False
         self.serial.close()
+
+    def set_current_position_as_zero(self):
+        """Set the current position as the new work coordinate system origin (all axes zero)."""
+        self.send("G10 P1 L20 X0 Y0 Z0 A0")
+        print("[GRBL] Set current position as WCS origin (all axes zero)")
