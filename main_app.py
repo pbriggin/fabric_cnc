@@ -386,6 +386,10 @@ class RealMotorController:
     def get_grbl_info(self):
         """Get GRBL version and build info.""" 
         self.motor_controller.get_grbl_info()
+    
+    def test_limit_switch_connection(self):
+        """Test if limit switches are properly connected and readable."""
+        self.motor_controller.test_limit_switch_connection()
 
     def move_to(self, x=None, y=None, z=None, rot=None):
         # Get current position from GRBL for logging

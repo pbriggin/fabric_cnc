@@ -365,16 +365,51 @@ class GrblMotorController:
         """Check the current status of limit switches."""
         try:
             logger.info("Checking limit switch status...")
-            # Send real-time status request
+            # Send real-time status request to get current machine state
             self.send_immediate("?")
-            time.sleep(0.1)
+            time.sleep(0.2)
             
-            # Also check pin states if available
-            self.send("$P")  # Check pin states
-            time.sleep(0.5)
+            # Try different pin state commands for grblHAL
+            try:
+                self.send("$Pins")  # grblHAL pin state command
+                time.sleep(0.3)
+            except:
+                try:
+                    self.send("$#")  # Alternative status command
+                    time.sleep(0.3)
+                except:
+                    logger.warning("Could not query pin states - command not supported")
             
         except Exception as e:
             logger.error(f"Failed to check limit switches: {e}")
+    
+    def test_limit_switch_connection(self):
+        """Test if limit switches are properly connected and readable."""
+        try:
+            logger.info("=== LIMIT SWITCH CONNECTION TEST ===")
+            logger.info("Please manually trigger the X-axis limit switch and observe the output...")
+            
+            # Get initial status
+            logger.info("Getting initial machine status...")
+            self.send_immediate("?")
+            time.sleep(0.5)
+            
+            # Instructions for manual testing
+            logger.info("INSTRUCTIONS:")
+            logger.info("1. Physically press/trigger the X-axis limit switch")
+            logger.info("2. Watch the status messages for any change")
+            logger.info("3. Release the limit switch")
+            logger.info("4. Check if the status changes back")
+            
+            # Monitor for changes over a few seconds
+            for i in range(10):
+                self.send_immediate("?")
+                time.sleep(0.5)
+                
+            logger.info("=== LIMIT SWITCH TEST COMPLETE ===")
+            
+        except Exception as e:
+            logger.error(f"Limit switch test failed: {e}")
     
     def get_grbl_settings(self):
         """Query and display current GRBL settings."""
