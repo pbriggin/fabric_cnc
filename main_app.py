@@ -129,6 +129,7 @@ class SimulatedMotorController:
         self.position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
         self.lock = threading.Lock()
         self.is_homing = False
+        self._debug_prints_enabled = False  # Debug printing control
 
     def _clamp(self, axis, value):
         if axis == 'X':
@@ -216,6 +217,7 @@ class RealMotorController:
         self.motor_controller = GrblMotorController()
         self.lock = threading.Lock()
         self.is_homing = False
+        self._debug_prints_enabled = False  # Debug printing control
         # No internal position tracking - GRBL is single source of truth
         # Reset work coordinates on startup
         time.sleep(1)  # Let GRBL initialize
