@@ -21,12 +21,15 @@ class GrblMotorController:
         self.writer_thread.start()
         self.poll_thread.start()
         
-        # Initialize GRBL to use inches and reset work coordinates
+        # Initialize GRBL settings and reset work coordinates
         time.sleep(2)  # Wait for GRBL to initialize
-        self.send("G20")  # Set units to inches
+        self.send("G21")  # Keep GRBL in mm mode (we'll convert inches to mm)
         self.send("G90")  # Set absolute positioning
         self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Reset work coordinates to 0,0,0,0
         self.send("G54")  # Select work coordinate system 1
+        # Reset position tracking
+        with self.status_lock:
+            self.position = [0.0, 0.0, 0.0, 0.0]
 
     def _read_loop(self):
         buffer = b""
@@ -72,15 +75,18 @@ class GrblMotorController:
     def jog(self, axis, delta, feedrate=100):
         if axis not in "XYZA":
             raise ValueError("Invalid axis")
-        # Use G20 for inches instead of G21 for mm
-        self.send(f"$J=G91 G20 {axis}{delta:.3f} F{feedrate}")
+        # Use G21 for mm (delta should already be in mm)
+        self.send(f"$J=G91 G21 {axis}{delta:.3f} F{feedrate}")
 
     def home_all(self):
         self.send("$H")
         # After homing, reset work coordinates to 0,0,0,0
-        time.sleep(1)  # Wait for homing to complete
+        time.sleep(2)  # Wait for homing to complete
         self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Set work coordinate system origin
         self.send("G54")  # Select work coordinate system 1
+        # Reset position tracking
+        with self.status_lock:
+            self.position = [0.0, 0.0, 0.0, 0.0]
 
     def run_gcode_file(self, filepath):
         with open(filepath, 'r') as f:
