@@ -125,11 +125,11 @@ def flatten_spline_with_angle_limit(spline, max_angle_deg=2.0):
 
 # --- Motor simulation logic ---
 class SimulatedMotorController:
-    def __init__(self):
+    def __init__(self, debug_mode=False):
         self.position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
         self.lock = threading.Lock()
         self.is_homing = False
-        self._debug_prints_enabled = False  # Debug printing control
+        self._debug_prints_enabled = debug_mode  # Debug printing control
 
     def _clamp(self, axis, value):
         if axis == 'X':
@@ -213,11 +213,11 @@ class SimulatedMotorController:
 
 # --- Real Motor Controller Wrapper ---
 class RealMotorController:
-    def __init__(self):
-        self.motor_controller = GrblMotorController()
+    def __init__(self, debug_mode=False):
+        self.motor_controller = GrblMotorController(debug_mode=debug_mode)
         self.lock = threading.Lock()
         self.is_homing = False
-        self._debug_prints_enabled = False  # Debug printing control
+        self._debug_prints_enabled = debug_mode  # Debug printing control
         # No internal position tracking - GRBL is single source of truth
         # Reset work coordinates on startup
         time.sleep(1)  # Let GRBL initialize
@@ -455,7 +455,10 @@ class FabricCNCApp:
         self._toolpath_step_count = 0
         self._current_toolpath_pos = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
         self.toolpaths = []
-        self.motor_ctrl = SimulatedMotorController() if SIMULATION_MODE else RealMotorController()
+        
+        # Check for debug mode from environment variable or config
+        debug_mode = os.environ.get('FABRIC_CNC_DEBUG', '').lower() in ('1', 'true', 'yes')
+        self.motor_ctrl = SimulatedMotorController(debug_mode) if SIMULATION_MODE else RealMotorController(debug_mode)
         self._jog_in_progress = {'X': False, 'Y': False, 'Z': False, 'ROT': False}
         self._arrow_key_repeat_delay = config.APP_CONFIG['ARROW_KEY_REPEAT_DELAY']
         
@@ -463,7 +466,7 @@ class FabricCNCApp:
         self._canvas_redraw_pending = False
         self._last_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
         self._position_update_threshold = 0.01  # Only update if position changes by > 0.01 inches
-        self._debug_prints_enabled = False  # Toggle for debug output
+        self._debug_prints_enabled = debug_mode  # Toggle for debug output
         
         # Initialize new DXF processing and toolpath generation
         if DXF_TOOLPATH_IMPORTS_AVAILABLE:

@@ -12,10 +12,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 class GrblMotorController:
-    def __init__(self, port='/dev/ttyACM0', baudrate=115200):
+    def __init__(self, port='/dev/ttyACM0', baudrate=115200, debug_mode=False):
         self.port = port
         self.baudrate = baudrate
         self.serial = None
+        self.debug_mode = debug_mode
         
         # Try to open the serial connection with cleanup
         self._open_serial_with_cleanup()
@@ -171,7 +172,10 @@ class GrblMotorController:
                     if decoded.startswith("<"):
                         self._parse_status(decoded)
                     else:
-                        print(f"[GRBL RESP] {decoded}")
+                        if self.debug_mode:
+                            print(f"[GRBL RESP] {decoded}")
+                        elif not decoded.strip() == "ok":  # Only log non-"ok" responses in non-debug mode
+                            logger.info(f"GRBL: {decoded}")
             time.sleep(0.01)
 
     def _write_loop(self):
@@ -193,7 +197,8 @@ class GrblMotorController:
         if match:
             with self.status_lock:
                 self.position = [float(match.group(i)) for i in range(1, 5)]
-                print(f"[GRBL DEBUG] Raw position from GRBL: {self.position}")
+                if self.debug_mode:
+                    print(f"[GRBL DEBUG] Raw position from GRBL: {self.position}")
 
     def send(self, gcode_line):
         self.command_queue.put(gcode_line)
@@ -206,7 +211,8 @@ class GrblMotorController:
             raise ValueError("Invalid axis")
         # Use G91 for relative movement, let GRBL use current unit mode
         command = f"$J=G91 {axis}{delta:.3f} F{feedrate}"
-        print(f"[GRBL DEBUG] Sending jog command: {command}")
+        if self.debug_mode:
+            print(f"[GRBL DEBUG] Sending jog command: {command}")
         self.send(command)
 
     def home_all(self):
@@ -233,7 +239,9 @@ class GrblMotorController:
                                 ack_event.set()
                                 break
                             elif resp.startswith("error:"):
-                                print(f"[GRBL ERROR] {resp}")
+                                logger.error(f"GRBL error: {resp}")
+                                if self.debug_mode:
+                                    print(f"[GRBL ERROR] {resp}")
                                 ack_event.set()
                                 break
 
@@ -241,7 +249,9 @@ class GrblMotorController:
                     self.serial.write((clean + "\n").encode('utf-8'))
                     wait_for_ack()
                     if not ack_event.wait(timeout=2):
-                        print(f"[TIMEOUT] No ack for: {clean}")
+                        logger.warning(f"GRBL timeout, no ack for: {clean}")
+                        if self.debug_mode:
+                            print(f"[TIMEOUT] No ack for: {clean}")
                         break
 
     def get_position(self):
