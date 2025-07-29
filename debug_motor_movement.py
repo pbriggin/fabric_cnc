@@ -28,18 +28,18 @@ def test_grbl_status(grbl):
     print()
 
 def test_movement_calibration(grbl):
-    """Test actual vs expected movement"""
-    print("=== Movement Calibration Test ===")
+    """Test actual vs expected movement (X motor only)"""
+    print("=== X Motor Movement Calibration Test ===")
     
     # Get initial position
     print("Getting initial position...")
     grbl.send_immediate("?")
     time.sleep(1)
     
-    print("\nTesting different movement commands:")
+    print("\nTesting different X movement commands:")
     
     # Test 1: 1mm movement in G21 mode
-    print("Test 1: 1mm movement in G21 (mm) mode")
+    print("Test 1: 1mm X movement in G21 (mm) mode")
     grbl.send("G21")  # Set to mm mode
     grbl.send("G90")  # Absolute positioning
     grbl.send_immediate("?")  # Get position
@@ -52,7 +52,7 @@ def test_movement_calibration(grbl):
     time.sleep(1)
     
     # Test 2: 1 inch (25.4mm) movement in G21 mode
-    print("\nTest 2: 25.4mm movement in G21 (mm) mode (should equal 1 inch)")
+    print("\nTest 2: 25.4mm X movement in G21 (mm) mode (should equal 1 inch)")
     print("Sending: $J=G91 G21 X25.4 F100")
     grbl.send("$J=G91 G21 X25.4 F100")
     time.sleep(3)
@@ -60,7 +60,7 @@ def test_movement_calibration(grbl):
     time.sleep(1)
     
     # Test 3: 1 inch movement in G20 mode
-    print("\nTest 3: 1 inch movement in G20 (inch) mode")
+    print("\nTest 3: 1 inch X movement in G20 (inch) mode")
     grbl.send("G20")  # Set to inch mode
     print("Sending: $J=G91 G20 X1.0 F4")
     grbl.send("$J=G91 G20 X1.0 F4")
@@ -69,17 +69,17 @@ def test_movement_calibration(grbl):
     time.sleep(1)
 
 def interactive_jog_test(grbl):
-    """Interactive jogging to test movements"""
-    print("=== Interactive Jog Test ===")
+    """Interactive X motor jogging to test movements"""
+    print("=== Interactive X Motor Jog Test ===")
     print("Commands:")
     print("  x+ : Jog X positive 1 unit")
     print("  x- : Jog X negative 1 unit")
-    print("  y+ : Jog Y positive 1 unit")
-    print("  y- : Jog Y negative 1 unit")
     print("  ? : Get position")
     print("  mm : Switch to mm mode")
     print("  in : Switch to inch mode")
     print("  q : Quit")
+    print()
+    print("NOTE: Only X motor movement for safety")
     print()
     
     current_mode = "mm"
@@ -116,24 +116,8 @@ def interactive_jog_test(grbl):
                 grbl.send("$J=G91 G20 X-0.1 F4")
                 print("Sent: $J=G91 G20 X-0.1 F4")
             time.sleep(2)
-        elif cmd == 'y+':
-            if current_mode == "mm":
-                grbl.send("$J=G91 G21 Y1.0 F100")
-                print("Sent: $J=G91 G21 Y1.0 F100")
-            else:
-                grbl.send("$J=G91 G20 Y0.1 F4")
-                print("Sent: $J=G91 G20 Y0.1 F4")
-            time.sleep(2)
-        elif cmd == 'y-':
-            if current_mode == "mm":
-                grbl.send("$J=G91 G21 Y-1.0 F100")
-                print("Sent: $J=G91 G21 Y-1.0 F100")
-            else:
-                grbl.send("$J=G91 G20 Y-0.1 F4")
-                print("Sent: $J=G91 G20 Y-0.1 F4")
-            time.sleep(2)
         else:
-            print("Unknown command")
+            print("Unknown command (only x+, x-, ?, mm, in, q supported)")
 
 def main():
     print("GRBL Motor Movement Debug Script")

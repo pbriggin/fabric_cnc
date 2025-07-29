@@ -92,6 +92,8 @@ def main():
         time.sleep(3)
         grbl.get_status()
         
+        print("\nNOTE: All movements are X-axis only for safety")
+        
         # Check GRBL settings
         print("\n--- GRBL Settings ---")
         grbl.send_command("$$")
