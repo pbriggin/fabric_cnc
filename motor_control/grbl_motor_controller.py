@@ -24,6 +24,8 @@ class GrblMotorController:
         self.running = True
         self.position = [0.0, 0.0, 0.0, 0.0]  # X, Y, Z, A
         self.status_lock = threading.Lock()
+        self.alarm_detected = False
+        self.last_error_time = 0
 
         self.reader_thread = threading.Thread(target=self._read_loop, daemon=True)
         self.writer_thread = threading.Thread(target=self._write_loop, daemon=True)
@@ -36,15 +38,10 @@ class GrblMotorController:
         # Wait for GRBL to initialize and check/clear alarms FIRST
         time.sleep(2)  # Wait for GRBL to initialize
         
-        # Check and clear any alarms before configuring settings
-        if not self.check_and_clear_alarms():
-            logger.warning("Failed to clear alarms, attempting controller reset...")
-            if self.reset_controller():
-                logger.info("Controller reset successful")
-                # Try clearing alarms one more time after reset
-                self.check_and_clear_alarms()
-            else:
-                logger.error("Controller reset failed - manual intervention may be required")
+        # Simple alarm clearing - just send unlock command at startup
+        logger.info("Sending unlock command at startup...")
+        self.send("$X")  # Clear any alarm state
+        time.sleep(1)  # Wait for unlock to process
         
         # Initialize GRBL settings and reset work coordinates
         self._configure_grbl_settings()
@@ -281,6 +278,15 @@ class GrblMotorController:
                             if decoded.startswith("error:"):
                                 error_msg = self._interpret_grbl_error(decoded)
                                 logger.error(f"GRBL {decoded}: {error_msg}")
+                                
+                                # Auto-clear alarm if error:9 (alarm state)
+                                if decoded == "error:9":
+                                    current_time = time.time()
+                                    # Only try to clear alarm once every 5 seconds to avoid spam
+                                    if current_time - self.last_error_time > 5.0:
+                                        self.last_error_time = current_time
+                                        logger.info("Auto-clearing alarm state...")
+                                        self.send("$X")  # Send unlock command
                             else:
                                 logger.info(f"GRBL: {decoded}")
             time.sleep(0.01)
@@ -296,31 +302,22 @@ class GrblMotorController:
 
     def _poll_loop(self):
         logger.info("📡 Position polling thread started")
-        poll_count = 0
         while self.running:
             self.send_immediate("?")
-            poll_count += 1
-            if poll_count % 50 == 0:  # Log every 10 seconds (50 * 0.2s)
-                logger.debug(f"📡 Polling active - sent {poll_count} status requests")
             time.sleep(0.2)
-        logger.info("📡 Position polling thread stopped")
 
     def _parse_status(self, line):
         match = re.search(r"MPos:([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)", line)
         if match:
             with self.status_lock:
-                old_position = self.position.copy() if hasattr(self, 'position') else [0, 0, 0, 0]
+                old_position = self.position.copy()
                 self.position = [float(match.group(i)) for i in range(1, 5)]
                 if self.debug_mode:
                     print(f"[GRBL DEBUG] Raw position from GRBL: {self.position}")
                     
                 # Log position changes for debugging
                 if old_position != self.position:
-                    logger.debug(f"📍 Position updated: X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
-        else:
-            # Log non-position status lines for debugging
-            if self.debug_mode and line.startswith("<") and "MPos" not in line:
-                logger.debug(f"[GRBL STATUS] {line}")
+                    logger.info(f"📍 Position: X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
 
     def send(self, gcode_line):
         self.command_queue.put(gcode_line)
@@ -458,204 +455,14 @@ class GrblMotorController:
         except Exception as e:
             logger.error(f"Failed to get GRBL info: {e}")
     
-    def check_and_clear_alarms(self):
-        """Check for active alarms and clear them if found."""
+    def clear_alarms_simple(self):
+        """Simple alarm clearing that doesn't disrupt threads."""
         try:
-            logger.info("Checking for active alarms...")
-            
-            # Temporarily pause the polling thread to avoid interference
-            was_running = self.running
-            self.running = False
-            time.sleep(0.2)  # Let polling thread stop
-            
-            # Clear any pending input first to get clean responses
-            if self.serial.in_waiting:
-                discarded = self.serial.read(self.serial.in_waiting)
-                logger.debug(f"Discarded {len(discarded)} pending bytes")
-            
-            # Test if machine is in alarm state by trying a simple command
-            logger.info("Testing if machine accepts commands...")
-            self.serial.write("G20\n".encode('utf-8'))  # Direct write to avoid queue
-            
-            # Wait for response with timeout
-            alarm_detected = False
-            start_time = time.time()
-            response_received = False
-            
-            while time.time() - start_time < 2.0:  # 2 second timeout
-                if self.serial.in_waiting:
-                    try:
-                        response = self.serial.readline().decode('utf-8').strip()
-                        if response:
-                            response_received = True
-                            logger.info(f"Direct command response: '{response}'")
-                            if "error:9" in response:
-                                alarm_detected = True
-                                logger.warning("✓ Machine is in alarm state (error:9 detected)")
-                                break
-                            elif response == "ok":
-                                logger.info("✓ Machine accepts commands - no alarm")
-                                break
-                    except Exception as e:
-                        logger.error(f"Error reading response: {e}")
-                        break
-                time.sleep(0.1)
-            
-            if not response_received:
-                # Try status request as fallback
-                logger.warning("No response to G-code - trying status request...")
-                self.serial.write("?\n".encode('utf-8'))
-                time.sleep(0.5)
-                
-                while self.serial.in_waiting:
-                    try:
-                        response = self.serial.readline().decode('utf-8').strip()
-                        if response:
-                            logger.info(f"Status response: '{response}'")
-                            if 'Alarm' in response:
-                                alarm_detected = True
-                                logger.warning(f"✓ Alarm detected in status: {response}")
-                                break
-                    except:
-                        break
-            
-            # Resume the polling thread - restart it if it died
-            self.running = was_running
-            if was_running:
-                if not self.poll_thread.is_alive():
-                    logger.info("🔄 Restarting polling thread after alarm check...")
-                    self.poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
-                    self.poll_thread.start()
-                else:
-                    logger.info("🔄 Resumed polling thread")
-            
-            if alarm_detected:
-                logger.info("🚨 Alarm state confirmed - attempting to clear...")
-                result = self._clear_alarm_sequence()
-                if result:
-                    # Restart the polling thread after successful alarm clear
-                    self.running = True
-                    if not self.poll_thread.is_alive():
-                        logger.info("🔄 Restarting polling thread...")
-                        self.poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
-                        self.poll_thread.start()
-                    logger.info("✅ Alarm clearing complete - polling resumed")
-                return result
-            else:
-                logger.info("✅ No alarms detected - machine ready")
-                return True
-                
+            logger.info("Clearing any alarm state...")
+            self.send("$X")  # Send unlock command through normal queue
+            return True
         except Exception as e:
-            # Make sure to resume polling even if there's an error
-            self.running = was_running
-            if was_running and not self.poll_thread.is_alive():
-                logger.info("🔄 Restarting polling thread after alarm check error...")
-                self.poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
-                self.poll_thread.start()
-            logger.error(f"Failed to check alarms: {e}")
-            return False
-    
-    def _clear_alarm_sequence(self):
-        """Execute alarm clearing sequence."""
-        try:
-            # Method 1: Direct $X unlock
-            logger.info("🔧 Step 1: Attempting $X unlock...")
-            self.serial.write("$X\n".encode('utf-8'))
-            time.sleep(1.5)
-            
-            # Clear any responses to $X
-            while self.serial.in_waiting:
-                try:
-                    response = self.serial.readline().decode('utf-8').strip()
-                    if response:
-                        logger.info(f"$X response: '{response}'")
-                except:
-                    break
-            
-            # Test if cleared
-            if self._test_alarm_cleared():
-                logger.info("✅ Alarm cleared with $X")
-                return True
-            
-            # Method 2: Soft reset then $X
-            logger.info("🔧 Step 2: $X failed, trying soft reset...")
-            self.serial.write(b"\x18")  # Ctrl-X soft reset (raw byte)
-            time.sleep(3.0)  # Wait for reset to complete
-            
-            # Clear any startup messages
-            startup_messages = 0
-            while self.serial.in_waiting and startup_messages < 10:
-                try:
-                    msg = self.serial.readline().decode('utf-8').strip()
-                    if msg:
-                        logger.info(f"Reset response: '{msg}'")
-                        startup_messages += 1
-                except:
-                    break
-            
-            # Now try $X after reset
-            logger.info("🔧 Step 3: Attempting $X after reset...")
-            self.serial.write("$X\n".encode('utf-8'))
-            time.sleep(1.5)
-            
-            # Clear $X responses
-            while self.serial.in_waiting:
-                try:
-                    response = self.serial.readline().decode('utf-8').strip()
-                    if response:
-                        logger.info(f"$X after reset response: '{response}'")
-                except:
-                    break
-            
-            if self._test_alarm_cleared():
-                logger.info("✅ Alarm cleared after soft reset")
-                return True
-            
-            logger.error("❌ Alarm persists after all attempts - manual intervention required")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Failed during alarm clearing sequence: {e}")
-            return False
-    
-    def _test_alarm_cleared(self):
-        """Test if alarm has been cleared by trying a simple command."""
-        try:
-            logger.info("🧪 Testing if alarm is cleared...")
-            
-            # Clear any pending responses
-            if self.serial.in_waiting:
-                discarded = self.serial.read(self.serial.in_waiting)
-                logger.debug(f"Cleared {len(discarded)} pending bytes before test")
-            
-            # Try a simple command
-            self.serial.write("G20\n".encode('utf-8'))
-            
-            # Wait for response with timeout
-            start_time = time.time()
-            while time.time() - start_time < 2.0:
-                if self.serial.in_waiting:
-                    try:
-                        response = self.serial.readline().decode('utf-8').strip()
-                        if response:
-                            logger.info(f"Test response: '{response}'")
-                            if "error:9" in response:
-                                logger.info("❌ Still getting error:9 - alarm not cleared")
-                                return False
-                            elif response == "ok":
-                                logger.info("✅ Got 'ok' response - alarm cleared!")
-                                return True
-                            # Other responses might be settings or status - continue waiting
-                    except Exception as e:
-                        logger.error(f"Error reading test response: {e}")
-                        return False
-                time.sleep(0.1)
-            
-            logger.warning("⚠️ No response to test command - unclear if alarm cleared")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Failed to test alarm status: {e}")
+            logger.error(f"Failed to clear alarms: {e}")
             return False
     
     def reset_controller(self):
