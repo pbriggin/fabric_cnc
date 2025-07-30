@@ -222,18 +222,7 @@ class RealMotorController:
         self._debug_prints_enabled = debug_mode  # Debug printing control
         # No internal position tracking - GRBL is single source of truth
         
-        # Check and clear any active alarms at startup
-        time.sleep(2)  # Let GRBL initialize
-        if not self.motor_controller.check_and_clear_alarms():
-            logger.warning("Failed to clear alarms, attempting controller reset...")
-            if self.motor_controller.reset_controller():
-                logger.info("Controller reset successful")
-                # Try clearing alarms one more time after reset
-                self.motor_controller.check_and_clear_alarms()
-            else:
-                logger.error("Controller reset failed - manual intervention may be required")
-        
-        # Reset work coordinates after alarm handling
+        # Reset work coordinates (alarm handling now done in GrblMotorController)
         self.reset_work_coordinates()
 
     def reset_work_coordinates(self):
