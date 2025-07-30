@@ -26,6 +26,7 @@ class GrblMotorController:
         self.status_lock = threading.Lock()
         self.alarm_detected = False
         self.last_error_time = 0
+        self.response_callback = None  # Callback for manual command responses
 
         self.reader_thread = threading.Thread(target=self._read_loop, daemon=True)
         self.writer_thread = threading.Thread(target=self._write_loop, daemon=True)
@@ -279,6 +280,10 @@ class GrblMotorController:
                                 error_msg = self._interpret_grbl_error(decoded)
                                 logger.error(f"GRBL {decoded}: {error_msg}")
                                 
+                                # Send to GUI if callback is set
+                                if self.response_callback:
+                                    self.response_callback(f"ERROR: {decoded} - {error_msg}")
+                                
                                 # Auto-clear alarm if error:9 (alarm state) or error:79 (unlock failed)
                                 if decoded == "error:9" or decoded == "error:79":
                                     current_time = time.time()
@@ -295,6 +300,13 @@ class GrblMotorController:
                                             self.send("$X")  # Try unlock after reset
                             else:
                                 logger.info(f"GRBL: {decoded}")
+                                # Send non-error responses to GUI if callback is set
+                                if self.response_callback:
+                                    self.response_callback(decoded)
+                        else:
+                            # Send "ok" responses to GUI if callback is set
+                            if self.response_callback:
+                                self.response_callback("ok")
             time.sleep(0.01)
 
     def _write_loop(self):
@@ -327,6 +339,14 @@ class GrblMotorController:
 
     def send(self, gcode_line):
         self.command_queue.put(gcode_line)
+    
+    def set_response_callback(self, callback):
+        """Set callback function to receive GRBL responses for manual commands."""
+        self.response_callback = callback
+    
+    def clear_response_callback(self):
+        """Clear the response callback."""
+        self.response_callback = None
 
     def send_immediate(self, gcode_line):
         self.serial.write((gcode_line + "\n").encode('utf-8'))
