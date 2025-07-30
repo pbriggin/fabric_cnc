@@ -295,17 +295,32 @@ class GrblMotorController:
                 continue
 
     def _poll_loop(self):
+        logger.info("📡 Position polling thread started")
+        poll_count = 0
         while self.running:
             self.send_immediate("?")
+            poll_count += 1
+            if poll_count % 50 == 0:  # Log every 10 seconds (50 * 0.2s)
+                logger.debug(f"📡 Polling active - sent {poll_count} status requests")
             time.sleep(0.2)
+        logger.info("📡 Position polling thread stopped")
 
     def _parse_status(self, line):
         match = re.search(r"MPos:([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)", line)
         if match:
             with self.status_lock:
+                old_position = self.position.copy() if hasattr(self, 'position') else [0, 0, 0, 0]
                 self.position = [float(match.group(i)) for i in range(1, 5)]
                 if self.debug_mode:
                     print(f"[GRBL DEBUG] Raw position from GRBL: {self.position}")
+                    
+                # Log position changes for debugging
+                if old_position != self.position:
+                    logger.debug(f"📍 Position updated: X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
+        else:
+            # Log non-position status lines for debugging
+            if self.debug_mode and line.startswith("<") and "MPos" not in line:
+                logger.debug(f"[GRBL STATUS] {line}")
 
     def send(self, gcode_line):
         self.command_queue.put(gcode_line)
@@ -506,10 +521,17 @@ class GrblMotorController:
             
             # Resume the polling thread
             self.running = was_running
+            if was_running:
+                logger.info("🔄 Resumed polling thread")
             
             if alarm_detected:
                 logger.info("🚨 Alarm state confirmed - attempting to clear...")
-                return self._clear_alarm_sequence()
+                result = self._clear_alarm_sequence()
+                if result:
+                    # Make sure polling is definitely running after successful alarm clear
+                    self.running = True
+                    logger.info("✅ Alarm clearing complete - polling resumed")
+                return result
             else:
                 logger.info("✅ No alarms detected - machine ready")
                 return True
