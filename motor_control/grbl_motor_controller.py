@@ -546,26 +546,28 @@ class GrblMotorController:
     def diagnose_homing_issue(self):
         """Diagnose why homing isn't working."""
         try:
-            logger.info("🔍 HOMING DIAGNOSTICS")
-            logger.info("=" * 50)
+            logger.info("🔍 COMPREHENSIVE HOMING DIAGNOSTICS")
+            logger.info("=" * 60)
             
-            # 1. Check current settings
-            logger.info("1. Checking GRBL settings...")
-            self.send("$$")  # Request all settings
-            time.sleep(2)  # Wait for settings to print
-            
-            # 2. Check current status
-            logger.info("2. Checking machine status...")
+            # 1. Check alarm state first
+            logger.info("1. Checking alarm state...")
             self.send_immediate("?")
-            time.sleep(0.5)
+            time.sleep(1)
             
-            # 3. Test if motors can move at all
-            logger.info("3. Testing basic motor movement...")
-            logger.info("   Attempting small X-axis jog...")
-            self.send("G91")  # Relative mode
-            self.send("G1 X0.1 F100")  # Move 0.1 inch at 100 IPM
-            self.send("G90")  # Back to absolute mode
-            time.sleep(2)
+            # 2. Test individual axis movement
+            logger.info("2. Testing individual axis movement...")
+            axes_to_test = ['X', 'Z']  # Focus on problem axes
+            for axis in axes_to_test:
+                logger.info(f"   Testing {axis}-axis...")
+                if self.test_motor_movement(axis, 0.1):
+                    logger.info(f"   ✅ {axis}-axis motor works")
+                else:
+                    logger.error(f"   ❌ {axis}-axis motor failed - check wiring/config")
+            
+            # 3. Check GRBL settings
+            logger.info("3. Checking critical GRBL settings...")
+            self.send("$$")  # Request all settings
+            time.sleep(3)  # Wait for settings to print
             
             # 4. Check limit switch status
             logger.info("4. Checking limit switch status...")
@@ -575,22 +577,84 @@ class GrblMotorController:
             except:
                 logger.info("   $Pins command not supported")
             
-            # 5. Check homing settings specifically
-            logger.info("5. Key homing settings to verify:")
-            logger.info("   $21 (Hard limits): Should be 1")
-            logger.info("   $22 (Homing cycle): Should be 1") 
-            logger.info("   $23 (Homing dir mask): Check direction")
-            logger.info("   $24 (Homing seek): Speed for initial search")
-            logger.info("   $25 (Homing feed): Speed for final approach")
-            logger.info("   $100 (X steps/mm): Motor resolution")
-            logger.info("   $110 (X max rate): Maximum speed")
-            logger.info("   $120 (X acceleration): Motor acceleration")
+            # 5. Test homing sequence step by step
+            logger.info("5. Testing homing sequence components...")
             
-            logger.info("=" * 50)
-            logger.info("🔍 DIAGNOSTICS COMPLETE - Check output above")
+            # Check if homing is enabled
+            logger.info("   Checking if homing is enabled ($22)...")
+            self.send("$22")
+            time.sleep(0.5)
+            
+            # Check hard limits setting
+            logger.info("   Checking hard limits setting ($21)...")
+            self.send("$21")
+            time.sleep(0.5)
+            
+            # Check homing direction mask
+            logger.info("   Checking homing direction mask ($23)...")
+            self.send("$23")
+            time.sleep(0.5)
+            
+            # 6. Manual limit switch test
+            logger.info("6. MANUAL LIMIT SWITCH TEST:")
+            logger.info("   Please manually press each limit switch and observe:")
+            logger.info("   - X-axis limit switch")
+            logger.info("   - Z-axis limit switch")
+            logger.info("   Watch for pin state changes in the status output above")
+            
+            # 7. Recommendations
+            logger.info("7. TROUBLESHOOTING RECOMMENDATIONS:")
+            logger.info("   Common issues and solutions:")
+            logger.info("   • Motor doesn't move: Check $100,$110,$120 settings")
+            logger.info("   • Motor moves but error:5: Check limit switch wiring")
+            logger.info("   • Wrong direction: Adjust $23 (homing direction mask)")
+            logger.info("   • Homing disabled: Set $22=1")
+            logger.info("   • Hard limits disabled: Set $21=1")
+            logger.info("   • Speed too high: Lower $24 (seek) and $25 (feed)")
+            
+            logger.info("=" * 60)
+            logger.info("🔍 DIAGNOSTICS COMPLETE")
             
         except Exception as e:
             logger.error(f"Failed to run diagnostics: {e}")
+    
+    def test_axis_homing_individually(self, axis):
+        """Test homing for a specific axis with detailed feedback."""
+        try:
+            logger.info(f"🎯 TESTING {axis}-AXIS HOMING")
+            logger.info("-" * 30)
+            
+            # Step 1: Check if motor can move
+            logger.info(f"Step 1: Testing {axis}-axis motor movement...")
+            if not self.test_motor_movement(axis, 0.1):
+                logger.error(f"❌ {axis}-axis motor cannot move - fix motor config first")
+                return False
+            
+            # Step 2: Check current status
+            logger.info(f"Step 2: Checking machine status before homing...")
+            self.send_immediate("?")
+            time.sleep(0.5)
+            
+            # Step 3: Attempt homing
+            logger.info(f"Step 3: Attempting {axis}-axis homing...")
+            logger.warning(f"⚠️  Ensure {axis}-axis limit switch is connected!")
+            
+            self.send(f"$H{axis}")
+            
+            # Wait and monitor for completion/error
+            time.sleep(8)  # Give enough time for homing
+            
+            # Step 4: Check final status
+            logger.info(f"Step 4: Checking status after homing attempt...")
+            self.send_immediate("?")
+            time.sleep(0.5)
+            
+            logger.info(f"🎯 {axis}-AXIS HOMING TEST COMPLETE")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to test {axis}-axis homing: {e}")
+            return False
     
     def test_motor_movement(self, axis='X', distance=0.1):
         """Test if a motor can move at all."""

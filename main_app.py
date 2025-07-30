@@ -1917,6 +1917,14 @@ class FabricCNCApp:
         else:
             logger.info("Diagnostics not available in simulation mode")
     
+    def _test_individual_homing(self, axis):
+        """Test homing for a specific axis."""
+        logger.info(f"🎯 Testing {axis}-axis homing individually...")
+        if hasattr(self.motor_ctrl, 'motor_controller') and hasattr(self.motor_ctrl.motor_controller, 'test_axis_homing_individually'):
+            self.motor_ctrl.motor_controller.test_axis_homing_individually(axis)
+        else:
+            logger.info("Individual homing test not available in simulation mode")
+    
     def _setup_manual_command_interface(self):
         """Set up manual GRBL command interface below the canvas."""
         # Manual command frame
