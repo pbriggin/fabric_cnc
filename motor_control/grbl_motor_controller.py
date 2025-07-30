@@ -436,12 +436,17 @@ class GrblMotorController:
         try:
             logger.info("Checking for active alarms...")
             
+            # Clear any pending input first
+            if self.serial.in_waiting:
+                self.serial.read(self.serial.in_waiting)
+            
             # Send status request
             self.send_immediate("?")
             time.sleep(0.5)
             
             # Read any pending responses to check for alarm state
             alarm_detected = False
+            error9_detected = False
             responses = []
             
             # Collect responses for a short time
@@ -452,47 +457,109 @@ class GrblMotorController:
                         response = self.serial.readline().decode('utf-8').strip()
                         if response:
                             responses.append(response)
+                            logger.info(f"Status response: {response}")
+                            # Check for alarm in status response (format: <Alarm|...>)
                             if 'Alarm' in response:
                                 alarm_detected = True
-                                logger.warning(f"Alarm detected: {response}")
+                                logger.warning(f"Alarm detected in status: {response}")
                     except:
                         pass
                 time.sleep(0.1)
             
-            if alarm_detected:
-                logger.info("Clearing alarm state...")
-                # Soft reset first
-                self.send_immediate("\x18")  # Ctrl-X soft reset
+            # Also check if we've been getting error:9 messages (indicates alarm state)
+            # This is a secondary check since error:9 means "G-code locked out during alarm"
+            try:
+                test_cmd = "G20"  # Simple command to test if we get error:9
+                self.send_immediate(test_cmd)
+                time.sleep(0.3)
+                
+                if self.serial.in_waiting:
+                    test_response = self.serial.readline().decode('utf-8').strip()
+                    if "error:9" in test_response:
+                        error9_detected = True
+                        alarm_detected = True
+                        logger.warning(f"Error:9 detected, indicating alarm state: {test_response}")
+            except:
+                pass
+            
+            if alarm_detected or error9_detected:
+                logger.info("Alarm state detected, attempting to clear...")
+                
+                # Method 1: Try immediate alarm clear
+                logger.info("Attempting $X alarm clear...")
+                self.send_immediate("$X")
                 time.sleep(1.0)
                 
-                # Clear alarm
-                self.send("$X")
-                time.sleep(0.5)
-                
-                # Verify alarm is cleared
+                # Test if alarm is cleared
                 self.send_immediate("?")
                 time.sleep(0.5)
                 
-                # Check final status
-                final_responses = []
-                start_time = time.time()
-                while time.time() - start_time < 1.0:
+                cleared = False
+                if self.serial.in_waiting:
+                    try:
+                        status_response = self.serial.readline().decode('utf-8').strip()
+                        logger.info(f"Status after $X: {status_response}")
+                        if 'Alarm' not in status_response:
+                            # Double-check with a test command
+                            self.send_immediate("G20")
+                            time.sleep(0.3)
+                            if self.serial.in_waiting:
+                                test_resp = self.serial.readline().decode('utf-8').strip()
+                                if "error:9" not in test_resp:
+                                    cleared = True
+                                    logger.info("Alarm successfully cleared with $X")
+                    except:
+                        pass
+                
+                # Method 2: If $X didn't work, try soft reset + $X
+                if not cleared:
+                    logger.info("$X alone didn't work, trying soft reset + $X...")
+                    self.send_immediate("\x18")  # Ctrl-X soft reset
+                    time.sleep(2.0)
+                    
+                    # Wait for GRBL ready message
+                    start_time = time.time()
+                    while time.time() - start_time < 3.0:
+                        if self.serial.in_waiting:
+                            try:
+                                response = self.serial.readline().decode('utf-8').strip()
+                                logger.info(f"Reset response: {response}")
+                                if "Grbl" in response:  # GRBL startup message
+                                    break
+                            except:
+                                pass
+                        time.sleep(0.1)
+                    
+                    # Now try clearing alarm again
+                    self.send_immediate("$X")
+                    time.sleep(1.0)
+                    
+                    # Test final status
+                    self.send_immediate("?")
+                    time.sleep(0.5)
+                    
                     if self.serial.in_waiting:
                         try:
-                            response = self.serial.readline().decode('utf-8').strip()
-                            if response:
-                                final_responses.append(response)
+                            final_status = self.serial.readline().decode('utf-8').strip()
+                            logger.info(f"Final status after reset+$X: {final_status}")
+                            if 'Alarm' not in final_status:
+                                # Double-check with test command
+                                self.send_immediate("G20")
+                                time.sleep(0.3)
+                                if self.serial.in_waiting:
+                                    test_resp = self.serial.readline().decode('utf-8').strip()
+                                    if "error:9" not in test_resp:
+                                        cleared = True
+                                        logger.info("Alarm cleared after soft reset")
                         except:
                             pass
-                    time.sleep(0.1)
                 
-                still_alarmed = any('Alarm' in resp for resp in final_responses)
-                if still_alarmed:
-                    logger.warning("Alarm state persists after clearing attempt")
-                    return False
-                else:
+                if cleared:
                     logger.info("Alarm state successfully cleared")
                     return True
+                else:
+                    logger.warning("Alarm state persists after all clearing attempts")
+                    return False
             else:
                 logger.info("No active alarms detected")
                 return True
