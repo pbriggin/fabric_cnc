@@ -1905,6 +1905,14 @@ class FabricCNCApp:
         # Position update loop will handle canvas redraw automatically
         # Clear status after 2 seconds
         self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
+    
+    def _debug_homing(self):
+        """Debug homing issues - call this method to run diagnostics."""
+        logger.info("🔧 Running homing diagnostics...")
+        if hasattr(self.motor_ctrl, 'motor_controller') and hasattr(self.motor_ctrl.motor_controller, 'diagnose_homing_issue'):
+            self.motor_ctrl.motor_controller.diagnose_homing_issue()
+        else:
+            logger.info("Diagnostics not available in simulation mode")
 
     def _stop_movement(self):
         """Stop all movement and cancel any pending arrow key operations."""

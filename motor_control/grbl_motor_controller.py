@@ -38,10 +38,9 @@ class GrblMotorController:
         # Wait for GRBL to initialize and check/clear alarms FIRST
         time.sleep(2)  # Wait for GRBL to initialize
         
-        # Simple alarm clearing - just send unlock command at startup
-        logger.info("Sending unlock command at startup...")
-        self.send("$X")  # Clear any alarm state
-        time.sleep(1)  # Wait for unlock to process
+        # Robust alarm clearing sequence at startup
+        logger.info("Attempting to clear alarm state at startup...")
+        self._startup_alarm_clear()
         
         # Initialize GRBL settings and reset work coordinates
         self._configure_grbl_settings()
@@ -255,7 +254,8 @@ class GrblMotorController:
             "error:34": "A G2 or G3 arc, traced with the radius definition, had a mathematical error when computing the arc geometry. Try either breaking up the arc into semi-circles or quadrants, or redefine them with the arc offset definition.",
             "error:35": "A G2 or G3 arc, traced with the offset definition, is missing the IJK offset word in the selected plane to trace the arc.",
             "error:36": "There are unused, leftover G-code words that aren't used by any command in the block.",
-            "error:37": "The G43.1 dynamic tool length offset command cannot apply an offset to an axis other than its configured axis. The Grbl default axis is the Z-axis."
+            "error:37": "The G43.1 dynamic tool length offset command cannot apply an offset to an axis other than its configured axis. The Grbl default axis is the Z-axis.",
+            "error:79": "Homing not enabled in settings, or emergency stop/limit switch triggered during unlock attempt."
         }
         
         return error_codes.get(error_str, "Unknown GRBL error")
@@ -279,14 +279,20 @@ class GrblMotorController:
                                 error_msg = self._interpret_grbl_error(decoded)
                                 logger.error(f"GRBL {decoded}: {error_msg}")
                                 
-                                # Auto-clear alarm if error:9 (alarm state)
-                                if decoded == "error:9":
+                                # Auto-clear alarm if error:9 (alarm state) or error:79 (unlock failed)
+                                if decoded == "error:9" or decoded == "error:79":
                                     current_time = time.time()
                                     # Only try to clear alarm once every 5 seconds to avoid spam
                                     if current_time - self.last_error_time > 5.0:
                                         self.last_error_time = current_time
-                                        logger.info("Auto-clearing alarm state...")
-                                        self.send("$X")  # Send unlock command
+                                        if decoded == "error:9":
+                                            logger.info("Auto-clearing alarm state (error:9)...")
+                                            self.send("$X")  # Send unlock command
+                                        elif decoded == "error:79":
+                                            logger.info("Unlock failed (error:79) - trying reset + unlock...")
+                                            self.send_immediate("\x18")  # Soft reset
+                                            time.sleep(1)
+                                            self.send("$X")  # Try unlock after reset
                             else:
                                 logger.info(f"GRBL: {decoded}")
             time.sleep(0.01)
@@ -463,6 +469,141 @@ class GrblMotorController:
             return True
         except Exception as e:
             logger.error(f"Failed to clear alarms: {e}")
+            return False
+    
+    def _startup_alarm_clear(self):
+        """Robust alarm clearing sequence for startup."""
+        try:
+            logger.info("🔧 Starting comprehensive alarm clearing sequence...")
+            
+            # Method 1: Try simple unlock first
+            logger.info("Step 1: Trying simple unlock ($X)...")
+            self.send("$X")
+            time.sleep(2)
+            
+            # Method 2: If still in alarm, try soft reset + unlock
+            logger.info("Step 2: Soft reset + unlock...")
+            self.send_immediate("\x18")  # Ctrl-X soft reset
+            time.sleep(3)  # Wait for reset
+            
+            # Wait for startup messages
+            start_time = time.time()
+            while time.time() - start_time < 2.0:
+                if self.serial.in_waiting:
+                    try:
+                        msg = self.serial.readline().decode('utf-8').strip()
+                        if msg and "Grbl" in msg:
+                            logger.info(f"Reset response: {msg}")
+                    except:
+                        pass
+                time.sleep(0.1)
+            
+            # Send unlock after reset
+            self.send("$X")
+            time.sleep(1)
+            
+            # Method 3: Disable hard limits temporarily to clear alarm
+            logger.info("Step 3: Temporarily disabling hard limits...")
+            self.send("$21=0")  # Disable hard limits
+            time.sleep(0.5)
+            self.send("$X")     # Try unlock with limits disabled
+            time.sleep(1)
+            self.send("$21=1")  # Re-enable hard limits
+            time.sleep(0.5)
+            
+            # Method 4: Final attempt with position reset
+            logger.info("Step 4: Resetting work coordinates...")
+            self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Reset work coordinates
+            time.sleep(0.5)
+            self.send("$X")  # Final unlock attempt
+            time.sleep(1)
+            
+            logger.info("✅ Alarm clearing sequence complete")
+            
+        except Exception as e:
+            logger.error(f"Failed during startup alarm clearing: {e}")
+    
+    def diagnose_homing_issue(self):
+        """Diagnose why homing isn't working."""
+        try:
+            logger.info("🔍 HOMING DIAGNOSTICS")
+            logger.info("=" * 50)
+            
+            # 1. Check current settings
+            logger.info("1. Checking GRBL settings...")
+            self.send("$$")  # Request all settings
+            time.sleep(2)  # Wait for settings to print
+            
+            # 2. Check current status
+            logger.info("2. Checking machine status...")
+            self.send_immediate("?")
+            time.sleep(0.5)
+            
+            # 3. Test if motors can move at all
+            logger.info("3. Testing basic motor movement...")
+            logger.info("   Attempting small X-axis jog...")
+            self.send("G91")  # Relative mode
+            self.send("G1 X0.1 F100")  # Move 0.1 inch at 100 IPM
+            self.send("G90")  # Back to absolute mode
+            time.sleep(2)
+            
+            # 4. Check limit switch status
+            logger.info("4. Checking limit switch status...")
+            try:
+                self.send("$Pins")  # grblHAL pin status
+                time.sleep(1)
+            except:
+                logger.info("   $Pins command not supported")
+            
+            # 5. Check homing settings specifically
+            logger.info("5. Key homing settings to verify:")
+            logger.info("   $21 (Hard limits): Should be 1")
+            logger.info("   $22 (Homing cycle): Should be 1") 
+            logger.info("   $23 (Homing dir mask): Check direction")
+            logger.info("   $24 (Homing seek): Speed for initial search")
+            logger.info("   $25 (Homing feed): Speed for final approach")
+            logger.info("   $100 (X steps/mm): Motor resolution")
+            logger.info("   $110 (X max rate): Maximum speed")
+            logger.info("   $120 (X acceleration): Motor acceleration")
+            
+            logger.info("=" * 50)
+            logger.info("🔍 DIAGNOSTICS COMPLETE - Check output above")
+            
+        except Exception as e:
+            logger.error(f"Failed to run diagnostics: {e}")
+    
+    def test_motor_movement(self, axis='X', distance=0.1):
+        """Test if a motor can move at all."""
+        try:
+            logger.info(f"🧪 Testing {axis}-axis motor movement ({distance} inches)...")
+            
+            # Get current position
+            current_pos = self.get_position()
+            logger.info(f"   Current position: {current_pos}")
+            
+            # Try to move
+            self.send("G91")  # Relative mode
+            self.send(f"G1 {axis}{distance} F100")  # Move slowly
+            self.send("G90")  # Back to absolute mode
+            
+            # Wait and check new position
+            time.sleep(3)
+            new_pos = self.get_position()
+            logger.info(f"   New position: {new_pos}")
+            
+            # Check if movement occurred
+            axis_index = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3}[axis]
+            movement = abs(new_pos[axis_index] - current_pos[axis_index])
+            
+            if movement > 0.001:  # Moved more than 0.001 inches
+                logger.info(f"   ✅ {axis}-axis motor CAN move! Moved {movement:.4f} inches")
+                return True
+            else:
+                logger.error(f"   ❌ {axis}-axis motor did NOT move!")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to test {axis}-axis movement: {e}")
             return False
     
     def reset_controller(self):
