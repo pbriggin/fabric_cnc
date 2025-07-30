@@ -430,6 +430,97 @@ class GrblMotorController:
             
         except Exception as e:
             logger.error(f"Failed to get GRBL info: {e}")
+    
+    def check_and_clear_alarms(self):
+        """Check for active alarms and clear them if found."""
+        try:
+            logger.info("Checking for active alarms...")
+            
+            # Send status request
+            self.send_immediate("?")
+            time.sleep(0.5)
+            
+            # Read any pending responses to check for alarm state
+            alarm_detected = False
+            responses = []
+            
+            # Collect responses for a short time
+            start_time = time.time()
+            while time.time() - start_time < 1.0:
+                if self.serial.in_waiting:
+                    try:
+                        response = self.serial.readline().decode('utf-8').strip()
+                        if response:
+                            responses.append(response)
+                            if 'Alarm' in response:
+                                alarm_detected = True
+                                logger.warning(f"Alarm detected: {response}")
+                    except:
+                        pass
+                time.sleep(0.1)
+            
+            if alarm_detected:
+                logger.info("Clearing alarm state...")
+                # Soft reset first
+                self.send_immediate("\x18")  # Ctrl-X soft reset
+                time.sleep(1.0)
+                
+                # Clear alarm
+                self.send("$X")
+                time.sleep(0.5)
+                
+                # Verify alarm is cleared
+                self.send_immediate("?")
+                time.sleep(0.5)
+                
+                # Check final status
+                final_responses = []
+                start_time = time.time()
+                while time.time() - start_time < 1.0:
+                    if self.serial.in_waiting:
+                        try:
+                            response = self.serial.readline().decode('utf-8').strip()
+                            if response:
+                                final_responses.append(response)
+                        except:
+                            pass
+                    time.sleep(0.1)
+                
+                still_alarmed = any('Alarm' in resp for resp in final_responses)
+                if still_alarmed:
+                    logger.warning("Alarm state persists after clearing attempt")
+                    return False
+                else:
+                    logger.info("Alarm state successfully cleared")
+                    return True
+            else:
+                logger.info("No active alarms detected")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Failed to check/clear alarms: {e}")
+            return False
+    
+    def reset_controller(self):
+        """Perform a soft reset of the GRBL controller."""
+        try:
+            logger.info("Performing GRBL soft reset...")
+            self.send_immediate("\x18")  # Ctrl-X soft reset
+            time.sleep(2.0)  # Wait for reset to complete
+            
+            # Reconfigure settings after reset
+            self._configure_grbl_settings()
+            self.send("G20")  # Set inches mode
+            self.send("G90")  # Set absolute positioning
+            self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Reset work coordinates
+            self.send("G54")  # Select work coordinate system 1
+            
+            logger.info("GRBL soft reset completed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to reset controller: {e}")
+            return False
 
     def run_gcode_file(self, filepath):
         with open(filepath, 'r') as f:
