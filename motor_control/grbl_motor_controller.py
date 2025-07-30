@@ -519,17 +519,26 @@ class GrblMotorController:
                     except:
                         break
             
-            # Resume the polling thread
+            # Resume the polling thread - restart it if it died
             self.running = was_running
             if was_running:
-                logger.info("🔄 Resumed polling thread")
+                if not self.poll_thread.is_alive():
+                    logger.info("🔄 Restarting polling thread after alarm check...")
+                    self.poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
+                    self.poll_thread.start()
+                else:
+                    logger.info("🔄 Resumed polling thread")
             
             if alarm_detected:
                 logger.info("🚨 Alarm state confirmed - attempting to clear...")
                 result = self._clear_alarm_sequence()
                 if result:
-                    # Make sure polling is definitely running after successful alarm clear
+                    # Restart the polling thread after successful alarm clear
                     self.running = True
+                    if not self.poll_thread.is_alive():
+                        logger.info("🔄 Restarting polling thread...")
+                        self.poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
+                        self.poll_thread.start()
                     logger.info("✅ Alarm clearing complete - polling resumed")
                 return result
             else:
@@ -539,6 +548,10 @@ class GrblMotorController:
         except Exception as e:
             # Make sure to resume polling even if there's an error
             self.running = was_running
+            if was_running and not self.poll_thread.is_alive():
+                logger.info("🔄 Restarting polling thread after alarm check error...")
+                self.poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
+                self.poll_thread.start()
             logger.error(f"Failed to check alarms: {e}")
             return False
     
