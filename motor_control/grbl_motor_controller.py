@@ -624,30 +624,64 @@ class GrblMotorController:
             logger.info(f"🎯 TESTING {axis}-AXIS HOMING")
             logger.info("-" * 30)
             
-            # Step 1: Check if motor can move
-            logger.info(f"Step 1: Testing {axis}-axis motor movement...")
-            if not self.test_motor_movement(axis, 0.1):
-                logger.error(f"❌ {axis}-axis motor cannot move - fix motor config first")
-                return False
+            # Step 1: Test jogging in both directions
+            logger.info(f"Step 1: Testing {axis}-axis movement in both directions...")
+            logger.info(f"   Testing {axis}+ direction...")
+            if self.test_motor_movement(axis, 0.1):
+                logger.info(f"   ✅ {axis}+ movement works")
+            else:
+                logger.error(f"   ❌ {axis}+ movement failed")
             
-            # Step 2: Check current status
-            logger.info(f"Step 2: Checking machine status before homing...")
+            logger.info(f"   Testing {axis}- direction...")
+            if self.test_motor_movement(axis, -0.1):
+                logger.info(f"   ✅ {axis}- movement works")
+            else:
+                logger.error(f"   ❌ {axis}- movement failed")
+            
+            # Step 2: Check homing direction setting
+            logger.info(f"Step 2: Checking homing direction for {axis}-axis...")
+            axis_bit = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3}[axis]
+            logger.info(f"   Current $23 setting controls homing direction")
+            logger.info(f"   Bit {axis_bit} in $23 controls {axis}-axis direction:")
+            logger.info(f"   • 0 = Home towards negative direction ({axis}-)")
+            logger.info(f"   • 1 = Home towards positive direction ({axis}+)")
+            self.send("$23")
+            time.sleep(1)
+            
+            # Step 3: Check current status
+            logger.info(f"Step 3: Checking machine status before homing...")
             self.send_immediate("?")
             time.sleep(0.5)
             
-            # Step 3: Attempt homing
-            logger.info(f"Step 3: Attempting {axis}-axis homing...")
-            logger.warning(f"⚠️  Ensure {axis}-axis limit switch is connected!")
+            # Step 4: Attempt homing with monitoring
+            logger.info(f"Step 4: Attempting {axis}-axis homing...")
+            logger.warning(f"⚠️  Watch if motor actually moves during homing!")
+            
+            # Get position before homing
+            pos_before = self.get_position()
+            logger.info(f"   Position before homing: {pos_before}")
             
             self.send(f"$H{axis}")
             
-            # Wait and monitor for completion/error
-            time.sleep(8)  # Give enough time for homing
+            # Monitor position during homing
+            for i in range(10):  # Check position every 0.8 seconds for 8 seconds
+                time.sleep(0.8)
+                pos_current = self.get_position()
+                axis_idx = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3}[axis]
+                movement = abs(pos_current[axis_idx] - pos_before[axis_idx])
+                if movement > 0.01:  # Motor moved more than 0.01 inches
+                    logger.info(f"   ✅ Motor IS moving! Current position: {pos_current}")
+                    break
+            else:
+                logger.error(f"   ❌ Motor NOT moving during homing!")
+                logger.error(f"   This suggests wrong homing direction in $23 setting")
             
-            # Step 4: Check final status
-            logger.info(f"Step 4: Checking status after homing attempt...")
+            # Step 5: Check final status
+            logger.info(f"Step 5: Checking status after homing attempt...")
             self.send_immediate("?")
             time.sleep(0.5)
+            pos_after = self.get_position()
+            logger.info(f"   Position after homing: {pos_after}")
             
             logger.info(f"🎯 {axis}-AXIS HOMING TEST COMPLETE")
             return True
