@@ -171,49 +171,115 @@ class GrblMotorController:
             logger.warning(f"USB reset failed: {e}")
 
     def _configure_grbl_settings(self):
-        """Configure essential GRBL settings for proper operation.""" 
+        """Configure comprehensive GRBL settings for proper operation.""" 
         try:
-            # Enable hard limits ($21=1) - must be set before homing
-            self.send("$21=1")
-            if self.debug_mode:
-                logger.info("Enabled GRBL hard limits ($21=1)")
+            logger.info("🔧 Configuring GRBL settings...")
             
-            # Enable homing cycle ($22=1)
-            self.send("$22=1")
-            if self.debug_mode:
-                logger.info("Enabled GRBL homing cycle ($22=1)")
+            # Define all required settings
+            settings = {
+                # Basic settings
+                "$0": "5.0",      # Step pulse time
+                "$1": "25",       # Step idle delay
+                "$2": "0",        # Step pulse invert
+                "$3": "0",        # Step direction invert
+                "$4": "15",       # Step enable invert
+                "$5": "15",       # Limit pins invert
+                "$6": "0",        # Probe pin invert
+                "$9": "1",        # PWM spindle mode
+                "$10": "511",     # Status report options
+                "$11": "0.010",   # Junction deviation
+                "$12": "0.002",   # Arc tolerance
+                "$13": "0",       # Report inches
+                "$15": "0",       # Work area alarm
+                "$16": "0",       # Work area alarm
+                "$18": "0",       # Tool change mode
+                "$19": "0",       # Laser mode
+                "$20": "0",       # Soft limits
+                "$21": "1",       # Hard limits enable
+                "$22": "1",       # Homing cycle enable
+                "$23": "0",       # Homing direction mask
+                "$24": "500.0",   # Homing seek rate
+                "$25": "1500.0",  # Homing feed rate
+                "$26": "250",     # Homing debounce
+                "$27": "6.350",   # Homing pull-off
+                "$28": "0.000",   # Homing locate feed rate
+                "$29": "0.0",     # Homing search seek rate
+                "$30": "1000.000", # Spindle max rpm
+                "$31": "0.000",   # Spindle min rpm
+                "$32": "0",       # Laser mode enable
+                "$33": "5000.0",  # Spindle PWM frequency
+                "$34": "0.0",     # Spindle PWM off value
+                "$35": "0.0",     # Spindle PWM min value
+                "$36": "100.0",   # Spindle PWM max value
+                "$37": "0",       # Stepper deenergize mask
+                "$39": "1",       # Enable legacy RT commands
+                "$40": "0",       # Limit/control pins pull-up disable
+                "$43": "1",       # Homing passes
+                "$44": "4",       # Homing cycle mask
+                "$45": "11",      # Homing cycle pulloff mask
+                "$46": "0",       # Homing cycle allow manual
+                "$47": "0",       # Homing cycle mpos set
+                "$62": "0",       # Sleep enable
+                "$63": "3",       # Feed hold actions
+                "$64": "0",       # Force init alarm
+                "$65": "0",       # Probe allow feed override
+                
+                # Steps per unit (inches)
+                "$100": "40.00000",   # X steps/inch
+                "$101": "40.00000",   # Y steps/inch  
+                "$102": "200.00000",  # Z steps/inch
+                "$103": "252.00000",  # A steps/inch
+                
+                # Maximum rates (inches/min)
+                "$110": "500.000",    # X max rate
+                "$111": "3000.000",   # Y max rate
+                "$112": "500.000",    # Z max rate
+                "$113": "500.000",    # A max rate
+                
+                # Acceleration (inches/sec²)
+                "$120": "100.000",    # X acceleration
+                "$121": "100.000",    # Y acceleration
+                "$122": "10.000",     # Z acceleration
+                "$123": "10.000",     # A acceleration
+                
+                # Maximum travel (mm for GRBL)
+                "$130": "1727.000",   # X max travel
+                "$131": "1143.000",   # Y max travel
+                "$132": "127.000",    # Z max travel
+                "$133": "200.000",    # A max travel
+                
+                # Additional grblHAL settings
+                "$341": "0",       # Tool change mode
+                "$342": "30.0",    # Tool change probing distance
+                "$343": "25.0",    # Tool change locate feed rate
+                "$344": "200.0",   # Tool change search seek rate
+                "$345": "200.0",   # Tool change probe pull-off rate
+                "$346": "1",       # Restore position after M6
+                "$370": "0",       # Invert I/O Port inputs
+                "$376": "0",       # Invert I/O Port outputs
+                "$384": "0",       # Disable G92 persistence
+                "$394": "0.0",     # I/O Port analog input deadband
+                "$398": "100",     # Planner buffer blocks
+                "$481": "0",       # Autoreporting interval
+                "$485": "0",       # Multi-axis step pulse delay
+                "$486": "0",       # Step pulse delay
+                "$538": "0",       # Encoders enabled
+                "$539": "0.0",     # Encoder step rate
+                "$650": "0",       # WebUI heap size
+                "$673": "0.0",     # Tool change probing overrides
+                "$676": "3",       # WiFi mode
+                "$680": "0"        # Modbus enable
+            }
             
-            # Set homing direction mask - customize based on your limit switch setup
-            # $23=0 means all axes home in negative direction (typical)
-            self.send("$23=0")
+            # Send all settings with small delays
+            for setting, value in settings.items():
+                self.send(f"{setting}={value}")
+                time.sleep(0.1)  # Small delay between settings
             
-            # Set homing seek rate - GRBL uses mm/min internally, convert from inches
-            # 20 inches/min = ~508 mm/min for initial search
-            self.send("$24=508")
+            logger.info("✅ All GRBL settings configured")
             
-            # Set homing feed rate - slower for precision
-            # 2 inches/min = ~51 mm/min for final approach
-            self.send("$25=51")
-            
-            # Set homing debounce delay ($26=250 ms)
-            self.send("$26=250")
-            
-            # Set homing pull-off distance - GRBL uses mm internally
-            # 0.04 inches = ~1.0 mm back off from limit after homing
-            self.send("$27=1.0")
-            
-            # Set travel limits based on your fabric CNC machine dimensions
-            # Your machine: 68" x 45" work area, convert to mm for GRBL
-            # 68 inches = ~1727 mm, 45 inches = ~1143 mm
-            self.send("$130=1727.0")  # X max travel (68 inches in mm)
-            self.send("$131=1143.0")  # Y max travel (45 inches in mm)  
-            self.send("$132=127.0")   # Z max travel (~5 inches in mm) - adjust for your Z travel
-            
-            if self.debug_mode:
-                logger.info("Configured GRBL homing settings")
-            
-            # Wait longer for settings to be processed
-            time.sleep(1.0)
+            # Wait for all settings to be processed
+            time.sleep(2.0)
             
         except Exception as e:
             logger.error(f"Failed to configure GRBL settings: {e}")
