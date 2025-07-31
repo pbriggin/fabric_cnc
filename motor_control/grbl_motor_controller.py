@@ -233,14 +233,14 @@ class GrblMotorController:
                 # Maximum rates (inches/min)
                 "$110": "3000.000",   # X max rate
                 "$111": "3000.000",   # Y max rate
-                "$112": "500.000",    # Z max rate
-                "$113": "500.000",    # A max rate
+                "$112": "1500.000",   # Z max rate (increased to allow full homing seek speed)
+                "$113": "1500.000",   # A max rate (increased to allow full homing seek speed)
                 
                 # Acceleration (inches/sec²)
                 "$120": "100.000",    # X acceleration
                 "$121": "100.000",    # Y acceleration
-                "$122": "10.000",     # Z acceleration
-                "$123": "10.000",     # A acceleration
+                "$122": "50.000",     # Z acceleration (increased for better homing performance)
+                "$123": "50.000",     # A acceleration (increased for better homing performance)
                 
                 # Maximum travel (mm for GRBL)
                 "$130": "1727.000",   # X max travel
