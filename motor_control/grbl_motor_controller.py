@@ -231,7 +231,7 @@ class GrblMotorController:
                 "$103": "252.00000",  # A steps/inch
                 
                 # Maximum rates (inches/min)
-                "$110": "500.000",    # X max rate
+                "$110": "3000.000",   # X max rate
                 "$111": "3000.000",   # Y max rate
                 "$112": "500.000",    # Z max rate
                 "$113": "500.000",    # A max rate

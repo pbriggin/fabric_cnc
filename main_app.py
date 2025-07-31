@@ -263,7 +263,14 @@ class RealMotorController:
             if abs(actual_delta) > 1e-6:
                 # Map axis names - GRBL controller now expects inches directly
                 axis_map = {'X': 'X', 'Y': 'Y', 'Z': 'Z', 'ROT': 'A'}
-                feedrate = 100  # inches/min for jog moves
+                # Use specified jog feedrates for each axis
+                axis_feedrates = {
+                    'X': 3000,   # High speed for X-axis
+                    'Y': 3000,   # High speed for Y-axis
+                    'Z': 500,    # Medium speed for Z-axis
+                    'ROT': 500   # Medium speed for rotation axis
+                }
+                feedrate = axis_feedrates.get(axis, 100)
                 
                 if axis in axis_map:
                     if axis == 'ROT':
