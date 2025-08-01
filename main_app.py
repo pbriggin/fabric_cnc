@@ -1162,16 +1162,19 @@ class FabricCNCApp:
                         # Check if we should place an arrow here
                         if cumulative_distance >= arrow_spacing_inches:
                             arrow_indices.append(i)
-                            cumulative_distance = 0.0  # Reset for next 0.5" interval
+                            cumulative_distance = 0.0  # Reset for next 1.0" interval
                     
                     last_pos = pos
             
-            logger.info(f"Drawing arrows: {len(positions)} positions, {len(orientations)} orientations, {len(arrow_indices)} arrows at 0.5\" intervals")
+            logger.info(f"Drawing arrows: {len(positions)} positions, {len(orientations)} orientations, {len(arrow_indices)} arrows at 1.0\" intervals")
             for i in arrow_indices:
                 if i < len(positions):
                     x_in, y_in = positions[i]
-                    a_deg = orientations[i]
+                    a_inches = orientations[i]  # A-axis value in inches
                     x_canvas, y_canvas = self._inches_to_canvas(x_in, y_in)
+                    
+                    # Convert A-axis inches to degrees: 1 inch = 360 degrees
+                    a_deg = a_inches * 360.0
                     
                     # Calculate arrow direction
                     arrow_length = 15

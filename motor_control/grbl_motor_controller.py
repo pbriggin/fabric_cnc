@@ -201,7 +201,7 @@ class GrblMotorController:
                 "$24": "500.0",   # Homing seek rate (swapped - this implementation uses for first approach)
                 "$25": "1500.0",  # Homing feed rate (swapped - this implementation uses for second approach)
                 "$26": "250",     # Homing debounce
-                "$27": "5.080",   # Homing pull-off (0.2 inches)
+                "$27": "5.715",   # Homing pull-off (0.225 inches)
                 "$28": "0.000",   # Homing locate feed rate
                 "$29": "0.0",     # Homing search seek rate
                 "$30": "1000.000", # Spindle max rpm
