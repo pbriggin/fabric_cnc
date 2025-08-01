@@ -458,32 +458,35 @@ class GrblMotorController:
         """Home all axes using $H command."""
         logger.info("Starting home all axes sequence...")
         self.send("$H")
-        # After homing, wait for completion and pushoff, then reset coordinates
-        time.sleep(8)  # Wait longer for homing and pushoff to complete
         
-        # In GRBL, machine coordinates cannot be directly reset - they represent actual machine position
-        # Instead, we set the work coordinate system (G54) to make current position 0,0,0,0
-        logger.info("Resetting work coordinates to 0,0,0,0 at current position")
-        self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Set work coordinate system origin to current position  
-        self.send("G54")  # Select work coordinate system 1
-        time.sleep(1)  # Wait for coordinate reset to process
+        # Wait for homing to complete - this is critical timing
+        time.sleep(10)  # Extended wait for all axes homing and pushoff
         
-        # Get final stable position AFTER homing and coordinate reset commands complete
-        for i in range(5):
+        # Wait for machine to stabilize and get final position
+        logger.info("Waiting for machine to stabilize after homing...")
+        stable_position = None
+        for attempt in range(10):  # Try up to 10 times to get stable position
             self.send("?")
-            time.sleep(0.3)
+            time.sleep(0.5)
+            current_pos = self.position.copy()
+            
+            if stable_position is None:
+                stable_position = current_pos
+            elif all(abs(stable_position[i] - current_pos[i]) < 0.01 for i in range(4)):
+                # Position is stable - same for 2 consecutive readings
+                break
+            else:
+                stable_position = current_pos
         
-        # Store the FINAL homed machine position as our work coordinate offset
+        # Store the stable homed position as work offset
         with self.status_lock:
-            self.work_offset = self.position.copy()  # Final machine position after homing becomes work offset
-        
-        # Enable work coordinate reporting and force position update
-        self.send("$10=3")  # Enable both MPos and WPos reporting
-        time.sleep(0.2)
-        self.send("?")  # Query current position
-        time.sleep(0.5)
+            self.work_offset = stable_position.copy()
         
         logger.info(f"Home all completed - work offset set to {self.work_offset}")
+        
+        # Force immediate position update to apply the new offset
+        self.send("?")
+        time.sleep(0.5)
     
     def home_axis(self, axis):
         """Home a single axis using $H<axis> command (grblHAL)."""
@@ -503,32 +506,35 @@ class GrblMotorController:
             logger.info(f"Note: Ensure limit switch for {axis} axis is properly connected and configured")
         
         self.send(command)
-        # Wait for homing to complete (individual axis is faster)
-        time.sleep(8)  # Longer wait to ensure homing and pushoff completes
         
-        # Reset ALL work coordinates to 0,0,0,0 (not just the homed axis for consistency)
-        logger.info(f"Resetting work coordinates to 0,0,0,0 at current position after homing {axis} axis")
-        self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Reset all work coordinates
+        # Wait for homing to complete - individual axis is faster but still needs time
+        time.sleep(8)  # Wait for homing and pushoff to complete
         
-        self.send("G54")  # Select work coordinate system 1
-        time.sleep(1)  # Wait for coordinate reset to process
-        
-        # Get final stable position AFTER homing and coordinate reset commands complete
-        for i in range(5):
+        # Wait for machine to stabilize and get final position
+        logger.info(f"Waiting for machine to stabilize after homing {axis} axis...")
+        stable_position = None
+        for attempt in range(10):  # Try up to 10 times to get stable position
             self.send("?")
-            time.sleep(0.3)
+            time.sleep(0.5)
+            current_pos = self.position.copy()
+            
+            if stable_position is None:
+                stable_position = current_pos
+            elif all(abs(stable_position[i] - current_pos[i]) < 0.01 for i in range(4)):
+                # Position is stable - same for 2 consecutive readings
+                break
+            else:
+                stable_position = current_pos
         
-        # Store the FINAL homed machine position as our work coordinate offset
+        # Store the stable homed position as work offset
         with self.status_lock:
-            self.work_offset = self.position.copy()  # Final machine position after homing becomes work offset
-        
-        # Enable work coordinate reporting and force position update
-        self.send("$10=3")  # Enable both MPos and WPos reporting
-        time.sleep(0.2)
-        self.send("?")  # Query current position
-        time.sleep(0.5)
+            self.work_offset = stable_position.copy()
             
         logger.info(f"Homing sequence completed for {axis} axis - work offset set to {self.work_offset}")
+        
+        # Force immediate position update to apply the new offset
+        self.send("?")
+        time.sleep(0.5)
 
     def check_limit_switches(self):
         """Check the current status of limit switches."""
