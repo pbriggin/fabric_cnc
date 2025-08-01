@@ -257,8 +257,9 @@ class RealMotorController:
             clamped_val = self._clamp(axis, target_val)
             actual_delta = clamped_val - current_val
             
-            if self._debug_prints_enabled:
-                print(f"[JOG] Current: {current_val:.3f}in, Target: {target_val:.3f}in, Clamped: {clamped_val:.3f}in, Delta: {actual_delta:.3f}in")
+            # Always log Z-axis jog details for debugging
+            if axis == 'Z' or self._debug_prints_enabled:
+                logger.info(f"[JOG DEBUG] {axis}: Current={current_val:.3f}in, Target={target_val:.3f}in, Clamped={clamped_val:.3f}in, ActualDelta={actual_delta:.3f}in")
             
             if abs(actual_delta) > 1e-6:
                 # Map axis names - GRBL controller now expects inches directly
