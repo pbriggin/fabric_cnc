@@ -395,6 +395,8 @@ class RealMotorController:
             cmd_parts.append(f"A{rot:.3f}")
         
         if len(cmd_parts) > 1:  # Only send if we have axes to move
+            # Ensure we're using work coordinate system
+            self.motor_controller.send("G54")
             self.motor_controller.send(" ".join(cmd_parts))
         
         # Position tracking now handled by get_position() from GRBL
@@ -421,6 +423,8 @@ class RealMotorController:
             
             if len(cmd_parts) > 2:  # Only send if we have axes to move
                 cmd_parts.append("F1000")  # 1000 mm/min feedrate
+                # Ensure we're using work coordinate system
+                self.motor_controller.send("G54")
                 self.motor_controller.send(" ".join(cmd_parts))
                 self.motor_controller.send("G90")  # Return to absolute mode
             
@@ -2130,6 +2134,11 @@ class GCodeExecutor:
             self.absolute_positioning = False
         elif command == 'G28':  # Home all axes
             self._home_all_axes()
+        elif command == 'G54':  # Select work coordinate system 1
+            # Send G54 to GRBL to ensure we're using work coordinates
+            if MOTOR_IMPORTS_AVAILABLE:
+                self.motor_ctrl.motor_controller.send("G54")
+            logger.info("Selected work coordinate system (G54)")
         else:
             logger.warning(f"Unsupported G command: {command}")
     
