@@ -408,6 +408,8 @@ class GrblMotorController:
                 # Log position changes for debugging
                 if old_position != self.position:
                     logger.info(f"📍 Position ({coordinate_type}): X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
+                    if self.debug_mode:
+                        print(f"[GRBL DEBUG] Using {coordinate_type} coordinates for position display")
 
     def send(self, gcode_line):
         self.command_queue.put(gcode_line)
@@ -445,7 +447,9 @@ class GrblMotorController:
         self.send("G54")  # Select work coordinate system 1
         time.sleep(1)  # Wait for coordinate reset to process
         
-        # Force position update to get current coordinates
+        # Enable work coordinate reporting and force position update
+        self.send("$10=1")  # Enable WPos reporting in status
+        time.sleep(0.2)
         self.send("?")  # Query current position
         time.sleep(0.5)
     
@@ -484,7 +488,9 @@ class GrblMotorController:
         self.send("G54")  # Select work coordinate system 1
         time.sleep(1)  # Wait for coordinate reset to process
         
-        # Force position update to get current coordinates
+        # Enable work coordinate reporting and force position update
+        self.send("$10=1")  # Enable WPos reporting in status
+        time.sleep(0.2)
         self.send("?")  # Query current position
         time.sleep(0.5)
             
