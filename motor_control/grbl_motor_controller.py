@@ -438,15 +438,16 @@ class GrblMotorController:
         # After homing, wait for completion and pushoff, then reset coordinates
         time.sleep(8)  # Wait longer for homing and pushoff to complete
         
-        # Reset machine coordinates to 0,0,0,0 at current position
-        self.send("G10 P1 L2 X0 Y0 Z0 A0")   # Set machine coordinates to 0,0,0,0
-        time.sleep(0.5)
+        # In GRBL, machine coordinates cannot be directly reset - they represent actual machine position
+        # Instead, we set the work coordinate system (G54) to make current position 0,0,0,0
+        logger.info("Resetting work coordinates to 0,0,0,0 at current position")
         self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Set work coordinate system origin to current position  
         self.send("G54")  # Select work coordinate system 1
         time.sleep(1)  # Wait for coordinate reset to process
-        # Reset position tracking to 0,0,0,0
-        with self.status_lock:
-            self.position = [0.0, 0.0, 0.0, 0.0]
+        
+        # Force position update to get current coordinates
+        self.send("?")  # Query current position
+        time.sleep(0.5)
     
     def home_axis(self, axis):
         """Home a single axis using $H<axis> command (grblHAL)."""
@@ -469,33 +470,25 @@ class GrblMotorController:
         # Wait for homing to complete (individual axis is faster)
         time.sleep(8)  # Longer wait to ensure homing and pushoff completes
         
-        # Reset both machine and work coordinates for this axis
+        # Reset work coordinates for this axis (machine coordinates cannot be reset in GRBL)
+        logger.info(f"Resetting work coordinates to 0 for {axis} axis at current position")
         if axis == 'X':
-            self.send("G10 P1 L2 X0")   # Reset machine coordinate
-            time.sleep(0.5)
             self.send("G10 P1 L20 X0")  # Reset work coordinate
         elif axis == 'Y':
-            self.send("G10 P1 L2 Y0")   # Reset machine coordinate
-            time.sleep(0.5)
             self.send("G10 P1 L20 Y0")  # Reset work coordinate
         elif axis == 'Z':
-            self.send("G10 P1 L2 Z0")   # Reset machine coordinate
-            time.sleep(0.5)
             self.send("G10 P1 L20 Z0")  # Reset work coordinate
         elif axis == 'A':
-            self.send("G10 P1 L2 A0")   # Reset machine coordinate
-            time.sleep(0.5)
             self.send("G10 P1 L20 A0")  # Reset work coordinate
         
         self.send("G54")  # Select work coordinate system 1
         time.sleep(1)  # Wait for coordinate reset to process
         
-        # Update position tracking for this axis to 0
-        with self.status_lock:
-            axis_index = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3}[axis]
-            self.position[axis_index] = 0.0
+        # Force position update to get current coordinates
+        self.send("?")  # Query current position
+        time.sleep(0.5)
             
-        logger.info(f"Homing sequence completed for {axis} axis - both machine and work coordinates reset to 0")
+        logger.info(f"Homing sequence completed for {axis} axis - work coordinates reset to 0")
 
     def check_limit_switches(self):
         """Check the current status of limit switches."""
