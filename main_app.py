@@ -147,20 +147,6 @@ class SimulatedMotorController:
             self.position[axis] = self._clamp(axis, new_val)
             logger.info(f"Jogged {axis} by {delta}in. New pos: {self.position[axis]:.2f}")
 
-    def home(self, axis):
-        with self.lock:
-            if self.is_homing:
-                return False
-            self.is_homing = True
-            # Simulate homing delay (shorter for individual axis)
-            time.sleep(1)
-            if axis in ['X', 'Y', 'Z', 'ROT']:
-                self.position[axis] = 0.0
-                if self._debug_prints_enabled:
-                    logger.info(f"Simulated homing of {axis} axis")
-            self.is_homing = False
-            logger.info(f"Homed {axis} axis.")
-            return True
 
     def home_all_synchronous(self):
         """Home all axes simultaneously (simulated)."""
@@ -296,27 +282,6 @@ class RealMotorController:
         except Exception as e:
             logger.error(f"Jog error on {axis}: {e}")
 
-    def home(self, axis):
-        with self.lock:
-            if self.is_homing:
-                return False
-            self.is_homing = True
-            try:
-                if axis in ['X', 'Y', 'Z', 'ROT']:
-                    # Map ROT to A axis for GRBL
-                    grbl_axis = axis if axis != 'ROT' else 'A'
-                    self.motor_controller.home_axis(grbl_axis)
-                    success = True
-                    if self._debug_prints_enabled:
-                        logger.info(f"Homed {axis} axis individually")
-                else:
-                    success = False
-                self.is_homing = False
-                return success
-            except Exception as e:
-                logger.error(f"Home error on {axis}: {e}")
-                self.is_homing = False
-                return False
 
     def home_all_synchronous(self):
         """Home all axes simultaneously."""
@@ -671,10 +636,6 @@ class FabricCNCApp:
         home_section.grid(row=1, column=0, sticky="ew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
         
         home_buttons = [
-            ("Home X", lambda: self._home('X'), "primary"),
-            ("Home Y", lambda: self._home('Y'), "primary"),
-            ("Home Z", lambda: self._home('Z'), "primary"),
-            ("Home Rot", lambda: self._home('ROT'), "primary"),
             ("Home All", self._home_all, "success")
         ]
         
@@ -1898,15 +1859,6 @@ class FabricCNCApp:
         self.motor_ctrl.jog(axis, delta)
         # Position update loop will handle canvas redraw automatically
 
-    def _home(self, axis):
-        success = self.motor_ctrl.home(axis)
-        if success:
-            self.status_label.configure(text=f"{axis} axis homed", text_color="green")
-        else:
-            self.status_label.configure(text=f"Failed to home {axis}", text_color="red")
-        # Position update loop will handle canvas redraw automatically
-        # Clear status after 2 seconds
-        self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
     def _home_all(self):
         success = self.motor_ctrl.home_all_synchronous()
