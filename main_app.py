@@ -1593,8 +1593,7 @@ class FabricCNCApp:
                     with open(self.gcode_file_path, 'r') as f:
                         gcode_lines = f.readlines()
                     
-                    # Add debug prints for G-code vs motor controller position comparison
-                    self._add_gcode_debug_prints(gcode_lines)
+                    # G-code execution ready
                     
                     # Use GRBL to execute G-code directly
                     if not SIMULATION_MODE:
@@ -1625,59 +1624,6 @@ class FabricCNCApp:
             logger.error(f"Failed to start G-code execution: {e}")
             self.status_label.configure(text=self._truncate_status("Start failed"), text_color="red")
     
-    def _add_gcode_debug_prints(self, gcode_lines):
-        """Add debug prints to compare G-code positions with motor controller positions."""
-        print("\n" + "="*80)
-        print("G-CODE vs MOTOR CONTROLLER POSITION COMPARISON")
-        print("="*80)
-        
-        current_gcode_pos = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0}
-        
-        for line_num, line in enumerate(gcode_lines, 1):
-            line = line.strip()
-            if not line or line.startswith(';'):
-                continue
-            
-            # Parse G-code line for position updates
-            import re
-            x_match = re.search(r'X([-\d.]+)', line)
-            y_match = re.search(r'Y([-\d.]+)', line)
-            z_match = re.search(r'Z([-\d.]+)', line)
-            a_match = re.search(r'A([-\d.]+)', line)
-            
-            # Update G-code position tracking
-            if x_match:
-                current_gcode_pos['X'] = float(x_match.group(1))
-            if y_match:
-                current_gcode_pos['Y'] = float(y_match.group(1))
-            if z_match:
-                current_gcode_pos['Z'] = float(z_match.group(1))
-            if a_match:
-                current_gcode_pos['A'] = float(a_match.group(1))
-            
-            # Get current motor controller position
-            motor_pos = self.motor_ctrl.get_position()
-            
-            # Print comparison for movement commands
-            if line.startswith('G0') or line.startswith('G1'):
-                print(f"Line {line_num:3d}: {line}")
-                print(f"  GCODE pos: X={current_gcode_pos['X']:6.3f} Y={current_gcode_pos['Y']:6.3f} Z={current_gcode_pos['Z']:6.3f} A={current_gcode_pos['A']:6.3f}")
-                print(f"  MOTOR pos: X={motor_pos['X']:6.3f} Y={motor_pos['Y']:6.3f} Z={motor_pos['Z']:6.3f} R={motor_pos['ROT']:6.3f}")
-                
-                # Highlight differences
-                if abs(current_gcode_pos['X'] - motor_pos['X']) > 0.001:
-                    print(f"  *** X DIFFERENCE: GCODE={current_gcode_pos['X']:.3f} vs MOTOR={motor_pos['X']:.3f} ***")
-                if abs(current_gcode_pos['Y'] - motor_pos['Y']) > 0.001:
-                    print(f"  *** Y DIFFERENCE: GCODE={current_gcode_pos['Y']:.3f} vs MOTOR={motor_pos['Y']:.3f} ***")
-                if abs(current_gcode_pos['Z'] - motor_pos['Z']) > 0.001:
-                    print(f"  *** Z DIFFERENCE: GCODE={current_gcode_pos['Z']:.3f} vs MOTOR={motor_pos['Z']:.3f} ***")
-                if abs(current_gcode_pos['A'] - motor_pos['ROT']) > 0.001:
-                    print(f"  *** A/ROT DIFFERENCE: GCODE={current_gcode_pos['A']:.3f} vs MOTOR={motor_pos['ROT']:.3f} ***")
-                print()
-        
-        print("="*80)
-        print("END OF COMPARISON")
-        print("="*80 + "\n")
     
     def _update_execution_progress(self, progress, status):
         """Update UI with execution progress."""

@@ -177,7 +177,7 @@ class GrblMotorController:
                 "$5": "15",       # Limit pins invert
                 "$6": "0",        # Probe pin invert
                 "$9": "1",        # PWM spindle mode
-                "$10": "3",       # Status report options: WPos only (1=MPos, 2=WPos, 3=both)
+                "$10": "2",       # Status report options: WPos only (1=MPos, 2=WPos, 3=both)
                 "$11": "0.010",   # Junction deviation
                 "$12": "0.002",   # Arc tolerance
                 "$13": "0",       # Report inches
@@ -482,6 +482,15 @@ class GrblMotorController:
                 self.work_offset = self.position.copy()
         
         logger.info(f"Home all completed - work offset set to {self.work_offset}")
+        
+        # Set GRBL work coordinate system to origin at current position
+        # This tells GRBL that the current (homed) position should be (0,0,0,0) in work coordinates
+        self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Set work coordinate system origin
+        time.sleep(0.5)
+        
+        # Select work coordinate system 1 (G54)
+        self.send("G54")
+        time.sleep(0.5)
         
         # Force immediate position update to apply the new offset
         self.send("?")
