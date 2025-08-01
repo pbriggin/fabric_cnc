@@ -456,8 +456,8 @@ class FabricCNCApp:
         if DXF_TOOLPATH_IMPORTS_AVAILABLE:
             self.dxf_processor = DXFProcessor()
             self.toolpath_generator = ToolpathGenerator(
-                cutting_height=-1.0,  # Fixed: -1.0 inches to stay within machine limits
-                safe_height=-0.5,  # Safe height is -0.5 inches (above cutting height)
+                cutting_height=-0.5,  # Plunge depth below work surface
+                safe_height=0.0,  # Safe height at work surface level
                 corner_angle_threshold=10.0,  # 10-degree threshold
                 feed_rate=1000.0,
                 plunge_rate=200.0
@@ -1587,9 +1587,15 @@ class FabricCNCApp:
                         # Update UI with progress (this will be called from the thread)
                         self.root.after(0, lambda: self._update_execution_progress(progress, status))
                     
-                    # Starting smooth motion execution
+                    # Ensure machine is homed before running toolpath
+                    if MOTOR_IMPORTS_AVAILABLE and not SIMULATION_MODE:
+                        logger.info("Checking if machine is homed before toolpath execution...")
+                        if not self.motor_ctrl.motor_controller.ensure_homed():
+                            logger.error("Failed to ensure machine is homed. Aborting toolpath execution.")
+                            self.root.after(0, lambda: self.status_label.configure(text=self._truncate_status("Homing failed"), text_color="red"))
+                            return
                     
-                    # Read GCODE file and add debug prints
+                    # Read GCODE file for execution
                     with open(self.gcode_file_path, 'r') as f:
                         gcode_lines = f.readlines()
                     

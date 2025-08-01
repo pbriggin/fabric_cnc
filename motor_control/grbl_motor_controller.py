@@ -27,6 +27,8 @@ class GrblMotorController:
         self.alarm_detected = False
         self.last_error_time = 0
         self.response_callback = None  # Callback for manual command responses
+        self.is_homed = False  # Track if machine is homed
+        self.machine_state = "Unknown"  # Track GRBL state (Idle, Run, Hold, Alarm, etc.)
 
         self.reader_thread = threading.Thread(target=self._read_loop, daemon=True)
         self.writer_thread = threading.Thread(target=self._write_loop, daemon=True)
@@ -188,7 +190,7 @@ class GrblMotorController:
                 "$20": "0",       # Soft limits
                 "$21": "1",       # Hard limits enable
                 "$22": "1",       # Homing cycle enable
-                "$23": "3",       # Homing direction mask (X=1, Y=2, total=3, Z and A not inverted)
+                "$23": "0",       # Homing direction mask (all axes home toward negative direction)
                 "$24": "500.0",   # Homing seek rate (swapped - this implementation uses for first approach)
                 "$25": "1500.0",  # Homing feed rate (swapped - this implementation uses for second approach)
                 "$26": "250",     # Homing debounce
@@ -382,6 +384,15 @@ class GrblMotorController:
             time.sleep(0.2)
 
     def _parse_status(self, line):
+        # Parse GRBL state from status line (e.g., <Idle|WPos:0,0,0,0|...)
+        state_match = re.search(r"<([^|]+)", line)
+        if state_match:
+            with self.status_lock:
+                self.machine_state = state_match.group(1)
+                # Machine is considered homed if not in Alarm state and has valid coordinates
+                # GRBL doesn't explicitly report "homed" status, but Alarm state usually means not homed
+                self.is_homed = self.machine_state not in ["Alarm", "Unknown"]
+        
         # Try to parse work coordinates first (WPos), then fall back to machine coordinates (MPos)
         wpos_match = re.search(r"WPos:([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)", line)
         mpos_match = re.search(r"MPos:([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)", line)
@@ -495,7 +506,58 @@ class GrblMotorController:
         # Force immediate position update to apply the new offset
         self.send("?")
         time.sleep(0.5)
+        
+        # Mark as homed after successful homing
+        with self.status_lock:
+            self.is_homed = True
     
+    def is_machine_homed(self) -> bool:
+        """Check if the machine is currently homed."""
+        with self.status_lock:
+            return self.is_homed and self.machine_state not in ["Alarm", "Unknown"]
+    
+    def get_machine_state(self) -> str:
+        """Get the current GRBL machine state."""
+        with self.status_lock:
+            return self.machine_state
+    
+    def ensure_homed(self) -> bool:
+        """Ensure machine is homed. Home if necessary. Returns True if homed successfully."""
+        try:
+            # Check current status
+            self.send_immediate("?")
+            time.sleep(0.5)
+            
+            if self.is_machine_homed():
+                logger.info("Machine is already homed")
+                return True
+            
+            logger.info(f"Machine not homed (state: {self.get_machine_state()}). Initiating homing sequence...")
+            
+            # Clear any alarms first
+            if self.machine_state == "Alarm":
+                logger.info("Clearing alarm state before homing...")
+                self.send("$X")
+                time.sleep(1)
+            
+            # Perform homing
+            self.home_all()
+            
+            # Verify homing was successful
+            time.sleep(1)
+            self.send_immediate("?")
+            time.sleep(0.5)
+            
+            if self.is_machine_homed():
+                logger.info("Homing completed successfully")
+                return True
+            else:
+                logger.error(f"Homing failed. Machine state: {self.get_machine_state()}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error during homing check/execution: {e}")
+            return False
 
     def check_limit_switches(self):
         """Check the current status of limit switches."""
