@@ -251,8 +251,10 @@ class ToolpathGenerator:
         # Debug output
         if angle_degrees > 5.0:
             # Corner detected
+            pass
         else:
             # Not a corner
+            pass
         
         # Use the configured corner angle threshold
         return angle_degrees > math.degrees(self.corner_angle_threshold_radians)
