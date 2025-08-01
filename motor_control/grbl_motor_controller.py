@@ -461,11 +461,6 @@ class GrblMotorController:
         # After homing, wait for completion and pushoff, then reset coordinates
         time.sleep(8)  # Wait longer for homing and pushoff to complete
         
-        # Force multiple position queries to get stable machine coordinates after homing
-        for i in range(3):
-            self.send("?")  # Query current position multiple times
-            time.sleep(0.3)
-        
         # In GRBL, machine coordinates cannot be directly reset - they represent actual machine position
         # Instead, we set the work coordinate system (G54) to make current position 0,0,0,0
         logger.info("Resetting work coordinates to 0,0,0,0 at current position")
@@ -473,14 +468,14 @@ class GrblMotorController:
         self.send("G54")  # Select work coordinate system 1
         time.sleep(1)  # Wait for coordinate reset to process
         
-        # Get final stable position after homing and coordinate reset
-        for i in range(3):
+        # Get final stable position AFTER homing and coordinate reset commands complete
+        for i in range(5):
             self.send("?")
             time.sleep(0.3)
         
-        # Store the homed machine position as our work coordinate offset
+        # Store the FINAL homed machine position as our work coordinate offset
         with self.status_lock:
-            self.work_offset = self.position.copy()  # Machine position becomes work offset
+            self.work_offset = self.position.copy()  # Final machine position after homing becomes work offset
         
         # Enable work coordinate reporting and force position update
         self.send("$10=3")  # Enable both MPos and WPos reporting
@@ -511,11 +506,6 @@ class GrblMotorController:
         # Wait for homing to complete (individual axis is faster)
         time.sleep(8)  # Longer wait to ensure homing and pushoff completes
         
-        # Force multiple position queries to get stable machine coordinates after homing
-        for i in range(3):
-            self.send("?")  # Query current position multiple times
-            time.sleep(0.3)
-        
         # Reset ALL work coordinates to 0,0,0,0 (not just the homed axis for consistency)
         logger.info(f"Resetting work coordinates to 0,0,0,0 at current position after homing {axis} axis")
         self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Reset all work coordinates
@@ -523,14 +513,14 @@ class GrblMotorController:
         self.send("G54")  # Select work coordinate system 1
         time.sleep(1)  # Wait for coordinate reset to process
         
-        # Get final stable position after homing and coordinate reset
-        for i in range(3):
+        # Get final stable position AFTER homing and coordinate reset commands complete
+        for i in range(5):
             self.send("?")
             time.sleep(0.3)
         
-        # Store the homed machine position as our work coordinate offset
+        # Store the FINAL homed machine position as our work coordinate offset
         with self.status_lock:
-            self.work_offset = self.position.copy()  # Machine position becomes work offset
+            self.work_offset = self.position.copy()  # Final machine position after homing becomes work offset
         
         # Enable work coordinate reporting and force position update
         self.send("$10=3")  # Enable both MPos and WPos reporting
