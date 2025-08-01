@@ -186,7 +186,7 @@ class GrblMotorController:
                 "$5": "15",       # Limit pins invert
                 "$6": "0",        # Probe pin invert
                 "$9": "1",        # PWM spindle mode
-                "$10": "511",     # Status report options
+                "$10": "515",     # Status report options (511 + 4 for WPos reporting)
                 "$11": "0.010",   # Junction deviation
                 "$12": "0.002",   # Arc tolerance
                 "$13": "0",       # Report inches
@@ -391,17 +391,23 @@ class GrblMotorController:
             time.sleep(0.2)
 
     def _parse_status(self, line):
-        match = re.search(r"MPos:([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)", line)
+        # Try to parse work coordinates first (WPos), then fall back to machine coordinates (MPos)
+        wpos_match = re.search(r"WPos:([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)", line)
+        mpos_match = re.search(r"MPos:([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)", line)
+        
+        match = wpos_match if wpos_match else mpos_match
+        coordinate_type = "WPos" if wpos_match else "MPos"
+        
         if match:
             with self.status_lock:
                 old_position = self.position.copy()
                 self.position = [float(match.group(i)) for i in range(1, 5)]
                 if self.debug_mode:
-                    print(f"[GRBL DEBUG] Raw position from GRBL: {self.position}")
+                    print(f"[GRBL DEBUG] Raw position from GRBL ({coordinate_type}): {self.position}")
                     
                 # Log position changes for debugging
                 if old_position != self.position:
-                    logger.info(f"📍 Position: X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
+                    logger.info(f"📍 Position ({coordinate_type}): X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
 
     def send(self, gcode_line):
         self.command_queue.put(gcode_line)
@@ -429,9 +435,13 @@ class GrblMotorController:
     def home_all(self):
         """Home all axes using $H command."""
         self.send("$H")
-        # After homing, wait for completion and pushoff, then reset work coordinates
+        # After homing, wait for completion and pushoff, then reset coordinates
         time.sleep(8)  # Wait longer for homing and pushoff to complete
-        self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Set work coordinate system origin to current position
+        
+        # Reset machine coordinates to 0,0,0,0 at current position
+        self.send("G10 P1 L2 X0 Y0 Z0 A0")   # Set machine coordinates to 0,0,0,0
+        time.sleep(0.5)
+        self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Set work coordinate system origin to current position  
         self.send("G54")  # Select work coordinate system 1
         time.sleep(1)  # Wait for coordinate reset to process
         # Reset position tracking to 0,0,0,0
@@ -459,15 +469,23 @@ class GrblMotorController:
         # Wait for homing to complete (individual axis is faster)
         time.sleep(8)  # Longer wait to ensure homing and pushoff completes
         
-        # Reset work coordinate for this axis only - set current position as 0
+        # Reset both machine and work coordinates for this axis
         if axis == 'X':
-            self.send("G10 P1 L20 X0")
+            self.send("G10 P1 L2 X0")   # Reset machine coordinate
+            time.sleep(0.5)
+            self.send("G10 P1 L20 X0")  # Reset work coordinate
         elif axis == 'Y':
-            self.send("G10 P1 L20 Y0")
+            self.send("G10 P1 L2 Y0")   # Reset machine coordinate
+            time.sleep(0.5)
+            self.send("G10 P1 L20 Y0")  # Reset work coordinate
         elif axis == 'Z':
-            self.send("G10 P1 L20 Z0")
+            self.send("G10 P1 L2 Z0")   # Reset machine coordinate
+            time.sleep(0.5)
+            self.send("G10 P1 L20 Z0")  # Reset work coordinate
         elif axis == 'A':
-            self.send("G10 P1 L20 A0")
+            self.send("G10 P1 L2 A0")   # Reset machine coordinate
+            time.sleep(0.5)
+            self.send("G10 P1 L20 A0")  # Reset work coordinate
         
         self.send("G54")  # Select work coordinate system 1
         time.sleep(1)  # Wait for coordinate reset to process
@@ -477,7 +495,7 @@ class GrblMotorController:
             axis_index = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3}[axis]
             self.position[axis_index] = 0.0
             
-        logger.info(f"Homing sequence completed for {axis} axis - position reset to 0")
+        logger.info(f"Homing sequence completed for {axis} axis - both machine and work coordinates reset to 0")
 
     def check_limit_switches(self):
         """Check the current status of limit switches."""
