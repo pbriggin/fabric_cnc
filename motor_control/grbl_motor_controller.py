@@ -190,7 +190,7 @@ class GrblMotorController:
                 "$20": "0",       # Soft limits
                 "$21": "1",       # Hard limits enable
                 "$22": "1",       # Homing cycle enable
-                "$23": "0",       # Homing direction mask (all axes home toward negative direction)
+                "$23": "3",       # Homing direction mask (X=1, Y=1, Z=0, A=0 - X&Y home positive, Z&A home negative)
                 "$24": "500.0",   # Homing seek rate (swapped - this implementation uses for first approach)
                 "$25": "1500.0",  # Homing feed rate (swapped - this implementation uses for second approach)
                 "$26": "250",     # Homing debounce
