@@ -1603,7 +1603,18 @@ class FabricCNCApp:
                     
                     # Use GRBL to execute G-code directly
                     if not SIMULATION_MODE:
-                        self.motor_ctrl.motor_controller.run_gcode_file(self.gcode_file_path)
+                        # Disable hard limits before toolpath execution to prevent A-axis limit issues
+                        logger.info("Disabling hard limits for toolpath execution...")
+                        self.motor_ctrl.motor_controller.send("$21=0")
+                        time.sleep(0.5)  # Wait for setting to take effect
+                        
+                        try:
+                            self.motor_ctrl.motor_controller.run_gcode_file(self.gcode_file_path)
+                        finally:
+                            # Always re-enable hard limits after execution
+                            logger.info("Re-enabling hard limits after toolpath execution...")
+                            self.motor_ctrl.motor_controller.send("$21=1")
+                            time.sleep(0.5)  # Wait for setting to take effect
                     else:
                         # For simulation, just log the lines
                         for i, line in enumerate(gcode_lines):
