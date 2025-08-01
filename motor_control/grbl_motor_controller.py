@@ -186,7 +186,7 @@ class GrblMotorController:
                 "$5": "15",       # Limit pins invert
                 "$6": "0",        # Probe pin invert
                 "$9": "1",        # PWM spindle mode
-                "$10": "515",     # Status report options (511 + 4 for WPos reporting)
+                "$10": "3",       # Status report options: WPos only (1=MPos, 2=WPos, 3=both)
                 "$11": "0.010",   # Junction deviation
                 "$12": "0.002",   # Arc tolerance
                 "$13": "0",       # Report inches
@@ -395,21 +395,41 @@ class GrblMotorController:
         wpos_match = re.search(r"WPos:([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)", line)
         mpos_match = re.search(r"MPos:([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)", line)
         
-        match = wpos_match if wpos_match else mpos_match
-        coordinate_type = "WPos" if wpos_match else "MPos"
-        
-        if match:
+        if wpos_match:
+            # Use work coordinates directly
             with self.status_lock:
                 old_position = self.position.copy()
-                self.position = [float(match.group(i)) for i in range(1, 5)]
+                self.position = [float(wpos_match.group(i)) for i in range(1, 5)]
                 if self.debug_mode:
-                    print(f"[GRBL DEBUG] Raw position from GRBL ({coordinate_type}): {self.position}")
+                    print(f"[GRBL DEBUG] Raw position from GRBL (WPos): {self.position}")
                     
                 # Log position changes for debugging
                 if old_position != self.position:
-                    logger.info(f"📍 Position ({coordinate_type}): X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
+                    logger.info(f"📍 Position (WPos): X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
                     if self.debug_mode:
-                        print(f"[GRBL DEBUG] Using {coordinate_type} coordinates for position display")
+                        print(f"[GRBL DEBUG] Using WPos coordinates for position display")
+        elif mpos_match:
+            # Convert machine coordinates to work coordinates using stored offsets
+            with self.status_lock:
+                old_position = self.position.copy()
+                mpos = [float(mpos_match.group(i)) for i in range(1, 5)]
+                
+                # Subtract work coordinate offsets to get work position
+                # After homing and coordinate reset, the work offset should make position 0,0,0,0
+                if hasattr(self, 'work_offset'):
+                    self.position = [mpos[i] - self.work_offset[i] for i in range(4)]
+                else:
+                    # If no work offset stored, assume current MPos should be 0,0,0,0 after homing
+                    self.position = [0.0, 0.0, 0.0, 0.0] if hasattr(self, '_just_homed') and self._just_homed else mpos
+                
+                if self.debug_mode:
+                    print(f"[GRBL DEBUG] Converted MPos {mpos} to WPos {self.position}")
+                    
+                # Log position changes for debugging
+                if old_position != self.position:
+                    logger.info(f"📍 Position (WPos from MPos): X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
+                    if self.debug_mode:
+                        print(f"[GRBL DEBUG] Using converted WPos coordinates for position display")
 
     def send(self, gcode_line):
         self.command_queue.put(gcode_line)
@@ -447,8 +467,13 @@ class GrblMotorController:
         self.send("G54")  # Select work coordinate system 1
         time.sleep(1)  # Wait for coordinate reset to process
         
+        # Store the current machine position as the work coordinate offset
+        current_mpos = self.position.copy()  # Current machine position
+        self.work_offset = current_mpos  # Store as offset for WPos calculation
+        self._just_homed = True  # Flag to indicate we just homed
+        
         # Enable work coordinate reporting and force position update
-        self.send("$10=1")  # Enable WPos reporting in status
+        self.send("$10=3")  # Enable both MPos and WPos reporting
         time.sleep(0.2)
         self.send("?")  # Query current position
         time.sleep(0.5)
@@ -488,8 +513,13 @@ class GrblMotorController:
         self.send("G54")  # Select work coordinate system 1
         time.sleep(1)  # Wait for coordinate reset to process
         
+        # Store the current machine position as the work coordinate offset
+        current_mpos = self.position.copy()  # Current machine position
+        self.work_offset = current_mpos  # Store as offset for WPos calculation
+        self._just_homed = True  # Flag to indicate we just homed
+        
         # Enable work coordinate reporting and force position update
-        self.send("$10=1")  # Enable WPos reporting in status
+        self.send("$10=3")  # Enable both MPos and WPos reporting
         time.sleep(0.2)
         self.send("?")  # Query current position
         time.sleep(0.5)
