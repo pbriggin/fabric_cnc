@@ -250,9 +250,9 @@ class ToolpathGenerator:
         
         # Debug output
         if angle_degrees > 5.0:
-            logger.info(f"Point {point_index}: angle = {angle_degrees:.3f}° -> CORNER")
+            # Corner detected
         else:
-            logger.info(f"Point {point_index}: angle = {angle_degrees:.3f}° -> not a corner")
+            # Not a corner
         
         # Use the configured corner angle threshold
         return angle_degrees > math.degrees(self.corner_angle_threshold_radians)

@@ -145,7 +145,6 @@ class SimulatedMotorController:
         with self.lock:
             new_val = self.position[axis] + delta
             self.position[axis] = self._clamp(axis, new_val)
-            logger.info(f"Jogged {axis} by {delta}in. New pos: {self.position[axis]:.2f}")
 
 
     def home_all_synchronous(self):
@@ -161,7 +160,6 @@ class SimulatedMotorController:
             self.position['Z'] = 0.0
             self.position['ROT'] = 0.0
             self.is_homing = False
-            logger.info("Homed all axes simultaneously.")
             return True
 
     def get_position(self):
@@ -185,7 +183,6 @@ class SimulatedMotorController:
                 self.position['Z'] = self._clamp('Z', z)
             if rot is not None:
                 self.position['ROT'] = rot
-            logger.info(f"Simulated move_to: X={self.position['X']:.2f}in, Y={self.position['Y']:.2f}in, Z={self.position['Z']:.2f}in, ROT={self.position['ROT']:.2f}°")
 
     def stop_movement(self):
         pass
@@ -197,7 +194,6 @@ class SimulatedMotorController:
             self.position['Y'] += y_distance_mm
             self.position['Z'] += z_distance_mm
             self.position['ROT'] += rot_distance_mm
-            logger.info(f"Simulated coordinated movement: X={self.position['X']:.2f}in, Y={self.position['Y']:.2f}in, Z={self.position['Z']:.2f}in, ROT={self.position['ROT']:.2f}°")
 
 # --- Real Motor Controller Wrapper ---
 class RealMotorController:
@@ -215,7 +211,6 @@ class RealMotorController:
         """Reset work coordinates to 0,0,0,0"""
         try:
             self.motor_controller.send("G10 P1 L20 X0 Y0 Z0 A0")  # Reset work coordinates
-            logger.info("Reset work coordinates to 0,0,0,0")
         except Exception as e:
             logger.error(f"Failed to reset work coordinates: {e}")
 
@@ -231,8 +226,6 @@ class RealMotorController:
 
     def jog(self, axis, delta):
         try:
-            if self._debug_prints_enabled:
-                print(f"[JOG] Request: {axis} by {delta:.3f}in")
             
             # Get current position from GRBL
             current_pos = self.get_position()
@@ -243,9 +236,6 @@ class RealMotorController:
             clamped_val = self._clamp(axis, target_val)
             actual_delta = clamped_val - current_val
             
-            # Always log Z-axis jog details for debugging
-            if axis == 'Z' or self._debug_prints_enabled:
-                logger.info(f"[JOG DEBUG] {axis}: Current={current_val:.3f}in, Target={target_val:.3f}in, Clamped={clamped_val:.3f}in, ActualDelta={actual_delta:.3f}in")
             
             if abs(actual_delta) > 1e-6:
                 # Map axis names - GRBL controller now expects inches directly
@@ -263,21 +253,13 @@ class RealMotorController:
                     if axis == 'ROT':
                         # Convert rotation from degrees to inches for GRBL (1 inch = 360 degrees)
                         delta_grbl = actual_delta / 360.0
-                        if self._debug_prints_enabled:
-                            print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.6f}in ({actual_delta:.3f}°)")
                     else:
                         # Linear axes - send inches directly to GRBL
                         delta_grbl = actual_delta
-                        if self._debug_prints_enabled:
-                            print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.3f}in")
                     
                     self.motor_controller.jog(axis_map[axis], delta_grbl, feedrate)
                     time.sleep(0.2)  # Wait for GRBL to process
                     
-            if axis == 'ROT':
-                logger.info(f"Jogged {axis} by {actual_delta:.3f}° ({actual_delta/360.0:.6f}in)")
-            else:
-                logger.info(f"Jogged {axis} by {actual_delta:.3f}in")
             
         except Exception as e:
             logger.error(f"Jog error on {axis}: {e}")
@@ -311,18 +293,13 @@ class RealMotorController:
                 'Z': z / 25.4,  # Convert mm to inches
                 'ROT': (a / 25.4) * 360.0  # A-axis: convert mm to inches, then inches to degrees (1 inch = 360 degrees)
             }
-            if self._debug_prints_enabled:
-                print(f"[POSITION] GRBL raw: [{x:.3f}, {y:.3f}, {z:.3f}, {a:.3f}]mm -> GUI: [{pos['X']:.3f}, {pos['Y']:.3f}, {pos['Z']:.3f}, {pos['ROT']:.1f}]° ({a/25.4:.6f}in)")
             return pos
         except Exception as e:
-            if self._debug_prints_enabled:
-                print(f"[POSITION ERROR] Could not get GRBL position: {e}")
             # Return zeros if GRBL unavailable
             return {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'ROT': 0.0}
     
     def sync_position(self):
         """Position syncing now handled by get_position() from GRBL"""
-        logger.info("Position sync - GRBL is single source of truth")
     
     def get_sensor_states(self):
         """Get current sensor states for debugging (not applicable for GRBL)."""
@@ -375,7 +352,6 @@ class RealMotorController:
         current_z = current_pos.get('Z', 0.0)
         current_rot = current_pos.get('ROT', 0.0)
         
-        logger.info(f"MOVE_TO: current=({current_x:.1f},{current_y:.1f},{current_z:.1f},{current_rot:.1f}) -> target=({x or current_x:.1f},{y or current_y:.1f},{z or current_z:.1f},{rot or current_rot:.1f})")
         
         # Use G0 (rapid) movement to move to absolute position
         # Convert from inches to mm for GRBL
@@ -848,7 +824,7 @@ class FabricCNCApp:
                                           fill=color,
                                           font=("Arial", 8, "bold"))
         
-        logger.debug(f"Drew {len(self.processed_shapes)} processed shapes with unique colors")
+        # Drew processed shapes with unique colors
 
     def _reload_config_and_redraw(self):
         """Reload configuration and redraw the canvas to reflect changes."""
@@ -997,19 +973,19 @@ class FabricCNCApp:
         self.canvas.create_text(x_c, y_c - r - 15, text=f"(X={x_in:.2f}, Y={y_in:.2f})", fill=UI_COLORS['PRIMARY_VARIANT'], font=("Arial", 10, "bold"))
         
         # Debug: log position for troubleshooting
-        logger.debug(f"Tool head at canvas pos: ({x_c:.1f}, {y_c:.1f}), inches: ({x_in:.2f}, {y_in:.2f})")
+        # Tool head position updated
 
     def _draw_dxf_entities_inches(self):
         # Draw DXF entities, converting mm to inches for plotting
         if not (self.dxf_doc and self.dxf_entities):
-            logger.debug("No DXF entities to draw")
+            # No DXF entities to draw
             return
         scale = getattr(self, 'dxf_unit_scale', 1.0)
         
         # Use the offset calculated during import
         dx, dy = getattr(self, 'dxf_offset', (0, 0))
         
-        logger.debug(f"Drawing DXF entities: scale={scale}, offset=({dx:.3f}, {dy:.3f}), entities={len(self.dxf_entities)}")
+        # Drawing DXF entities
 
         # If toolpaths exist, use their shapes for color grouping
         color_cycle = [UI_COLORS['PRIMARY_COLOR'], UI_COLORS['PRIMARY_VARIANT'], UI_COLORS['SECONDARY_COLOR'], '#cc7700', '#aa00cc', '#cc2222', '#0a0', '#f0a', '#0af', '#fa0', '#a0f', '#0fa', '#af0', '#f00', '#00f', '#0ff', '#ff0', '#f0f', '#888', '#444']
@@ -1170,7 +1146,7 @@ class FabricCNCApp:
                     
                     last_pos = pos
             
-            logger.info(f"Drawing arrows: {len(positions)} positions, {len(orientations)} orientations, {len(arrow_indices)} arrows at 1.0\" intervals")
+            # Drawing toolpath arrows
             for i in arrow_indices:
                 if i < len(positions):
                     x_in, y_in = positions[i]
@@ -1200,7 +1176,7 @@ class FabricCNCApp:
                         fill='green', width=3, arrow='last', tags='toolpath'
                     )
             
-            logger.info(f"Drew {len(arrow_indices)} arrows")
+            # Drew toolpath arrows
 
     # --- DXF Import/Toolpath ---
     def _import_dxf(self):
@@ -1234,9 +1210,7 @@ class FabricCNCApp:
             self.toolpath_data = None
             
             # Update status
-            logger.info(f"DXF imported successfully:")
-            logger.info(f"  - File: {file_path}")
-            logger.info(f"  - Shapes found: {len(self.processed_shapes)}")
+            logger.info(f"DXF imported: {len(self.processed_shapes)} shapes from {file_path}")
             
             # Update status label
             self.status_label.configure(text=f"DXF imported: {len(self.processed_shapes)} shapes", text_color="green")
@@ -1350,9 +1324,7 @@ class FabricCNCApp:
             total_lines = len([line for line in gcode_lines if line.strip() and not line.strip().startswith(';')])
             corner_count = len([line for line in gcode_lines if 'Raise Z for corner' in line])
             
-            logger.info(f"Toolpath generated successfully:")
-            logger.info(f"  - G-code file: {self.gcode_file_path}")
-            logger.info(f"  - Total lines: {total_lines}")
+            logger.info(f"Toolpath generated: {total_lines} lines saved to {self.gcode_file_path}")
             logger.info(f"  - Corners detected: {corner_count}")
             
             # Update status label
@@ -1404,9 +1376,7 @@ class FabricCNCApp:
             total_lines = len([line for line in gcode_lines if line.strip() and not line.strip().startswith(';')])
             corner_count = len([line for line in gcode_lines if 'Raise Z for corner' in line])
             
-            logger.info(f"Toolpath generated successfully:")
-            logger.info(f"  - G-code file: {self.gcode_file_path}")
-            logger.info(f"  - Total lines: {total_lines}")
+            logger.info(f"Toolpath generated: {total_lines} lines saved to {self.gcode_file_path}")
             logger.info(f"  - Corners detected: {corner_count}")
             
         except Exception as e:
@@ -1454,7 +1424,7 @@ class FabricCNCApp:
             # Check if points form a reasonable circle (radius variation < 10%)
             radius_variation = max(radii) - min(radii)
             if radius_variation / avg_radius < 0.1:  # Less than 10% variation
-                logger.info(f"Detected circle from splines: center=({center_x:.3f}, {center_y:.3f}), radius={avg_radius:.3f}")
+                # Detected circle from splines
                 return (center_x, center_y), avg_radius
             
             return None, None
@@ -1509,7 +1479,7 @@ class FabricCNCApp:
         
         try:
             # Always generate a new toolpath for preview (with timestamp)
-            logger.info("Generating toolpath for preview...")
+            # Generating toolpath for preview
             self._generate_toolpath_internal()
             
             # Parse GCODE and extract toolpath data
@@ -1529,7 +1499,7 @@ class FabricCNCApp:
     
     def _parse_gcode_for_preview(self, gcode_file_path: str):
         """Parse GCODE file and extract toolpath data for canvas display."""
-        logger.info(f"Parsing GCODE for preview: {gcode_file_path}")
+        # Parsing GCODE for preview
         
         # Initialize toolpath data structure
         self.toolpath_data = {
@@ -1589,10 +1559,7 @@ class FabricCNCApp:
                     self.toolpath_data['z_changes'].append((current_x, current_y, current_z))
                     self.toolpath_data['last_z'] = current_z
         
-        logger.info(f"Parsed toolpath data:")
-        logger.info(f"  - Positions: {len(self.toolpath_data['positions'])}")
-        logger.info(f"  - Corners: {len(self.toolpath_data['corners'])}")
-        logger.info(f"  - Z changes: {len(self.toolpath_data['z_changes'])}")
+        # Parsed toolpath data
 
     def _run_toolpath(self):
         """Run toolpath using the new G-code executor."""
@@ -1614,7 +1581,7 @@ class FabricCNCApp:
                         # Update UI with progress (this will be called from the thread)
                         self.root.after(0, lambda: self._update_execution_progress(progress, status))
                     
-                    logger.info(f"Starting smooth motion execution: {self.gcode_file_path}")
+                    # Starting smooth motion execution
                     
                     # Read GCODE file and add debug prints
                     with open(self.gcode_file_path, 'r') as f:
@@ -1632,7 +1599,7 @@ class FabricCNCApp:
                             if progress_callback:
                                 progress_callback(i / len(gcode_lines) * 100, f"Line {i+1}/{len(gcode_lines)}")
                             time.sleep(0.01)  # Simulate execution time
-                    logger.info("Smooth motion execution completed successfully")
+                    logger.info("G-code execution completed")
                     
                     # Update UI on completion
                     self.root.after(0, lambda: self.status_label.configure(text="Execution completed", text_color="green"))
@@ -1709,7 +1676,7 @@ class FabricCNCApp:
     def _update_execution_progress(self, progress, status):
         """Update UI with execution progress."""
         # This method can be expanded to show progress in the UI
-        logger.info(f"Execution progress: {progress:.1f}% - {status}")
+        # Execution progress updated
     
     def _stop_execution(self):
         """Stop G-code execution."""
@@ -1719,13 +1686,13 @@ class FabricCNCApp:
             return
         
         if not self.smooth_motion_executor or not self.smooth_motion_executor.is_executing:
-            logger.info("No G-code execution is currently running.")
+            # No G-code execution running
             self.status_label.configure(text="No execution running", text_color="orange")
             return
         
         try:
             self.smooth_motion_executor.stop_execution()
-            logger.info("G-code execution stopped by user")
+            # G-code execution stopped by user
             self.status_label.configure(text="Execution stopped", text_color="orange")
         except Exception as e:
             logger.error(f"Failed to stop G-code execution: {e}")
@@ -1774,9 +1741,6 @@ class FabricCNCApp:
         # Use rotation angle directly - motor controller handles direction inversion
         self._current_toolpath_pos['ROT'] = math.degrees(angle)
         
-        # Debug: print toolpath coordinates
-        if self._debug_prints_enabled:
-            print(f"[DEBUG] Toolpath step {step_idx}: X={x:.3f}in, Y={y:.3f}in")
         
         if MOTOR_IMPORTS_AVAILABLE:
             self.motor_ctrl.move_to(
@@ -1785,16 +1749,10 @@ class FabricCNCApp:
                 z=self._current_toolpath_pos['Z'],
                 rot=self._current_toolpath_pos['ROT']
             )
-        # Debug: print both toolpath and actual motor position
-        actual_pos = self.motor_ctrl.get_position()
-        if self._debug_prints_enabled:
-            print(f"[DEBUG] Toolpath pos: X={self._current_toolpath_pos['X']:.2f} Y={self._current_toolpath_pos['Y']:.2f} | Motor pos: X={actual_pos['X']:.2f} Y={actual_pos['Y']:.2f}")
         
         # Check if coordinates are within machine limits
         if abs(x_in) > 68.0 or abs(y_in) > 45.0:
-            if self._debug_prints_enabled:
-                print(f"[WARNING] Coordinates beyond machine limits! X={x_in:.2f}in (limit: ±68.0in), Y={y_in:.2f}in (limit: ±45.0in)")
-            logger.warning(f"Coordinates beyond machine limits! X={x_in:.2f}in, Y={y_in:.2f}in")
+            logger.warning(f"Coordinates beyond machine limits! X={x_in:.2f}in (limit: ±68.0in), Y={y_in:.2f}in (limit: ±45.0in)")
         
         # Update position tracking and schedule canvas redraw
         self._last_position = self.motor_ctrl.get_position().copy()
@@ -1887,7 +1845,7 @@ class FabricCNCApp:
     
     def _test_individual_homing(self, axis):
         """Test homing for a specific axis."""
-        logger.info(f"🎯 Testing {axis}-axis homing individually...")
+        # Testing axis homing individually
         if hasattr(self.motor_ctrl, 'motor_controller') and hasattr(self.motor_ctrl.motor_controller, 'test_axis_homing_individually'):
             self.motor_ctrl.motor_controller.test_axis_homing_individually(axis)
         else:
@@ -1994,9 +1952,6 @@ def main():
 
     # In main(), print debug info for simulation mode
     if __name__ == "__main__":  # Only print on startup
-        print(f"[DEBUG] ON_RPI={ON_RPI}")
-        print(f"[DEBUG] MOTOR_IMPORTS_AVAILABLE={MOTOR_IMPORTS_AVAILABLE}")
-        print(f"[DEBUG] SIMULATION_MODE={SIMULATION_MODE}")
 
 # G-code generation functions moved to toolpath_planning package
 
@@ -2023,7 +1978,7 @@ class GCodeExecutor:
         self.absolute_positioning = True
         self.units_mm = True
         
-        logger.info("G-code executor initialized")
+        # G-code executor initialized
     
     def execute_gcode_file(self, gcode_file_path: str, progress_callback=None):
         """Execute G-code from file.
@@ -2057,7 +2012,7 @@ class GCodeExecutor:
         try:
             for line_num, line in enumerate(gcode_lines, 1):
                 if self.stop_requested:
-                    logger.info("G-code execution stopped by user")
+                    # G-code execution stopped by user
                     break
                 
                 line = line.strip()
@@ -2138,7 +2093,7 @@ class GCodeExecutor:
             # Send G54 to GRBL to ensure we're using work coordinates
             if MOTOR_IMPORTS_AVAILABLE:
                 self.motor_ctrl.motor_controller.send("G54")
-            logger.info("Selected work coordinate system (G54)")
+            # Selected work coordinate system (G54)
         else:
             logger.warning(f"Unsupported G command: {command}")
     
@@ -2150,9 +2105,9 @@ class GCodeExecutor:
             params: Command parameters
         """
         if command == 'M3':  # Spindle on
-            logger.info("Spindle on")
+            # Spindle on
         elif command == 'M5':  # Spindle off
-            logger.info("Spindle off")
+            # Spindle off
         else:
             logger.warning(f"Unsupported M command: {command}")
     
@@ -2207,7 +2162,6 @@ class GCodeExecutor:
             self.current_position['ROT'] = target_pos['A']
             del self.current_position['A']
         
-        logger.debug(f"Move to: X={x_mm:.2f}, Y={y_mm:.2f}, Z={z_mm:.2f}, A={a_deg:.2f}")
     
     def _home_all_axes(self):
         """Home all axes."""
@@ -2223,7 +2177,7 @@ class GCodeExecutor:
         self.stop_requested = True
         if MOTOR_IMPORTS_AVAILABLE:
             self.motor_ctrl.stop_movement()
-        logger.info("G-code execution stopped")
+        # G-code execution stopped
 
 if __name__ == "__main__":
     main() 

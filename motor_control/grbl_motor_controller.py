@@ -40,7 +40,6 @@ class GrblMotorController:
         time.sleep(2)  # Wait for GRBL to initialize
         
         # Robust alarm clearing sequence at startup
-        logger.info("Attempting to clear alarm state at startup...")
         self._startup_alarm_clear()
         
         # Initialize GRBL settings and reset work coordinates
@@ -61,12 +60,9 @@ class GrblMotorController:
         for attempt in range(max_retries):
             try:
                 self.serial = serial.Serial(self.port, self.baudrate, timeout=1)
-                logger.info(f"Successfully opened {self.port}")
                 return
             except serial.SerialException as e:
                 if "Device or resource busy" in str(e) or "Permission denied" in str(e):
-                    logger.warning(f"Attempt {attempt + 1}: {self.port} is busy, attempting cleanup...")
-                    
                     if attempt < max_retries - 1:  # Don't cleanup on last attempt
                         self._cleanup_device_processes()
                         time.sleep(retry_delay)
@@ -94,7 +90,6 @@ class GrblMotorController:
                         if line.strip():
                             pid = int(line.split()[1])
                             blocking_pids.append(pid)
-                            logger.info(f"Found process {pid} using {self.port}")
             except (subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError):
                 pass
             
@@ -109,7 +104,6 @@ class GrblMotorController:
                                    ['grbl', 'serial', 'ttyacm', 'arduino', 'cnc']):
                                 if proc.info['pid'] != os.getpid():  # Don't kill ourselves
                                     blocking_pids.append(proc.info['pid'])
-                                    logger.info(f"Found potential blocking process {proc.info['pid']}: {cmdline}")
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         continue
             except Exception as e:
@@ -119,18 +113,16 @@ class GrblMotorController:
             for pid in set(blocking_pids):  # Remove duplicates
                 try:
                     process = psutil.Process(pid)
-                    logger.info(f"Terminating process {pid} ({process.name()})")
                     process.terminate()
                     
                     # Wait up to 3 seconds for graceful termination
                     try:
                         process.wait(timeout=3)
                     except psutil.TimeoutExpired:
-                        logger.warning(f"Force killing process {pid}")
                         process.kill()
                         
-                except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                    logger.warning(f"Could not terminate process {pid}: {e}")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
             
             # Additional cleanup: reset the USB device if possible
             self._reset_usb_device()
@@ -158,7 +150,6 @@ class GrblMotorController:
                             break
                     
                     if reset_path and os.path.exists(reset_path):
-                        logger.info(f"Attempting USB device reset via {reset_path}")
                         # Deauthorize and reauthorize the USB device
                         subprocess.run(['sudo', 'sh', '-c', f'echo 0 > {reset_path}'], timeout=2)
                         time.sleep(0.5)
@@ -167,13 +158,13 @@ class GrblMotorController:
             except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
                 pass
                 
-        except Exception as e:
-            logger.warning(f"USB reset failed: {e}")
+        except Exception:
+            pass
 
     def _configure_grbl_settings(self):
         """Configure comprehensive GRBL settings for proper operation.""" 
         try:
-            logger.info("🔧 Configuring GRBL settings...")
+            # Configure GRBL settings
             
             # Define all required settings
             settings = {
@@ -276,7 +267,7 @@ class GrblMotorController:
                 self.send(f"{setting}={value}")
                 time.sleep(0.1)  # Small delay between settings
             
-            logger.info("✅ All GRBL settings configured")
+            # All GRBL settings configured
             
             # Wait for all settings to be processed
             time.sleep(2.0)
@@ -386,7 +377,6 @@ class GrblMotorController:
                 continue
 
     def _poll_loop(self):
-        logger.info("📡 Position polling thread started")
         while self.running:
             self.send_immediate("?")
             time.sleep(0.2)
@@ -404,11 +394,10 @@ class GrblMotorController:
                 if self.debug_mode:
                     print(f"[GRBL DEBUG] Raw position from GRBL (WPos): {self.position}")
                     
-                # Log position changes for debugging
-                if old_position != self.position:
-                    logger.info(f"📍 Position (WPos): X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
-                    if self.debug_mode:
-                        print(f"[GRBL DEBUG] Using WPos coordinates for position display")
+                # Log position changes for debugging in debug mode only
+                if self.debug_mode and old_position != self.position:
+                    print(f"[GRBL DEBUG] Position (WPos): X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
+                    print(f"[GRBL DEBUG] Using WPos coordinates for position display")
         elif mpos_match:
             # Convert machine coordinates to work coordinates using stored offsets
             with self.status_lock:
@@ -426,11 +415,10 @@ class GrblMotorController:
                 if self.debug_mode:
                     print(f"[GRBL DEBUG] Converted MPos {mpos} to WPos {self.position}")
                     
-                # Log position changes for debugging
-                if old_position != self.position:
-                    logger.info(f"📍 Position (WPos from MPos): X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
-                    if self.debug_mode:
-                        print(f"[GRBL DEBUG] Using converted WPos coordinates for position display")
+                # Log position changes for debugging in debug mode only
+                if self.debug_mode and old_position != self.position:
+                    print(f"[GRBL DEBUG] Position (WPos from MPos): X={self.position[0]:.3f}, Y={self.position[1]:.3f}, Z={self.position[2]:.3f}, A={self.position[3]:.3f}")
+                    print(f"[GRBL DEBUG] Using converted WPos coordinates for position display")
 
     def send(self, gcode_line):
         self.command_queue.put(gcode_line)
@@ -503,7 +491,6 @@ class GrblMotorController:
     def check_limit_switches(self):
         """Check the current status of limit switches."""
         try:
-            logger.info("Checking limit switch status...")
             # Send real-time status request to get current machine state
             self.send_immediate("?")
             time.sleep(0.2)
@@ -517,7 +504,7 @@ class GrblMotorController:
                     self.send("$#")  # Alternative status command
                     time.sleep(0.3)
                 except:
-                    logger.warning("Could not query pin states - command not supported")
+                    pass
             
         except Exception as e:
             logger.error(f"Failed to check limit switches: {e}")
@@ -553,7 +540,6 @@ class GrblMotorController:
     def get_grbl_settings(self):
         """Query and display current GRBL settings."""
         try:
-            logger.info("Querying GRBL settings...")
             self.send("$$")  # Request all settings
             time.sleep(1)  # Wait for response
             
@@ -563,7 +549,6 @@ class GrblMotorController:
     def get_grbl_info(self):
         """Get GRBL version and build info."""
         try:
-            logger.info("Getting GRBL version info...")
             self.send("$I")  # Request build info
             time.sleep(0.5)
             
@@ -573,7 +558,6 @@ class GrblMotorController:
     def clear_alarms_simple(self):
         """Simple alarm clearing that doesn't disrupt threads."""
         try:
-            logger.info("Clearing any alarm state...")
             self.send("$X")  # Send unlock command through normal queue
             return True
         except Exception as e:
@@ -583,15 +567,13 @@ class GrblMotorController:
     def _startup_alarm_clear(self):
         """Robust alarm clearing sequence for startup."""
         try:
-            logger.info("🔧 Starting comprehensive alarm clearing sequence...")
+            # Comprehensive alarm clearing sequence
             
             # Method 1: Try simple unlock first
-            logger.info("Step 1: Trying simple unlock ($X)...")
             self.send("$X")
             time.sleep(2)
             
             # Method 2: If still in alarm, try soft reset + unlock
-            logger.info("Step 2: Soft reset + unlock...")
             self.send_immediate("\x18")  # Ctrl-X soft reset
             time.sleep(3)  # Wait for reset
             
@@ -601,8 +583,6 @@ class GrblMotorController:
                 if self.serial.in_waiting:
                     try:
                         msg = self.serial.readline().decode('utf-8').strip()
-                        if msg and "Grbl" in msg:
-                            logger.info(f"Reset response: {msg}")
                     except:
                         pass
                 time.sleep(0.1)
@@ -612,7 +592,6 @@ class GrblMotorController:
             time.sleep(1)
             
             # Method 3: Disable hard limits temporarily to clear alarm
-            logger.info("Step 3: Temporarily disabling hard limits...")
             self.send("$21=0")  # Disable hard limits
             time.sleep(0.5)
             self.send("$X")     # Try unlock with limits disabled
@@ -621,13 +600,10 @@ class GrblMotorController:
             time.sleep(0.5)
             
             # Method 4: Final attempt with position reset
-            logger.info("Step 4: Resetting work coordinates...")
             self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Reset work coordinates
             time.sleep(0.5)
             self.send("$X")  # Final unlock attempt
             time.sleep(1)
-            
-            logger.info("✅ Alarm clearing sequence complete")
             
         except Exception as e:
             logger.error(f"Failed during startup alarm clearing: {e}")
@@ -816,7 +792,6 @@ class GrblMotorController:
     def reset_controller(self):
         """Perform a soft reset of the GRBL controller."""
         try:
-            logger.info("Performing GRBL soft reset...")
             self.send_immediate("\x18")  # Ctrl-X soft reset
             time.sleep(2.0)  # Wait for reset to complete
             
@@ -827,7 +802,6 @@ class GrblMotorController:
             self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Reset work coordinates
             self.send("G54")  # Select work coordinate system 1
             
-            logger.info("GRBL soft reset completed")
             return True
             
         except Exception as e:
@@ -883,7 +857,6 @@ class GrblMotorController:
             # Close serial connection
             if self.serial and self.serial.is_open:
                 self.serial.close()
-                logger.info(f"Closed connection to {self.port}")
                 
         except Exception as e:
             logger.error(f"Error closing GRBL controller: {e}")
