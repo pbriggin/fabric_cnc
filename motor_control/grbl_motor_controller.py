@@ -414,13 +414,20 @@ class GrblMotorController:
                 old_position = self.position.copy()
                 mpos = [float(mpos_match.group(i)) for i in range(1, 5)]
                 
-                # Subtract work coordinate offsets to get work position
-                # After homing and coordinate reset, the work offset should make position 0,0,0,0
-                if hasattr(self, 'work_offset') and self.work_offset:
+                # After G10 L20 coordinate reset, we expect GRBL to report relative to new origin
+                # If we just homed and work offset is zero, position should be 0,0,0,0
+                if (hasattr(self, '_just_homed') and self._just_homed and 
+                    hasattr(self, 'work_offset') and self.work_offset == [0.0, 0.0, 0.0, 0.0]):
+                    # Force position to be exactly 0,0,0,0 immediately after homing with zero offset
+                    self.position = [0.0, 0.0, 0.0, 0.0]
+                    if old_position != self.position:
+                        logger.info("📍 Position reset to 0,0,0,0 after homing")
+                    self._just_homed = False  # Clear the flag after first use
+                elif hasattr(self, 'work_offset') and self.work_offset and any(offset != 0 for offset in self.work_offset):
+                    # Use work offset for coordinate conversion
                     self.position = [mpos[i] - self.work_offset[i] for i in range(4)]
                 else:
-                    # If no work offset stored yet, use raw machine coordinates
-                    # This will be corrected after the first homing sequence completes
+                    # No work offset or zero offset - use machine coordinates directly
                     self.position = mpos
                 
                 if self.debug_mode:
