@@ -429,11 +429,12 @@ class GrblMotorController:
     def home_all(self):
         """Home all axes using $H command."""
         self.send("$H")
-        # After homing, reset work coordinates to 0,0,0,0
-        time.sleep(2)  # Wait for homing to complete
-        self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Set work coordinate system origin
+        # After homing, wait for completion and pushoff, then reset work coordinates
+        time.sleep(8)  # Wait longer for homing and pushoff to complete
+        self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Set work coordinate system origin to current position
         self.send("G54")  # Select work coordinate system 1
-        # Reset position tracking
+        time.sleep(1)  # Wait for coordinate reset to process
+        # Reset position tracking to 0,0,0,0
         with self.status_lock:
             self.position = [0.0, 0.0, 0.0, 0.0]
     
@@ -456,9 +457,9 @@ class GrblMotorController:
         
         self.send(command)
         # Wait for homing to complete (individual axis is faster)
-        time.sleep(5)  # Longer wait to ensure homing completes or fails properly
+        time.sleep(8)  # Longer wait to ensure homing and pushoff completes
         
-        # Reset work coordinate for this axis only
+        # Reset work coordinate for this axis only - set current position as 0
         if axis == 'X':
             self.send("G10 P1 L20 X0")
         elif axis == 'Y':
@@ -469,13 +470,14 @@ class GrblMotorController:
             self.send("G10 P1 L20 A0")
         
         self.send("G54")  # Select work coordinate system 1
+        time.sleep(1)  # Wait for coordinate reset to process
         
-        # Update position tracking for this axis
+        # Update position tracking for this axis to 0
         with self.status_lock:
             axis_index = {'X': 0, 'Y': 1, 'Z': 2, 'A': 3}[axis]
             self.position[axis_index] = 0.0
             
-        logger.info(f"Homing sequence completed for {axis} axis")
+        logger.info(f"Homing sequence completed for {axis} axis - position reset to 0")
 
     def check_limit_switches(self):
         """Check the current status of limit switches."""
