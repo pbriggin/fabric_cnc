@@ -1603,35 +1603,7 @@ class FabricCNCApp:
                     
                     # Use GRBL to execute G-code directly
                     if not SIMULATION_MODE:
-                        # Disable hard limits before toolpath execution to prevent A-axis limit issues
-                        logger.info("Disabling hard limits for toolpath execution...")
-                        self.motor_ctrl.motor_controller.send("$21=0")
-                        time.sleep(0.5)  # Wait for setting to take effect
-                        
-                        try:
-                            self.motor_ctrl.motor_controller.run_gcode_file(self.gcode_file_path)
-                        finally:
-                            # Always re-enable hard limits after execution
-                            logger.info("Re-enabling hard limits after toolpath execution...")
-                            try:
-                                # Wait for machine to be idle before changing settings
-                                time.sleep(1.0)  # Give machine time to finish any operations
-                                
-                                # Check if we can send commands (machine might be disconnected)
-                                if self.motor_ctrl.motor_controller.serial and self.motor_ctrl.motor_controller.serial.is_open:
-                                    # Send a soft reset first to ensure idle state
-                                    self.motor_ctrl.motor_controller.send_immediate("\x18")  # Ctrl-X soft reset
-                                    time.sleep(2.0)  # Wait for reset to complete
-                                    
-                                    # Now re-enable hard limits
-                                    self.motor_ctrl.motor_controller.send("$21=1")
-                                    time.sleep(0.5)
-                                    logger.info("Hard limits re-enabled successfully")
-                                else:
-                                    logger.warning("Cannot re-enable hard limits - serial connection lost")
-                            except Exception as e:
-                                logger.error(f"Failed to re-enable hard limits: {e}")
-                                logger.info("Hard limits may need to be manually re-enabled with: $21=1")
+                        self.motor_ctrl.motor_controller.run_gcode_file(self.gcode_file_path)
                     else:
                         # For simulation, just log the lines
                         for i, line in enumerate(gcode_lines):

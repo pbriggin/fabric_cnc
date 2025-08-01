@@ -188,7 +188,7 @@ class GrblMotorController:
                 "$18": "0",       # Tool change mode
                 "$19": "0",       # Laser mode
                 "$20": "0",       # Soft limits
-                "$21": "1",       # Hard limits enable
+                "$21": "0",       # Hard limits disable (prevent A-axis limit issues)
                 "$22": "1",       # Homing cycle enable
                 "$23": "3",       # Homing direction mask (X=1, Y=1, Z=0, A=0 - X&Y home positive, Z&A home negative)
                 "$24": "500.0",   # Homing seek rate (swapped - this implementation uses for first approach)
@@ -662,13 +662,9 @@ class GrblMotorController:
             self.send("$X")
             time.sleep(1)
             
-            # Method 3: Disable hard limits temporarily to clear alarm
-            self.send("$21=0")  # Disable hard limits
-            time.sleep(0.5)
-            self.send("$X")     # Try unlock with limits disabled
+            # Method 3: Try unlock (hard limits already disabled at startup)
+            self.send("$X")     # Try unlock
             time.sleep(1)
-            self.send("$21=1")  # Re-enable hard limits
-            time.sleep(0.5)
             
             # Method 4: Final attempt with position reset
             self.send("G10 P1 L20 X0 Y0 Z0 A0")  # Reset work coordinates
