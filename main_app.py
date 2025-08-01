@@ -275,10 +275,10 @@ class RealMotorController:
                 
                 if axis in axis_map:
                     if axis == 'ROT':
-                        # Rotation axis in degrees
-                        delta_grbl = actual_delta
+                        # Convert rotation from degrees to inches for GRBL (1 inch = 360 degrees)
+                        delta_grbl = actual_delta / 360.0
                         if self._debug_prints_enabled:
-                            print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.3f}°")
+                            print(f"[JOG] Sending to GRBL: {axis_map[axis]} by {delta_grbl:.6f}in ({actual_delta:.3f}°)")
                     else:
                         # Linear axes - send inches directly to GRBL
                         delta_grbl = actual_delta
@@ -288,7 +288,10 @@ class RealMotorController:
                     self.motor_controller.jog(axis_map[axis], delta_grbl, feedrate)
                     time.sleep(0.2)  # Wait for GRBL to process
                     
-            logger.info(f"Jogged {axis} by {actual_delta:.3f}in")
+            if axis == 'ROT':
+                logger.info(f"Jogged {axis} by {actual_delta:.3f}° ({actual_delta/360.0:.6f}in)")
+            else:
+                logger.info(f"Jogged {axis} by {actual_delta:.3f}in")
             
         except Exception as e:
             logger.error(f"Jog error on {axis}: {e}")
@@ -341,10 +344,10 @@ class RealMotorController:
                 'X': x / 25.4,  # Convert mm to inches
                 'Y': y / 25.4,  # Convert mm to inches
                 'Z': z / 25.4,  # Convert mm to inches
-                'ROT': a        # A-axis is already in degrees
+                'ROT': (a / 25.4) * 360.0  # A-axis: convert mm to inches, then inches to degrees (1 inch = 360 degrees)
             }
             if self._debug_prints_enabled:
-                print(f"[POSITION] GRBL raw: [{x:.3f}, {y:.3f}, {z:.3f}, {a:.3f}]mm -> GUI: [{pos['X']:.3f}, {pos['Y']:.3f}, {pos['Z']:.3f}, {pos['ROT']:.1f}]in")
+                print(f"[POSITION] GRBL raw: [{x:.3f}, {y:.3f}, {z:.3f}, {a:.3f}]mm -> GUI: [{pos['X']:.3f}, {pos['Y']:.3f}, {pos['Z']:.3f}, {pos['ROT']:.1f}]° ({a/25.4:.6f}in)")
             return pos
         except Exception as e:
             if self._debug_prints_enabled:

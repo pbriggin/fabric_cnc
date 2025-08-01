@@ -118,10 +118,10 @@ class ToolpathGenerator:
         first_point = points[0]
         gcode_lines.append(f"G0 X{first_point[0]:.3f} Y{first_point[1]:.3f} ; Move to start")
         
-        # Set initial Z rotation for first segment
+        # Set initial A rotation for first segment
         if len(points) > 1:
-            first_z_rotation = self._calculate_z_rotation(first_point, points[1])
-            gcode_lines.append(f"G0 A{first_z_rotation:.3f} ; Set initial cutting wheel angle")
+            first_a_position = self._calculate_z_rotation(first_point, points[1])
+            gcode_lines.append(f"G0 A{first_a_position:.6f} ; Set initial cutting wheel position")
         
         # First plunge - use G0 to ensure Z movement completes before XY movement
         gcode_lines.append(f"G0 Z{self.cutting_height} ; Plunge to cutting height")
@@ -137,18 +137,18 @@ class ToolpathGenerator:
             # Determine if we need to raise Z at this corner using simple angle detection
             should_raise_z = self._is_genuine_corner(points, i)
             
-            # Calculate Z rotation for the next segment
-            z_rotation = self._calculate_z_rotation(current_point, next_point)
+            # Calculate A rotation for the next segment
+            a_position = self._calculate_z_rotation(current_point, next_point)
             
             if should_raise_z:
-                # For corners: raise Z, rotate angle, lower Z, move to next point
+                # For corners: raise Z, rotate A, lower Z, move to next point
                 gcode_lines.append(f"G0 Z{self.safe_height} ; Raise Z for corner")
-                gcode_lines.append(f"G0 A{z_rotation:.3f} ; Rotate Z for corner")
+                gcode_lines.append(f"G0 A{a_position:.6f} ; Rotate A for corner")
                 gcode_lines.append(f"G0 Z{self.cutting_height} ; Lower Z to cutting height")
                 gcode_lines.append(f"G0 X{next_point[0]:.3f} Y{next_point[1]:.3f} ; Move to next point")
             else:
-                # For curves: combine Z rotation with cutting move
-                gcode_lines.append(f"G1 X{next_point[0]:.3f} Y{next_point[1]:.3f} A{z_rotation:.3f} F{self.feed_rate} ; Cut to next point")
+                # For curves: combine A rotation with cutting move
+                gcode_lines.append(f"G1 X{next_point[0]:.3f} Y{next_point[1]:.3f} A{a_position:.6f} F{self.feed_rate} ; Cut to next point")
         
         # For closed shapes, the main loop already handles all segments correctly
         # No additional handling needed
@@ -258,7 +258,7 @@ class ToolpathGenerator:
     
     def _calculate_z_rotation(self, point1: Tuple[float, float], point2: Tuple[float, float]) -> float:
         """
-        Calculate Z rotation angle to make cutting blade parallel to line segment.
+        Calculate A-axis position to make cutting blade parallel to line segment.
         Tool starts parallel to Y-axis, so we need to adjust by 90 degrees.
         
         Args:
@@ -266,7 +266,7 @@ class ToolpathGenerator:
             point2: Second point (x, y)
             
         Returns:
-            Z rotation angle in degrees
+            A-axis position in inches (1 inch = 360 degrees)
         """
         dx = point2[0] - point1[0]
         dy = point2[1] - point1[1]
@@ -280,7 +280,16 @@ class ToolpathGenerator:
         # Adjust for tool starting parallel to Y-axis (add 90 degrees)
         adjusted_angle = angle_degrees + 90.0
         
-        return adjusted_angle
+        # Normalize angle to 0-360 range
+        while adjusted_angle < 0:
+            adjusted_angle += 360.0
+        while adjusted_angle >= 360:
+            adjusted_angle -= 360.0
+        
+        # Convert to inches: 1 inch = 360 degrees
+        a_position_inches = adjusted_angle / 360.0
+        
+        return a_position_inches
 
 
 def main():
