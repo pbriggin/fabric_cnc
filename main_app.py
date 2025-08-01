@@ -412,6 +412,12 @@ class RealMotorController:
             raise
 
 class FabricCNCApp:
+    def _truncate_status(self, text: str, max_chars: int = 20) -> str:
+        """Truncate status text to fit within display constraints."""
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars-3] + "..."
+    
     def __init__(self, root):
         self.root = root
         self.root.title("Fabric CNC (Material Design)")
@@ -534,7 +540,7 @@ class FabricCNCApp:
         status_section.grid(row=1, column=0, sticky="ew", padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'])
         
         ctk.CTkLabel(status_section, text="Status:", font=("Arial", 16, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).pack(pady=UI_PADDING['SMALL'])
-        self.status_label = ctk.CTkLabel(status_section, text="Ready", font=("Arial", 16, "bold"), text_color=UI_COLORS['ON_SURFACE'])
+        self.status_label = ctk.CTkLabel(status_section, text="Ready", font=("Arial", 16, "bold"), text_color=UI_COLORS['ON_SURFACE'], width=200)
         self.status_label.pack(pady=UI_PADDING['SMALL'])
 
         # === MIDDLE COLUMN: Plot Canvas ===
@@ -1183,7 +1189,7 @@ class FabricCNCApp:
         """Import DXF file using the new DXF processor."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("DXF processing modules not available. Please install required dependencies.")
-            self.status_label.configure(text="Missing DXF dependencies", text_color="red")
+            self.status_label.configure(text=self._truncate_status("Missing DXF deps"), text_color="red")
             return
         
         initial_dir = os.path.expanduser("~/Desktop/DXF")
@@ -1197,7 +1203,7 @@ class FabricCNCApp:
             
             if not self.processed_shapes:
                 logger.error("No shapes found in DXF file.")
-                self.status_label.configure(text="No shapes found in DXF", text_color="red")
+                self.status_label.configure(text=self._truncate_status("No shapes found"), text_color="red")
                 return
             
             # Store the file path for later use
@@ -1213,14 +1219,14 @@ class FabricCNCApp:
             logger.info(f"DXF imported: {len(self.processed_shapes)} shapes from {file_path}")
             
             # Update status label
-            self.status_label.configure(text=f"DXF imported: {len(self.processed_shapes)} shapes", text_color="green")
+            self.status_label.configure(text=self._truncate_status(f"DXF: {len(self.processed_shapes)} shapes"), text_color="green")
             
             # Redraw canvas to show imported shapes
             self._schedule_canvas_redraw()
             
         except Exception as e:
             logger.error(f"Failed to load DXF: {e}")
-            self.status_label.configure(text=f"DXF import failed: {str(e)}", text_color="red")
+            self.status_label.configure(text=self._truncate_status(f"Import failed: {str(e)}"), text_color="red")
     
 
 
@@ -1286,12 +1292,12 @@ class FabricCNCApp:
         """Generate toolpath using the new toolpath generator."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("Toolpath generation modules not available.")
-            self.status_label.configure(text="Missing toolpath dependencies", text_color="red")
+            self.status_label.configure(text=self._truncate_status("Missing toolpath"), text_color="red")
             return
         
         if not self.processed_shapes:
             logger.warning("No DXF imported. Import a DXF file first.")
-            self.status_label.configure(text="Import DXF first", text_color="orange")
+            self.status_label.configure(text=self._truncate_status("Import DXF first"), text_color="orange")
             return
         
         try:
@@ -1300,7 +1306,7 @@ class FabricCNCApp:
             
             if not self.generated_gcode:
                 logger.error("Failed to generate G-code.")
-                self.status_label.configure(text="Toolpath generation failed", text_color="red")
+                self.status_label.configure(text=self._truncate_status("Toolpath failed"), text_color="red")
                 return
             
             # Create timestamp for filename
@@ -1328,14 +1334,14 @@ class FabricCNCApp:
             logger.info(f"  - Corners detected: {corner_count}")
             
             # Update status label
-            self.status_label.configure(text=f"Toolpath generated: {total_lines} lines, {corner_count} corners", text_color="green")
+            self.status_label.configure(text=self._truncate_status(f"Generated: {total_lines}L"), text_color="green")
             
             # Redraw canvas to show toolpath
             self._schedule_canvas_redraw()
             
         except Exception as e:
             logger.error(f"Failed to generate toolpath: {e}")
-            self.status_label.configure(text=f"Toolpath generation failed: {str(e)}", text_color="red")
+            self.status_label.configure(text=self._truncate_status(f"Gen failed: {str(e)}"), text_color="red")
     
     def _generate_toolpath_internal(self):
         """Internal method to generate toolpath without UI status updates."""
@@ -1469,12 +1475,12 @@ class FabricCNCApp:
         """Preview toolpath with arrows and corner analysis in the main GUI."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("G-code visualization modules not available.")
-            self.status_label.configure(text="Missing visualization dependencies", text_color="red")
+            self.status_label.configure(text=self._truncate_status("Missing viz deps"), text_color="red")
             return
         
         if not self.processed_shapes:
             logger.warning("No DXF imported. Import a DXF file first.")
-            self.status_label.configure(text="Import DXF first", text_color="orange")
+            self.status_label.configure(text=self._truncate_status("Import DXF first"), text_color="orange")
             return
         
         try:
@@ -1491,11 +1497,11 @@ class FabricCNCApp:
             # Update status with preview info
             corner_count = len(self.toolpath_data.get('corners', []))
             point_count = len(self.toolpath_data.get('positions', []))
-            self.status_label.configure(text=f"Preview saved: {os.path.basename(self.gcode_file_path)}", text_color="green")
+            self.status_label.configure(text=self._truncate_status(f"Preview: {os.path.basename(self.gcode_file_path)}"), text_color="green")
             
         except Exception as e:
             logger.error(f"Failed to create toolpath preview: {e}")
-            self.status_label.configure(text=f"Preview failed: {str(e)}", text_color="red")
+            self.status_label.configure(text=self._truncate_status(f"Preview failed"), text_color="red")
     
     def _parse_gcode_for_preview(self, gcode_file_path: str):
         """Parse GCODE file and extract toolpath data for canvas display."""
@@ -1565,12 +1571,12 @@ class FabricCNCApp:
         """Run toolpath using the new G-code executor."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("G-code execution modules not available.")
-            self.status_label.configure(text="Missing execution dependencies", text_color="red")
+            self.status_label.configure(text=self._truncate_status("Missing exec deps"), text_color="red")
             return
         
         if not self.gcode_file_path or not os.path.exists(self.gcode_file_path):
             logger.warning("No G-code file. Generate a toolpath first.")
-            self.status_label.configure(text="Generate toolpath first", text_color="orange")
+            self.status_label.configure(text=self._truncate_status("Generate first"), text_color="orange")
             return
         
         try:
@@ -1602,22 +1608,22 @@ class FabricCNCApp:
                     logger.info("G-code execution completed")
                     
                     # Update UI on completion
-                    self.root.after(0, lambda: self.status_label.configure(text="Execution completed", text_color="green"))
+                    self.root.after(0, lambda: self.status_label.configure(text=self._truncate_status("Completed"), text_color="green"))
                 except Exception as e:
                     logger.error(f"Error during smooth motion execution: {e}")
                     error_msg = str(e)
-                    self.root.after(0, lambda: self.status_label.configure(text=f"Execution failed: {error_msg}", text_color="red"))
+                    self.root.after(0, lambda: self.status_label.configure(text=self._truncate_status(f"Exec failed"), text_color="red"))
             
             # Start execution thread
             execution_thread = threading.Thread(target=execute_gcode, daemon=True)
             execution_thread.start()
             
             # Update status to show execution started
-            self.status_label.configure(text="Toolpath execution started", text_color="blue")
+            self.status_label.configure(text=self._truncate_status("Executing..."), text_color="blue")
             
         except Exception as e:
             logger.error(f"Failed to start G-code execution: {e}")
-            self.status_label.configure(text=f"Failed to start execution: {str(e)}", text_color="red")
+            self.status_label.configure(text=self._truncate_status("Start failed"), text_color="red")
     
     def _add_gcode_debug_prints(self, gcode_lines):
         """Add debug prints to compare G-code positions with motor controller positions."""
@@ -1682,21 +1688,21 @@ class FabricCNCApp:
         """Stop G-code execution."""
         if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
             logger.error("G-code execution modules not available.")
-            self.status_label.configure(text="Missing execution dependencies", text_color="red")
+            self.status_label.configure(text=self._truncate_status("Missing exec deps"), text_color="red")
             return
         
         if not self.smooth_motion_executor or not self.smooth_motion_executor.is_executing:
             # No G-code execution running
-            self.status_label.configure(text="No execution running", text_color="orange")
+            self.status_label.configure(text=self._truncate_status("Not running"), text_color="orange")
             return
         
         try:
             self.smooth_motion_executor.stop_execution()
             # G-code execution stopped by user
-            self.status_label.configure(text="Execution stopped", text_color="orange")
+            self.status_label.configure(text=self._truncate_status("Stopped"), text_color="orange")
         except Exception as e:
             logger.error(f"Failed to stop G-code execution: {e}")
-            self.status_label.configure(text=f"Stop failed: {str(e)}", text_color="red")
+            self.status_label.configure(text=self._truncate_status("Stop failed"), text_color="red")
 
     def _travel_to_start(self, x_in, y_in):
         """Travel from home to the start position of the toolpath."""
@@ -1828,9 +1834,9 @@ class FabricCNCApp:
     def _home_all(self):
         success = self.motor_ctrl.home_all_synchronous()
         if success:
-            self.status_label.configure(text="All axes homed", text_color="green")
+            self.status_label.configure(text=self._truncate_status("Homed"), text_color="green")
         else:
-            self.status_label.configure(text="Homing failed", text_color="red")
+            self.status_label.configure(text=self._truncate_status("Homing failed"), text_color="red")
         # Position update loop will handle canvas redraw automatically
         # Clear status after 2 seconds
         self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
@@ -1868,7 +1874,7 @@ class FabricCNCApp:
 
     def _estop(self):
         self.motor_ctrl.estop()
-        self.status_label.configure(text="EMERGENCY STOP", text_color="red")
+        self.status_label.configure(text=self._truncate_status("EMERGENCY STOP"), text_color="red")
         # Clear status after 3 seconds
         self.root.after(3000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
 
@@ -1951,7 +1957,8 @@ def main():
     root.mainloop()
 
     # In main(), print debug info for simulation mode
-    if __name__ == "__main__":  # Only print on startup
+    if SIMULATION_MODE:
+        print("Running in simulation mode")
 
 # G-code generation functions moved to toolpath_planning package
 
@@ -2106,8 +2113,10 @@ class GCodeExecutor:
         """
         if command == 'M3':  # Spindle on
             # Spindle on
+            pass
         elif command == 'M5':  # Spindle off
             # Spindle off
+            pass
         else:
             logger.warning(f"Unsupported M command: {command}")
     
