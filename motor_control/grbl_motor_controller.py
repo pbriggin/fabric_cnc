@@ -876,33 +876,205 @@ class GrblMotorController:
             return False
 
     def run_gcode_file(self, filepath):
+        """Stream G-code file to GRBL with proper flow control and error handling."""
+        
+        # Preprocess G-code file
+        gcode_lines = self._preprocess_gcode(filepath)
+        if not gcode_lines:
+            logger.warning("No valid G-code lines to execute")
+            return
+        
+        logger.info(f"Starting G-code stream: {len(gcode_lines)} commands")
+        
+        # Check for alarms and unlock if needed
+        if not self._ensure_ready_for_streaming():
+            logger.error("Machine not ready for G-code streaming")
+            return
+        
+        # Stream with sliding window
+        try:
+            self._stream_gcode_with_flow_control(gcode_lines)
+            logger.info("G-code streaming completed successfully")
+        except Exception as e:
+            logger.error(f"G-code streaming failed: {e}")
+            raise
+    
+    def _preprocess_gcode(self, filepath):
+        """Preprocess G-code file: strip comments, validate lines, remove ultra-short segments."""
+        processed_lines = []
+        
         with open(filepath, 'r') as f:
-            for line in f:
+            for line_num, line in enumerate(f, 1):
+                # Strip whitespace and comments
                 clean = line.strip()
-                if clean and not clean.startswith(";"):
-                    ack_event = threading.Event()
-
-                    def wait_for_ack():
-                        while True:
-                            resp = self.serial.readline().decode('utf-8').strip()
-                            if resp == "ok":
-                                ack_event.set()
-                                break
-                            elif resp.startswith("error:"):
-                                logger.error(f"GRBL error: {resp}")
-                                if self.debug_mode:
-                                    print(f"[GRBL ERROR] {resp}")
-                                ack_event.set()
-                                break
-
-                    ack_event.clear()
-                    self.serial.write((clean + "\n").encode('utf-8'))
-                    wait_for_ack()
-                    if not ack_event.wait(timeout=2):
-                        logger.warning(f"GRBL timeout, no ack for: {clean}")
-                        if self.debug_mode:
-                            print(f"[TIMEOUT] No ack for: {clean}")
-                        break
+                if ';' in clean:
+                    clean = clean.split(';')[0].strip()
+                
+                # Skip empty lines
+                if not clean:
+                    continue
+                
+                # Validate line length (≤80 characters)
+                if len(clean) > 80:
+                    logger.warning(f"Line {line_num} too long ({len(clean)} chars), truncating: {clean[:50]}...")
+                    clean = clean[:80]
+                
+                # Skip ultra-short segments (could be optimized further)
+                if self._is_ultra_short_segment(clean):
+                    if self.debug_mode:
+                        logger.debug(f"Skipping ultra-short segment: {clean}")
+                    continue
+                
+                processed_lines.append(clean)
+        
+        logger.info(f"Preprocessed {len(processed_lines)} valid G-code lines")
+        return processed_lines
+    
+    def _is_ultra_short_segment(self, gcode_line):
+        """Check if G-code line represents an ultra-short movement segment."""
+        # Simple heuristic: check for very small coordinate values
+        import re
+        
+        # Extract coordinate values
+        coords = re.findall(r'[XYZ]([-+]?\d*\.?\d+)', gcode_line.upper())
+        if not coords:
+            return False
+        
+        # Check if all movements are very small (< 0.001 inches)
+        for coord in coords:
+            try:
+                if abs(float(coord)) > 0.001:
+                    return False
+            except ValueError:
+                continue
+        
+        return len(coords) > 0  # Only flag as ultra-short if we found coordinates
+    
+    def _ensure_ready_for_streaming(self):
+        """Ensure machine is ready for G-code streaming."""
+        try:
+            # Send status query
+            self.send_immediate("?")
+            time.sleep(0.1)
+            
+            # Check machine state
+            with self.status_lock:
+                state = self.machine_state
+            
+            if state == "Alarm":
+                logger.info("Machine in alarm state, attempting unlock...")
+                self.send_immediate("$X")  # Unlock
+                time.sleep(1.0)
+                
+                # Check again
+                self.send_immediate("?")
+                time.sleep(0.1)
+                
+                with self.status_lock:
+                    if self.machine_state == "Alarm":
+                        logger.error("Failed to clear alarm state")
+                        return False
+            
+            logger.info(f"Machine ready for streaming (state: {state})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to check machine readiness: {e}")
+            return False
+    
+    def _stream_gcode_with_flow_control(self, gcode_lines):
+        """Stream G-code with sliding window flow control."""
+        WINDOW_SIZE = 16  # Maximum commands in flight
+        sent_lines = {}   # Track sent lines waiting for ack
+        line_index = 0    # Current line to send
+        completed = 0     # Lines completed
+        
+        last_status_time = time.time()
+        STATUS_INTERVAL = 0.05  # 20 Hz max status queries
+        
+        while completed < len(gcode_lines) or sent_lines:
+            current_time = time.time()
+            
+            # Send new lines if window has space
+            while len(sent_lines) < WINDOW_SIZE and line_index < len(gcode_lines):
+                line = gcode_lines[line_index]
+                
+                try:
+                    self.serial.write((line + "\n").encode('utf-8'))
+                    self.serial.flush()
+                    sent_lines[line_index] = {
+                        'line': line,
+                        'sent_time': current_time
+                    }
+                    
+                    if self.debug_mode:
+                        logger.debug(f"Sent line {line_index + 1}: {line}")
+                    
+                    line_index += 1
+                    
+                except (serial.SerialException, OSError) as e:
+                    logger.error(f"Serial error sending line {line_index + 1}: {e}")
+                    raise
+            
+            # Process responses
+            try:
+                if self.serial.in_waiting > 0:
+                    response = self.serial.readline().decode('utf-8').strip()
+                    
+                    if response == "ok":
+                        # Find oldest sent line and mark as completed
+                        if sent_lines:
+                            oldest_index = min(sent_lines.keys())
+                            del sent_lines[oldest_index]
+                            completed += 1
+                            
+                            # Progress reporting
+                            if completed % 50 == 0 or completed == len(gcode_lines):
+                                progress = (completed / len(gcode_lines)) * 100
+                                logger.info(f"G-code progress: {completed}/{len(gcode_lines)} ({progress:.1f}%)")
+                    
+                    elif response.startswith("error:"):
+                        error_msg = self._interpret_grbl_error(response)
+                        logger.error(f"GRBL error: {response} - {error_msg}")
+                        
+                        # Remove the failed line from tracking
+                        if sent_lines:
+                            oldest_index = min(sent_lines.keys())
+                            failed_line = sent_lines[oldest_index]['line']
+                            logger.error(f"Failed line {oldest_index + 1}: {failed_line}")
+                            del sent_lines[oldest_index]
+                            completed += 1  # Count as processed even if failed
+                    
+                    elif response.startswith("ALARM:"):
+                        logger.error(f"GRBL ALARM: {response}")
+                        logger.error("Stopping G-code streaming due to alarm")
+                        raise Exception(f"GRBL alarm during streaming: {response}")
+                    
+                    elif response and self.debug_mode:
+                        logger.debug(f"GRBL response: {response}")
+            
+            except (serial.SerialException, OSError) as e:
+                logger.error(f"Serial error reading response: {e}")
+                raise
+            
+            # Periodic status query (max 20 Hz)
+            if current_time - last_status_time >= STATUS_INTERVAL:
+                try:
+                    if len(sent_lines) > 0:  # Only query status if commands are in flight
+                        self.serial.write(b"?\n")
+                    last_status_time = current_time
+                except (serial.SerialException, OSError):
+                    pass  # Ignore status query failures
+            
+            # Check for timeouts
+            for idx, info in list(sent_lines.items()):
+                if current_time - info['sent_time'] > 10.0:  # 10 second timeout
+                    logger.warning(f"Timeout on line {idx + 1}: {info['line']}")
+                    del sent_lines[idx]
+                    completed += 1  # Count as processed to avoid hanging
+            
+            # Small sleep to prevent busy waiting
+            time.sleep(0.001)
 
     def get_position(self):
         with self.status_lock:
