@@ -430,8 +430,8 @@ class FabricCNCApp:
             except:
                 pass
         self.root.configure(bg=UI_COLORS['BACKGROUND'])
-        self.jog_speed = 1.0  # Default to 1 inch
-        self.jog_speed_var = ctk.DoubleVar(value=1.0)  # Default to 1 inch
+        self.jog_size = 1.0  # Default to 1 inch
+        self.jog_size_var = ctk.DoubleVar(value=1.0)  # Default to 1 inch
         self._jog_slider_scale = 0.1  # Scale factor for slider (0.1 inch increments)
         self._arrow_key_state = {}
         self._arrow_key_after_ids = {}
@@ -591,31 +591,31 @@ class FabricCNCApp:
         motor_section.grid_rowconfigure(3, weight=1)  # Down arrow row
         motor_section.grid_rowconfigure(4, weight=1)  # Z controls row
         motor_section.grid_rowconfigure(5, weight=1)  # ROT controls row
-        motor_section.grid_rowconfigure(6, weight=1)  # Jog speed label row
-        motor_section.grid_rowconfigure(7, weight=1)  # Jog speed slider row
-        motor_section.grid_rowconfigure(8, weight=1)  # Jog speed value display row
+        motor_section.grid_rowconfigure(6, weight=1)  # Jog size label row
+        motor_section.grid_rowconfigure(7, weight=1)  # Jog size slider row
+        motor_section.grid_rowconfigure(8, weight=1)  # Jog size value display row
         
         # Arrow buttons - stacked layout with equal widths
-        self._add_compact_jog_button(motor_section, "↑", lambda: self._jog('Y', +self.jog_speed)).grid(row=1, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
-        self._add_compact_jog_button(motor_section, "←", lambda: self._jog('X', -self.jog_speed)).grid(row=2, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
-        self._add_compact_jog_button(motor_section, "→", lambda: self._jog('X', +self.jog_speed)).grid(row=2, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
-        self._add_compact_jog_button(motor_section, "↓", lambda: self._jog('Y', -self.jog_speed)).grid(row=3, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "↑", lambda: self._jog('Y', +self.jog_size)).grid(row=1, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "←", lambda: self._jog('X', -self.jog_size)).grid(row=2, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "→", lambda: self._jog('X', +self.jog_size)).grid(row=2, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "↓", lambda: self._jog('Y', -self.jog_size)).grid(row=3, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
         
-        # Z and ROT controls
-        self._add_compact_jog_button(motor_section, "Z+", lambda: self._jog('Z', +1)).grid(row=4, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
-        self._add_compact_jog_button(motor_section, "Z-", lambda: self._jog('Z', -1)).grid(row=4, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
-        self._add_compact_jog_button(motor_section, "R+", lambda: self._jog('ROT', +5)).grid(row=5, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
-        self._add_compact_jog_button(motor_section, "R-", lambda: self._jog('ROT', -5)).grid(row=5, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        # Z and ROT controls - now using jog_size
+        self._add_compact_jog_button(motor_section, "Z+", lambda: self._jog('Z', +self.jog_size)).grid(row=4, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "Z-", lambda: self._jog('Z', -self.jog_size)).grid(row=4, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "A+", lambda: self._jog('ROT', +self.jog_size)).grid(row=5, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "A-", lambda: self._jog('ROT', -self.jog_size)).grid(row=5, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
         
-        # Jog speed slider
-        ctk.CTkLabel(motor_section, text="Jog Speed:", font=("Arial", 12, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).grid(row=6, column=0, columnspan=2, pady=(UI_PADDING['SMALL'], 0))
+        # Jog size slider
+        ctk.CTkLabel(motor_section, text="Jog Size:", font=("Arial", 12, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).grid(row=6, column=0, columnspan=2, pady=(UI_PADDING['SMALL'], 0))
         jog_slider = ctk.CTkSlider(motor_section, from_=1, to=50, number_of_steps=49, command=self._on_jog_slider)
         jog_slider.grid(row=7, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="ew")
         jog_slider.set(10)  # Set to 1.0 inch (10 * 0.1)
         
-        # Jog speed value display
-        self.jog_speed_label = ctk.CTkLabel(motor_section, text="1.0 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
-        self.jog_speed_label.grid(row=8, column=0, columnspan=2, pady=(0, UI_PADDING['SMALL']))
+        # Jog size value display
+        self.jog_size_label = ctk.CTkLabel(motor_section, text="1.0 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
+        self.jog_size_label.grid(row=8, column=0, columnspan=2, pady=(0, UI_PADDING['SMALL']))
         
         # Home controls section
         home_section = ctk.CTkFrame(self.right_column, fg_color="#d0d0d0", corner_radius=8)
@@ -676,28 +676,28 @@ class FabricCNCApp:
         delta = 0
         if key == 'Left':
             axis = 'X'
-            delta = -self.jog_speed
+            delta = -self.jog_size
         elif key == 'Right':
             axis = 'X'
-            delta = self.jog_speed
+            delta = self.jog_size
         elif key == 'Up':
             axis = 'Y'
-            delta = self.jog_speed
+            delta = self.jog_size
         elif key == 'Down':
             axis = 'Y'
-            delta = -self.jog_speed
+            delta = -self.jog_size
         elif key == 'Page_Up':
             axis = 'Z'
-            delta = 1.0  # 1 inch up
+            delta = self.jog_size
         elif key == 'Page_Down':
             axis = 'Z'
-            delta = -1.0  # 1 inch down
+            delta = -self.jog_size
         elif key == 'Home':
             axis = 'ROT'
-            delta = 5.0  # 5 degrees clockwise
+            delta = self.jog_size
         elif key == 'End':
             axis = 'ROT'
-            delta = -5.0  # 5 degrees counter-clockwise
+            delta = -self.jog_size
         if axis:
             if not self._jog_in_progress.get(axis, False):
                 self._jog_in_progress[axis] = True
@@ -1779,6 +1779,56 @@ class FabricCNCApp:
         return btn
 
     def _jog(self, axis, delta):
+        """Jog with bounds checking to prevent moves outside machine limits."""
+        if not MOTOR_IMPORTS_AVAILABLE or SIMULATION_MODE:
+            return
+        
+        # Get current position
+        current_pos = self.motor_ctrl.get_position()
+        if not current_pos:
+            logger.warning("Cannot jog - position unknown")
+            return
+        
+        # Calculate new position
+        axis_index = {'X': 0, 'Y': 1, 'Z': 2, 'ROT': 3}
+        if axis not in axis_index:
+            logger.error(f"Unknown axis: {axis}")
+            return
+        
+        idx = axis_index[axis]
+        new_pos = current_pos[idx] + delta
+        
+        # Bounds checking
+        if axis == 'X':
+            if new_pos < 0:
+                logger.warning(f"X jog blocked: would move to {new_pos:.3f} (min: 0)")
+                return
+            elif new_pos > self.config.work_area.x:
+                logger.warning(f"X jog blocked: would move to {new_pos:.3f} (max: {self.config.work_area.x})")
+                return
+        elif axis == 'Y':
+            if new_pos < 0:
+                logger.warning(f"Y jog blocked: would move to {new_pos:.3f} (min: 0)")
+                return
+            elif new_pos > self.config.work_area.y:
+                logger.warning(f"Y jog blocked: would move to {new_pos:.3f} (max: {self.config.work_area.y})")
+                return
+        elif axis == 'Z':
+            if new_pos > 0:
+                logger.warning(f"Z jog blocked: would move to {new_pos:.3f} (max: 0)")
+                return
+            elif new_pos < -0.5:
+                logger.warning(f"Z jog blocked: would move to {new_pos:.3f} (min: -0.5)")
+                return
+        elif axis == 'ROT':
+            if new_pos < 0:
+                logger.warning(f"A jog blocked: would move to {new_pos:.3f} (min: 0)")
+                return
+            elif new_pos > 1:
+                logger.warning(f"A jog blocked: would move to {new_pos:.3f} (max: 1)")
+                return
+        
+        # Perform the jog if within bounds
         self.motor_ctrl.jog(axis, delta)
         # Position update loop will handle canvas redraw automatically
 
@@ -1859,20 +1909,20 @@ class FabricCNCApp:
         text = f"X:{x_disp:.1f}in\nY:{y_disp:.1f}in\nZ:{z_disp:.1f}in\nR:{rot_disp:.0f}°"
         self.coord_label.configure(text=text)
 
-    def _update_jog_speed(self):
+    def _update_jog_size(self):
         try:
-            self.jog_speed = self.jog_speed_var.get()  # Already in inches
+            self.jog_size = self.jog_size_var.get()  # Already in inches
         except Exception:
             pass
 
     def _on_jog_slider(self, value):
         # Convert slider value to float inches
-        speed_inches = float(value) * self._jog_slider_scale
-        self.jog_speed_var.set(speed_inches)
+        size_inches = float(value) * self._jog_slider_scale
+        self.jog_size_var.set(size_inches)
         # Update the display label
-        self.jog_speed_label.configure(text=f"{speed_inches:.1f} in")
-        # Update the actual jog speed
-        self.jog_speed = speed_inches  # Already in inches
+        self.jog_size_label.configure(text=f"{size_inches:.1f} in")
+        # Update the actual jog size
+        self.jog_size = size_inches  # Already in inches
 
     def _toggle_fullscreen(self):
         """Toggle full screen mode."""

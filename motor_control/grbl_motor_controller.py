@@ -1013,8 +1013,22 @@ class GrblMotorController:
                     line_index += 1
                     
                 except (serial.SerialException, OSError) as e:
-                    logger.error(f"Serial error sending line {line_index + 1}: {e}")
-                    raise
+                    if "device reports readiness to read but returned no data" in str(e) or "port that is not open" in str(e):
+                        logger.warning(f"Serial disconnection detected while sending line {line_index + 1}: {e}")
+                        
+                        # Attempt to recover from disconnection
+                        if self._attempt_streaming_recovery():
+                            logger.info("Serial recovery successful, retrying send...")
+                            # Clear any pending sent_lines since connection was lost
+                            sent_lines.clear()
+                            logger.info(f"Cleared pending commands, retrying from line {line_index + 1}")
+                            continue  # Retry sending this line
+                        else:
+                            logger.error("Serial recovery failed during send")
+                            raise Exception("Serial connection lost and recovery failed")
+                    else:
+                        logger.error(f"Serial error sending line {line_index + 1}: {e}")
+                        raise
             
             # Process responses
             try:
@@ -1054,8 +1068,22 @@ class GrblMotorController:
                         logger.debug(f"GRBL response: {response}")
             
             except (serial.SerialException, OSError) as e:
-                logger.error(f"Serial error reading response: {e}")
-                raise
+                if "device reports readiness to read but returned no data" in str(e):
+                    logger.warning(f"Serial disconnection detected during streaming: {e}")
+                    
+                    # Attempt to recover from disconnection
+                    if self._attempt_streaming_recovery():
+                        logger.info("Serial recovery successful, continuing stream...")
+                        # Clear any pending sent_lines since connection was lost
+                        sent_lines.clear()
+                        logger.info(f"Cleared pending commands, resuming from line {line_index + 1}")
+                        continue  # Continue the streaming loop
+                    else:
+                        logger.error("Serial recovery failed, stopping stream")
+                        raise Exception("Serial connection lost and recovery failed")
+                else:
+                    logger.error(f"Serial error reading response: {e}")
+                    raise
             
             # Periodic status query (max 20 Hz)
             if current_time - last_status_time >= STATUS_INTERVAL:
@@ -1075,6 +1103,58 @@ class GrblMotorController:
             
             # Small sleep to prevent busy waiting
             time.sleep(0.001)
+    
+    def _attempt_streaming_recovery(self):
+        """Attempt to recover from serial disconnection during streaming."""
+        try:
+            logger.info("Attempting serial recovery during streaming...")
+            
+            # Give device time to reset
+            time.sleep(2.0)
+            
+            # Try to reopen the serial connection
+            if self.serial and self.serial.is_open:
+                try:
+                    self.serial.close()
+                except:
+                    pass
+            
+            # Wait for device to be ready
+            time.sleep(3.0)
+            
+            # Reopen with cleanup
+            self._open_serial_with_cleanup()
+            
+            if not self.serial or not self.serial.is_open:
+                logger.error("Failed to reopen serial connection")
+                return False
+            
+            # Wait for GRBL to initialize
+            time.sleep(2.0)
+            
+            # Reconfigure GRBL (minimal settings for recovery)
+            try:
+                self.send("G20")  # Set inches mode
+                time.sleep(0.5)
+                self.send("G90")  # Set absolute positioning
+                time.sleep(0.5)
+                self.send("G54")  # Select work coordinate system
+                time.sleep(0.5)
+                
+                # Check if machine is responsive
+                self.send_immediate("?")
+                time.sleep(0.5)
+                
+                logger.info("Serial recovery completed successfully")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Failed to reconfigure GRBL after recovery: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Serial recovery failed: {e}")
+            return False
 
     def get_position(self):
         with self.status_lock:
