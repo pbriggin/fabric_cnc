@@ -24,8 +24,6 @@ class GrblMotorController:
         self.running = True
         self.position = [0.0, 0.0, 0.0, 0.0]  # X, Y, Z, A
         self.status_lock = threading.Lock()
-        self.serial_lock = threading.Lock()  # Protect serial access
-        self.connection_healthy = True
         self.alarm_detected = False
         self.last_error_time = 0
         self.response_callback = None  # Callback for manual command responses
@@ -326,11 +324,6 @@ class GrblMotorController:
         buffer = b""
         while self.running:
             try:
-                # Skip if connection is unhealthy
-                if not self.connection_healthy:
-                    time.sleep(0.1)
-                    continue
-                    
                 if self.serial and self.serial.is_open and self.serial.in_waiting:
                     buffer += self.serial.read(self.serial.in_waiting)
                     lines = buffer.split(b'\n')
@@ -375,15 +368,9 @@ class GrblMotorController:
                                 # Send "ok" responses to GUI if callback is set
                                 if self.response_callback:
                                     self.response_callback("ok")
-            except (serial.SerialException, OSError, TypeError) as e:
-                if self.running and self.connection_healthy:
-                    logger.warning(f"Serial read error in background thread: {e}")
-                    self.connection_healthy = False
-                time.sleep(0.1)
-                continue
             except Exception as e:
                 if self.running:
-                    logger.error(f"Unexpected error in read loop: {e}")
+                    logger.warning(f"Serial read error in background thread: {e}")
                 time.sleep(0.1)
                 continue
             time.sleep(0.01)
@@ -392,35 +379,25 @@ class GrblMotorController:
         while self.running:
             try:
                 cmd = self.command_queue.get(timeout=0.1)
-                if self.connection_healthy and self.serial and self.serial.is_open:
+                if self.serial and self.serial.is_open:
                     self.serial.write((cmd + "\n").encode('utf-8'))
                 self.command_queue.task_done()
             except queue.Empty:
                 continue
-            except (serial.SerialException, OSError) as e:
-                if self.running and self.connection_healthy:
-                    logger.warning(f"Serial write error in background thread: {e}")
-                    self.connection_healthy = False
-                self.command_queue.task_done()
-                continue
             except Exception as e:
                 if self.running:
-                    logger.error(f"Unexpected error in write loop: {e}")
+                    logger.warning(f"Serial write error in background thread: {e}")
                 self.command_queue.task_done()
                 continue
 
     def _poll_loop(self):
         while self.running:
             try:
-                if self.connection_healthy and self.serial and self.serial.is_open:
+                if self.serial and self.serial.is_open:
                     self.serial.write(b"?\n")
-            except (serial.SerialException, OSError) as e:
-                if self.running and self.connection_healthy:
-                    logger.warning(f"Serial poll error in background thread: {e}")
-                    self.connection_healthy = False
             except Exception as e:
                 if self.running:
-                    logger.error(f"Unexpected error in poll loop: {e}")
+                    logger.warning(f"Serial poll error in background thread: {e}")
             time.sleep(0.2)
 
     def _parse_status(self, line):
@@ -916,437 +893,88 @@ class GrblMotorController:
             return False
 
     def run_gcode_file(self, filepath):
-        """Stream G-code file with robust error handling and recovery."""
+        """Simple G-code streaming like Universal GCODE Sender."""
+        logger.info(f"Starting G-code file: {filepath}")
         
-        # Preprocess G-code file
-        gcode_lines = self._preprocess_gcode(filepath)
-        if not gcode_lines:
-            logger.warning("No valid G-code lines to execute")
-            return
-        
-        logger.info(f"Starting G-code stream: {len(gcode_lines)} commands")
-        
-        # Check for alarms and unlock if needed
-        if not self._ensure_ready_for_streaming():
-            logger.error("Machine not ready for G-code streaming")
-            return
-        
-        # Use simpler, more robust streaming approach
         try:
-            self._stream_gcode_robust(gcode_lines)
+            with open(filepath, 'r') as f:
+                lines = f.readlines()
+            
+            # Filter out empty lines and comments
+            gcode_lines = []
+            for line in lines:
+                clean = line.strip()
+                if clean and not clean.startswith(';'):
+                    # Remove inline comments
+                    if ';' in clean:
+                        clean = clean.split(';')[0].strip()
+                    if clean:
+                        gcode_lines.append(clean)
+            
+            if not gcode_lines:
+                logger.warning("No valid G-code lines found")
+                return
+            
+            logger.info(f"Streaming {len(gcode_lines)} G-code lines")
+            
+            # Simple line-by-line streaming with acknowledgment
+            for line_num, gcode_line in enumerate(gcode_lines, 1):
+                success = False
+                max_attempts = 3
+                
+                for attempt in range(max_attempts):
+                    try:
+                        # Send line
+                        self.serial.write((gcode_line + '\n').encode('utf-8'))
+                        self.serial.flush()
+                        
+                        # Wait for response
+                        start_time = time.time()
+                        while time.time() - start_time < 30.0:  # 30 second timeout
+                            if self.serial.in_waiting > 0:
+                                response = self.serial.readline().decode('utf-8').strip()
+                                
+                                if response == 'ok':
+                                    success = True
+                                    break
+                                elif response.startswith('error:'):
+                                    logger.error(f"GRBL error on line {line_num}: {response}")
+                                    success = True  # Continue despite error
+                                    break
+                                elif response.startswith('ALARM:'):
+                                    logger.error(f"GRBL alarm on line {line_num}: {response}")
+                                    raise Exception(f"GRBL alarm: {response}")
+                                # Ignore status responses and other messages
+                            
+                            time.sleep(0.001)
+                        
+                        if success:
+                            break
+                        else:
+                            logger.warning(f"Timeout on line {line_num}, attempt {attempt + 1}")
+                            
+                    except (serial.SerialException, OSError) as e:
+                        logger.warning(f"Serial error on line {line_num}, attempt {attempt + 1}: {e}")
+                        if attempt < max_attempts - 1:
+                            time.sleep(1.0)  # Wait before retry
+                            continue
+                        else:
+                            raise Exception(f"Serial communication failed on line {line_num}: {e}")
+                
+                if not success:
+                    raise Exception(f"Failed to send line {line_num} after {max_attempts} attempts: {gcode_line}")
+                
+                # Progress reporting every 25 lines
+                if line_num % 25 == 0:
+                    progress = (line_num / len(gcode_lines)) * 100
+                    logger.info(f"Progress: {line_num}/{len(gcode_lines)} ({progress:.1f}%)")
+            
             logger.info("G-code streaming completed successfully")
+            
         except Exception as e:
             logger.error(f"G-code streaming failed: {e}")
             raise
     
-    def _preprocess_gcode(self, filepath):
-        """Preprocess G-code file: strip comments, validate lines, remove ultra-short segments."""
-        processed_lines = []
-        
-        with open(filepath, 'r') as f:
-            for line_num, line in enumerate(f, 1):
-                # Strip whitespace and comments
-                clean = line.strip()
-                if ';' in clean:
-                    clean = clean.split(';')[0].strip()
-                
-                # Skip empty lines
-                if not clean:
-                    continue
-                
-                # Validate line length (≤80 characters)
-                if len(clean) > 80:
-                    logger.warning(f"Line {line_num} too long ({len(clean)} chars), truncating: {clean[:50]}...")
-                    clean = clean[:80]
-                
-                # Skip ultra-short segments (could be optimized further)
-                if self._is_ultra_short_segment(clean):
-                    if self.debug_mode:
-                        logger.debug(f"Skipping ultra-short segment: {clean}")
-                    continue
-                
-                processed_lines.append(clean)
-        
-        logger.info(f"Preprocessed {len(processed_lines)} valid G-code lines")
-        return processed_lines
-    
-    def _is_ultra_short_segment(self, gcode_line):
-        """Check if G-code line represents an ultra-short movement segment."""
-        # Simple heuristic: check for very small coordinate values
-        import re
-        
-        # Extract coordinate values
-        coords = re.findall(r'[XYZ]([-+]?\d*\.?\d+)', gcode_line.upper())
-        if not coords:
-            return False
-        
-        # Check if all movements are very small (< 0.001 inches)
-        for coord in coords:
-            try:
-                if abs(float(coord)) > 0.001:
-                    return False
-            except ValueError:
-                continue
-        
-        return len(coords) > 0  # Only flag as ultra-short if we found coordinates
-    
-    def _ensure_ready_for_streaming(self):
-        """Ensure machine is ready for G-code streaming."""
-        try:
-            # Send status query
-            self.send_immediate("?")
-            time.sleep(0.1)
-            
-            # Check machine state
-            with self.status_lock:
-                state = self.machine_state
-            
-            if state == "Alarm":
-                logger.info("Machine in alarm state, attempting unlock...")
-                self.send_immediate("$X")  # Unlock
-                time.sleep(1.0)
-                
-                # Check again
-                self.send_immediate("?")
-                time.sleep(0.1)
-                
-                with self.status_lock:
-                    if self.machine_state == "Alarm":
-                        logger.error("Failed to clear alarm state")
-                        return False
-            
-            logger.info(f"Machine ready for streaming (state: {state})")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to check machine readiness: {e}")
-            return False
-    
-    def _stream_gcode_with_flow_control(self, gcode_lines):
-        """Stream G-code with sliding window flow control."""
-        WINDOW_SIZE = 16  # Maximum commands in flight
-        sent_lines = {}   # Track sent lines waiting for ack
-        line_index = 0    # Current line to send
-        completed = 0     # Lines completed
-        
-        last_status_time = time.time()
-        STATUS_INTERVAL = 0.05  # 20 Hz max status queries
-        
-        while completed < len(gcode_lines) or sent_lines:
-            current_time = time.time()
-            
-            # Send new lines if window has space
-            while len(sent_lines) < WINDOW_SIZE and line_index < len(gcode_lines):
-                line = gcode_lines[line_index]
-                
-                try:
-                    self.serial.write((line + "\n").encode('utf-8'))
-                    self.serial.flush()
-                    sent_lines[line_index] = {
-                        'line': line,
-                        'sent_time': current_time
-                    }
-                    
-                    if self.debug_mode:
-                        logger.debug(f"Sent line {line_index + 1}: {line}")
-                    
-                    line_index += 1
-                    
-                except (serial.SerialException, OSError) as e:
-                    if "device reports readiness to read but returned no data" in str(e) or "port that is not open" in str(e):
-                        logger.warning(f"Serial disconnection detected while sending line {line_index + 1}: {e}")
-                        
-                        # Attempt to recover from disconnection
-                        if self._attempt_streaming_recovery():
-                            logger.info("Serial recovery successful, retrying send...")
-                            # Clear any pending sent_lines since connection was lost
-                            sent_lines.clear()
-                            logger.info(f"Cleared pending commands, retrying from line {line_index + 1}")
-                            continue  # Retry sending this line
-                        else:
-                            logger.error("Serial recovery failed during send")
-                            raise Exception("Serial connection lost and recovery failed")
-                    else:
-                        logger.error(f"Serial error sending line {line_index + 1}: {e}")
-                        raise
-            
-            # Process responses
-            try:
-                if self.serial.in_waiting > 0:
-                    response = self.serial.readline().decode('utf-8').strip()
-                    
-                    if response == "ok":
-                        # Find oldest sent line and mark as completed
-                        if sent_lines:
-                            oldest_index = min(sent_lines.keys())
-                            del sent_lines[oldest_index]
-                            completed += 1
-                            
-                            # Progress reporting
-                            if completed % 50 == 0 or completed == len(gcode_lines):
-                                progress = (completed / len(gcode_lines)) * 100
-                                logger.info(f"G-code progress: {completed}/{len(gcode_lines)} ({progress:.1f}%)")
-                    
-                    elif response.startswith("error:"):
-                        error_msg = self._interpret_grbl_error(response)
-                        logger.error(f"GRBL error: {response} - {error_msg}")
-                        
-                        # Remove the failed line from tracking
-                        if sent_lines:
-                            oldest_index = min(sent_lines.keys())
-                            failed_line = sent_lines[oldest_index]['line']
-                            logger.error(f"Failed line {oldest_index + 1}: {failed_line}")
-                            del sent_lines[oldest_index]
-                            completed += 1  # Count as processed even if failed
-                    
-                    elif response.startswith("ALARM:"):
-                        logger.error(f"GRBL ALARM: {response}")
-                        logger.error("Stopping G-code streaming due to alarm")
-                        raise Exception(f"GRBL alarm during streaming: {response}")
-                    
-                    elif response and self.debug_mode:
-                        logger.debug(f"GRBL response: {response}")
-            
-            except (serial.SerialException, OSError) as e:
-                if "device reports readiness to read but returned no data" in str(e):
-                    logger.warning(f"Serial disconnection detected during streaming: {e}")
-                    
-                    # Attempt to recover from disconnection
-                    if self._attempt_streaming_recovery():
-                        logger.info("Serial recovery successful, continuing stream...")
-                        # Clear any pending sent_lines since connection was lost
-                        sent_lines.clear()
-                        logger.info(f"Cleared pending commands, resuming from line {line_index + 1}")
-                        continue  # Continue the streaming loop
-                    else:
-                        logger.error("Serial recovery failed, stopping stream")
-                        raise Exception("Serial connection lost and recovery failed")
-                else:
-                    logger.error(f"Serial error reading response: {e}")
-                    raise
-            
-            # Periodic status query (max 20 Hz)
-            if current_time - last_status_time >= STATUS_INTERVAL:
-                try:
-                    if len(sent_lines) > 0:  # Only query status if commands are in flight
-                        self.serial.write(b"?\n")
-                    last_status_time = current_time
-                except (serial.SerialException, OSError):
-                    pass  # Ignore status query failures
-            
-            # Check for timeouts
-            for idx, info in list(sent_lines.items()):
-                if current_time - info['sent_time'] > 10.0:  # 10 second timeout
-                    logger.warning(f"Timeout on line {idx + 1}: {info['line']}")
-                    del sent_lines[idx]
-                    completed += 1  # Count as processed to avoid hanging
-            
-            # Small sleep to prevent busy waiting
-            time.sleep(0.001)
-    
-    def _attempt_streaming_recovery(self):
-        """Attempt to recover from serial disconnection during streaming."""
-        try:
-            logger.info("Attempting serial recovery during streaming...")
-            
-            # Give device time to reset
-            time.sleep(2.0)
-            
-            # Try to reopen the serial connection
-            if self.serial and self.serial.is_open:
-                try:
-                    self.serial.close()
-                except:
-                    pass
-            
-            # Wait for device to be ready
-            time.sleep(3.0)
-            
-            # Reopen with cleanup
-            self._open_serial_with_cleanup()
-            
-            if not self.serial or not self.serial.is_open:
-                logger.error("Failed to reopen serial connection")
-                return False
-            
-            # Wait for GRBL to initialize
-            time.sleep(2.0)
-            
-            # Reconfigure GRBL (minimal settings for recovery)
-            try:
-                self.send("G20")  # Set inches mode
-                time.sleep(0.5)
-                self.send("G90")  # Set absolute positioning
-                time.sleep(0.5)
-                self.send("G54")  # Select work coordinate system
-                time.sleep(0.5)
-                
-                # Check if machine is responsive
-                self.send_immediate("?")
-                time.sleep(0.5)
-                
-                logger.info("Serial recovery completed successfully")
-                return True
-                
-            except Exception as e:
-                logger.error(f"Failed to reconfigure GRBL after recovery: {e}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Serial recovery failed: {e}")
-            return False
-    
-    def _stream_gcode_robust(self, gcode_lines):
-        """Robust G-code streaming with automatic recovery."""
-        MAX_RETRIES = 3
-        BATCH_SIZE = 8  # Smaller batches for more reliable streaming
-        
-        line_index = 0
-        total_lines = len(gcode_lines)
-        
-        while line_index < total_lines:
-            # Determine batch size (remaining lines or BATCH_SIZE, whichever is smaller)
-            batch_end = min(line_index + BATCH_SIZE, total_lines)
-            batch = gcode_lines[line_index:batch_end]
-            
-            # Try to send this batch with retries
-            success = False
-            for attempt in range(MAX_RETRIES):
-                try:
-                    if self._send_gcode_batch(batch, line_index):
-                        success = True
-                        break
-                    else:
-                        logger.warning(f"Batch failed on attempt {attempt + 1}")
-                        if attempt < MAX_RETRIES - 1:
-                            time.sleep(1.0)  # Brief pause before retry
-                except Exception as e:
-                    if "device reports readiness to read but returned no data" in str(e):
-                        logger.warning(f"Connection lost during batch {line_index}-{batch_end}, attempt {attempt + 1}")
-                        if self._simple_reconnect():
-                            logger.info("Reconnected successfully, retrying batch...")
-                            continue
-                        else:
-                            raise Exception("Failed to reconnect after connection loss")
-                    else:
-                        raise
-            
-            if not success:
-                raise Exception(f"Failed to send batch {line_index}-{batch_end} after {MAX_RETRIES} attempts")
-            
-            line_index = batch_end
-            
-            # Progress reporting
-            if line_index % 50 == 0 or line_index == total_lines:
-                progress = (line_index / total_lines) * 100
-                logger.info(f"G-code progress: {line_index}/{total_lines} ({progress:.1f}%)")
-    
-    def _send_gcode_batch(self, batch, start_index):
-        """Send a small batch of G-code lines with acknowledgment."""
-        try:
-            with self.serial_lock:
-                if not self.serial or not self.serial.is_open:
-                    raise serial.SerialException("Serial connection not available")
-                
-                # Send each line in the batch
-                for i, line in enumerate(batch):
-                    line_num = start_index + i + 1
-                    
-                    # Send the line
-                    self.serial.write((line + "\n").encode('utf-8'))
-                    self.serial.flush()
-                    
-                    # Wait for acknowledgment with timeout
-                    ack_received = False
-                    start_time = time.time()
-                    
-                    while time.time() - start_time < 10.0:  # 10 second timeout
-                        if self.serial.in_waiting > 0:
-                            response = self.serial.readline().decode('utf-8').strip()
-                            
-                            if response == "ok":
-                                ack_received = True
-                                break
-                            elif response.startswith("error:"):
-                                error_msg = self._interpret_grbl_error(response)
-                                logger.error(f"GRBL error on line {line_num}: {response} - {error_msg}")
-                                # Continue with next line (don't fail entire batch for one error)
-                                ack_received = True
-                                break
-                            elif response.startswith("ALARM:"):
-                                logger.error(f"GRBL ALARM on line {line_num}: {response}")
-                                raise Exception(f"GRBL alarm during streaming: {response}")
-                            elif response.startswith("<"):
-                                # Status message - parse and continue waiting
-                                self._parse_status(response)
-                            # Ignore other responses and keep waiting for ack
-                        
-                        time.sleep(0.001)  # Small sleep to prevent busy waiting
-                    
-                    if not ack_received:
-                        logger.warning(f"Timeout waiting for ack on line {line_num}: {line}")
-                        return False
-                
-                return True
-                
-        except (serial.SerialException, OSError) as e:
-            if "device reports readiness to read but returned no data" in str(e):
-                # This will be caught by the caller for reconnection
-                raise
-            else:
-                logger.error(f"Serial error in batch send: {e}")
-                return False
-        except Exception as e:
-            logger.error(f"Unexpected error in batch send: {e}")
-            return False
-    
-    def _simple_reconnect(self):
-        """Simple, reliable reconnection method."""
-        try:
-            logger.info("Attempting simple reconnection...")
-            
-            # Stop background threads temporarily
-            with self.serial_lock:
-                self.connection_healthy = False
-                
-                # Close existing connection
-                if self.serial and self.serial.is_open:
-                    try:
-                        self.serial.close()
-                    except:
-                        pass
-                
-                # Wait for device reset
-                time.sleep(3.0)
-                
-                # Reopen connection
-                self._open_serial_with_cleanup()
-                
-                if not self.serial or not self.serial.is_open:
-                    logger.error("Failed to reopen serial connection")
-                    return False
-                
-                # Wait for GRBL initialization
-                time.sleep(2.0)
-                
-                # Basic reconfiguration
-                self.serial.write(b"G20\n")  # Inches
-                time.sleep(0.5)
-                self.serial.write(b"G90\n")  # Absolute
-                time.sleep(0.5)
-                self.serial.write(b"G54\n")  # Work coordinates
-                time.sleep(0.5)
-                
-                # Mark connection as healthy
-                self.connection_healthy = True
-                
-            logger.info("Simple reconnection successful")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Simple reconnection failed: {e}")
-            self.connection_healthy = False
-            return False
 
     def get_position(self):
         with self.status_lock:
