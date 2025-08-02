@@ -24,6 +24,8 @@ class GrblMotorController:
         self.running = True
         self.position = [0.0, 0.0, 0.0, 0.0]  # X, Y, Z, A
         self.status_lock = threading.Lock()
+        self.serial_lock = threading.Lock()  # Protect serial access
+        self.connection_healthy = True
         self.alarm_detected = False
         self.last_error_time = 0
         self.response_callback = None  # Callback for manual command responses
@@ -323,7 +325,13 @@ class GrblMotorController:
     def _read_loop(self):
         buffer = b""
         while self.running:
-            if self.serial.in_waiting:
+            try:
+                # Skip if connection is unhealthy
+                if not self.connection_healthy:
+                    time.sleep(0.1)
+                    continue
+                    
+                if self.serial and self.serial.is_open and self.serial.in_waiting:
                 buffer += self.serial.read(self.serial.in_waiting)
                 lines = buffer.split(b'\n')
                 buffer = lines[-1]  # keep incomplete line
@@ -367,20 +375,52 @@ class GrblMotorController:
                             # Send "ok" responses to GUI if callback is set
                             if self.response_callback:
                                 self.response_callback("ok")
+            except (serial.SerialException, OSError, TypeError) as e:
+                if self.running and self.connection_healthy:
+                    logger.warning(f"Serial read error in background thread: {e}")
+                    self.connection_healthy = False
+                time.sleep(0.1)
+                continue
+            except Exception as e:
+                if self.running:
+                    logger.error(f"Unexpected error in read loop: {e}")
+                time.sleep(0.1)
+                continue
             time.sleep(0.01)
 
     def _write_loop(self):
         while self.running:
             try:
                 cmd = self.command_queue.get(timeout=0.1)
-                self.serial.write((cmd + "\n").encode('utf-8'))
+                if self.connection_healthy and self.serial and self.serial.is_open:
+                    self.serial.write((cmd + "\n").encode('utf-8'))
                 self.command_queue.task_done()
             except queue.Empty:
+                continue
+            except (serial.SerialException, OSError) as e:
+                if self.running and self.connection_healthy:
+                    logger.warning(f"Serial write error in background thread: {e}")
+                    self.connection_healthy = False
+                self.command_queue.task_done()
+                continue
+            except Exception as e:
+                if self.running:
+                    logger.error(f"Unexpected error in write loop: {e}")
+                self.command_queue.task_done()
                 continue
 
     def _poll_loop(self):
         while self.running:
-            self.send_immediate("?")
+            try:
+                if self.connection_healthy and self.serial and self.serial.is_open:
+                    self.serial.write(b"?\n")
+            except (serial.SerialException, OSError) as e:
+                if self.running and self.connection_healthy:
+                    logger.warning(f"Serial poll error in background thread: {e}")
+                    self.connection_healthy = False
+            except Exception as e:
+                if self.running:
+                    logger.error(f"Unexpected error in poll loop: {e}")
             time.sleep(0.2)
 
     def _parse_status(self, line):
@@ -876,7 +916,7 @@ class GrblMotorController:
             return False
 
     def run_gcode_file(self, filepath):
-        """Stream G-code file to GRBL with proper flow control and error handling."""
+        """Stream G-code file with robust error handling and recovery."""
         
         # Preprocess G-code file
         gcode_lines = self._preprocess_gcode(filepath)
@@ -891,9 +931,9 @@ class GrblMotorController:
             logger.error("Machine not ready for G-code streaming")
             return
         
-        # Stream with sliding window
+        # Use simpler, more robust streaming approach
         try:
-            self._stream_gcode_with_flow_control(gcode_lines)
+            self._stream_gcode_robust(gcode_lines)
             logger.info("G-code streaming completed successfully")
         except Exception as e:
             logger.error(f"G-code streaming failed: {e}")
@@ -1154,6 +1194,158 @@ class GrblMotorController:
                 
         except Exception as e:
             logger.error(f"Serial recovery failed: {e}")
+            return False
+    
+    def _stream_gcode_robust(self, gcode_lines):
+        """Robust G-code streaming with automatic recovery."""
+        MAX_RETRIES = 3
+        BATCH_SIZE = 8  # Smaller batches for more reliable streaming
+        
+        line_index = 0
+        total_lines = len(gcode_lines)
+        
+        while line_index < total_lines:
+            # Determine batch size (remaining lines or BATCH_SIZE, whichever is smaller)
+            batch_end = min(line_index + BATCH_SIZE, total_lines)
+            batch = gcode_lines[line_index:batch_end]
+            
+            # Try to send this batch with retries
+            success = False
+            for attempt in range(MAX_RETRIES):
+                try:
+                    if self._send_gcode_batch(batch, line_index):
+                        success = True
+                        break
+                    else:
+                        logger.warning(f"Batch failed on attempt {attempt + 1}")
+                        if attempt < MAX_RETRIES - 1:
+                            time.sleep(1.0)  # Brief pause before retry
+                except Exception as e:
+                    if "device reports readiness to read but returned no data" in str(e):
+                        logger.warning(f"Connection lost during batch {line_index}-{batch_end}, attempt {attempt + 1}")
+                        if self._simple_reconnect():
+                            logger.info("Reconnected successfully, retrying batch...")
+                            continue
+                        else:
+                            raise Exception("Failed to reconnect after connection loss")
+                    else:
+                        raise
+            
+            if not success:
+                raise Exception(f"Failed to send batch {line_index}-{batch_end} after {MAX_RETRIES} attempts")
+            
+            line_index = batch_end
+            
+            # Progress reporting
+            if line_index % 50 == 0 or line_index == total_lines:
+                progress = (line_index / total_lines) * 100
+                logger.info(f"G-code progress: {line_index}/{total_lines} ({progress:.1f}%)")
+    
+    def _send_gcode_batch(self, batch, start_index):
+        """Send a small batch of G-code lines with acknowledgment."""
+        try:
+            with self.serial_lock:
+                if not self.serial or not self.serial.is_open:
+                    raise serial.SerialException("Serial connection not available")
+                
+                # Send each line in the batch
+                for i, line in enumerate(batch):
+                    line_num = start_index + i + 1
+                    
+                    # Send the line
+                    self.serial.write((line + "\n").encode('utf-8'))
+                    self.serial.flush()
+                    
+                    # Wait for acknowledgment with timeout
+                    ack_received = False
+                    start_time = time.time()
+                    
+                    while time.time() - start_time < 10.0:  # 10 second timeout
+                        if self.serial.in_waiting > 0:
+                            response = self.serial.readline().decode('utf-8').strip()
+                            
+                            if response == "ok":
+                                ack_received = True
+                                break
+                            elif response.startswith("error:"):
+                                error_msg = self._interpret_grbl_error(response)
+                                logger.error(f"GRBL error on line {line_num}: {response} - {error_msg}")
+                                # Continue with next line (don't fail entire batch for one error)
+                                ack_received = True
+                                break
+                            elif response.startswith("ALARM:"):
+                                logger.error(f"GRBL ALARM on line {line_num}: {response}")
+                                raise Exception(f"GRBL alarm during streaming: {response}")
+                            elif response.startswith("<"):
+                                # Status message - parse and continue waiting
+                                self._parse_status(response)
+                            # Ignore other responses and keep waiting for ack
+                        
+                        time.sleep(0.001)  # Small sleep to prevent busy waiting
+                    
+                    if not ack_received:
+                        logger.warning(f"Timeout waiting for ack on line {line_num}: {line}")
+                        return False
+                
+                return True
+                
+        except (serial.SerialException, OSError) as e:
+            if "device reports readiness to read but returned no data" in str(e):
+                # This will be caught by the caller for reconnection
+                raise
+            else:
+                logger.error(f"Serial error in batch send: {e}")
+                return False
+        except Exception as e:
+            logger.error(f"Unexpected error in batch send: {e}")
+            return False
+    
+    def _simple_reconnect(self):
+        """Simple, reliable reconnection method."""
+        try:
+            logger.info("Attempting simple reconnection...")
+            
+            # Stop background threads temporarily
+            with self.serial_lock:
+                self.connection_healthy = False
+                
+                # Close existing connection
+                if self.serial and self.serial.is_open:
+                    try:
+                        self.serial.close()
+                    except:
+                        pass
+                
+                # Wait for device reset
+                time.sleep(3.0)
+                
+                # Reopen connection
+                self._open_serial_with_cleanup()
+                
+                if not self.serial or not self.serial.is_open:
+                    logger.error("Failed to reopen serial connection")
+                    return False
+                
+                # Wait for GRBL initialization
+                time.sleep(2.0)
+                
+                # Basic reconfiguration
+                self.serial.write(b"G20\n")  # Inches
+                time.sleep(0.5)
+                self.serial.write(b"G90\n")  # Absolute
+                time.sleep(0.5)
+                self.serial.write(b"G54\n")  # Work coordinates
+                time.sleep(0.5)
+                
+                # Mark connection as healthy
+                self.connection_healthy = True
+                
+            logger.info("Simple reconnection successful")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Simple reconnection failed: {e}")
+            self.connection_healthy = False
             return False
 
     def get_position(self):
