@@ -278,11 +278,11 @@ class ToolpathGenerator:
         dx = point2[0] - point1[0]
         dy = point2[1] - point1[1]
         
-        # Calculate angle from X-axis
+        # Calculate angle from X-axis (negate to fix direction)
         angle_radians = math.atan2(dy, dx)
         
-        # Convert to degrees
-        angle_degrees = math.degrees(angle_radians)
+        # Convert to degrees and negate to flip direction
+        angle_degrees = -math.degrees(angle_radians)
         
         # Adjust for tool starting parallel to Y-axis (add 90 degrees)
         adjusted_angle = angle_degrees + 90.0
