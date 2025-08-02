@@ -332,49 +332,49 @@ class GrblMotorController:
                     continue
                     
                 if self.serial and self.serial.is_open and self.serial.in_waiting:
-                buffer += self.serial.read(self.serial.in_waiting)
-                lines = buffer.split(b'\n')
-                buffer = lines[-1]  # keep incomplete line
-                for line in lines[:-1]:
-                    decoded = line.decode('utf-8').strip()
-                    if decoded.startswith("<"):
-                        self._last_status_line = decoded  # Store for direct parsing during homing
-                        self._parse_status(decoded)
-                    else:
-                        if self.debug_mode:
-                            print(f"[GRBL RESP] {decoded}")
-                        elif not decoded.strip() == "ok":  # Only log non-"ok" responses in non-debug mode
-                            if decoded.startswith("error:"):
-                                error_msg = self._interpret_grbl_error(decoded)
-                                logger.error(f"GRBL {decoded}: {error_msg}")
-                                
-                                # Send to GUI if callback is set
-                                if self.response_callback:
-                                    self.response_callback(f"ERROR: {decoded} - {error_msg}")
-                                
-                                # Auto-clear alarm if error:9 (alarm state) or error:79 (unlock failed)
-                                if decoded == "error:9" or decoded == "error:79":
-                                    current_time = time.time()
-                                    # Only try to clear alarm once every 5 seconds to avoid spam
-                                    if current_time - self.last_error_time > 5.0:
-                                        self.last_error_time = current_time
-                                        if decoded == "error:9":
-                                            logger.info("Auto-clearing alarm state (error:9)...")
-                                            self.send("$X")  # Send unlock command
-                                        elif decoded == "error:79":
-                                            logger.info("Unlock failed (error:79) - trying reset + unlock...")
-                                            self.send_immediate("\x18")  # Soft reset
-                                            time.sleep(1)
-                                            self.send("$X")  # Try unlock after reset
-                            else:
-                                logger.info(f"GRBL: {decoded}")
-                                # Send non-error responses to GUI if callback is set
-                                if self.response_callback:
-                                    self.response_callback(decoded)
+                    buffer += self.serial.read(self.serial.in_waiting)
+                    lines = buffer.split(b'\n')
+                    buffer = lines[-1]  # keep incomplete line
+                    for line in lines[:-1]:
+                        decoded = line.decode('utf-8').strip()
+                        if decoded.startswith("<"):
+                            self._last_status_line = decoded  # Store for direct parsing during homing
+                            self._parse_status(decoded)
                         else:
-                            # Send "ok" responses to GUI if callback is set
-                            if self.response_callback:
-                                self.response_callback("ok")
+                            if self.debug_mode:
+                                print(f"[GRBL RESP] {decoded}")
+                            elif not decoded.strip() == "ok":  # Only log non-"ok" responses in non-debug mode
+                                if decoded.startswith("error:"):
+                                    error_msg = self._interpret_grbl_error(decoded)
+                                    logger.error(f"GRBL {decoded}: {error_msg}")
+                                    
+                                    # Send to GUI if callback is set
+                                    if self.response_callback:
+                                        self.response_callback(f"ERROR: {decoded} - {error_msg}")
+                                    
+                                    # Auto-clear alarm if error:9 (alarm state) or error:79 (unlock failed)
+                                    if decoded == "error:9" or decoded == "error:79":
+                                        current_time = time.time()
+                                        # Only try to clear alarm once every 5 seconds to avoid spam
+                                        if current_time - self.last_error_time > 5.0:
+                                            self.last_error_time = current_time
+                                            if decoded == "error:9":
+                                                logger.info("Auto-clearing alarm state (error:9)...")
+                                                self.send("$X")  # Send unlock command
+                                            elif decoded == "error:79":
+                                                logger.info("Unlock failed (error:79) - trying reset + unlock...")
+                                                self.send_immediate("\x18")  # Soft reset
+                                                time.sleep(1)
+                                                self.send("$X")  # Try unlock after reset
+                                else:
+                                    logger.info(f"GRBL: {decoded}")
+                                    # Send non-error responses to GUI if callback is set
+                                    if self.response_callback:
+                                        self.response_callback(decoded)
+                            else:
+                                # Send "ok" responses to GUI if callback is set
+                                if self.response_callback:
+                                    self.response_callback("ok")
             except (serial.SerialException, OSError, TypeError) as e:
                 if self.running and self.connection_healthy:
                     logger.warning(f"Serial read error in background thread: {e}")
