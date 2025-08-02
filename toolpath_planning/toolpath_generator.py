@@ -45,6 +45,7 @@ class ToolpathGenerator:
         self.feed_rate = feed_rate
         self.plunge_rate = plunge_rate
         self.current_z = safe_height  # Track current Z position
+        self.current_a = 0.0  # Track current A position for continuous rotation
         
     def generate_toolpath(self, shapes: Dict[str, List[Tuple[float, float]]]) -> str:
         """
@@ -64,6 +65,8 @@ class ToolpathGenerator:
         # Process each shape
         for shape_name, points in shapes.items():
             logger.info(f"Generating toolpath for {shape_name} with {len(points)} points")
+            # Reset A position tracking for each new shape
+            self.current_a = 0.0
             shape_gcode = self._generate_shape_toolpath(shape_name, points)
             gcode_lines.extend(shape_gcode)
         
@@ -125,7 +128,8 @@ class ToolpathGenerator:
         
         # Set initial A rotation for first segment
         if len(points) > 1:
-            first_a_position = self._calculate_z_rotation(first_point, points[1])
+            first_a_raw = self._calculate_z_rotation(first_point, points[1])
+            first_a_position = self._calculate_continuous_a(first_a_raw)
             gcode_lines.append(f"G0 A{first_a_position:.4f} ; Set initial cutting wheel position")
         
         # First plunge - use G0 to ensure Z movement completes before XY movement
@@ -143,7 +147,8 @@ class ToolpathGenerator:
             should_raise_z = self._is_genuine_corner(points, i)
             
             # Calculate A rotation for the next segment
-            a_position = self._calculate_z_rotation(current_point, next_point)
+            a_raw = self._calculate_z_rotation(current_point, next_point)
+            a_position = self._calculate_continuous_a(a_raw)
             
             if should_raise_z:
                 # For corners: raise Z, rotate A, lower Z, move to next point
@@ -298,6 +303,35 @@ class ToolpathGenerator:
         
         # Round to 4 decimal places to reduce precision issues
         return round(a_position_inches, 4)
+    
+    def _calculate_continuous_a(self, target_a: float) -> float:
+        """
+        Calculate continuous A-axis position to avoid unnecessary 360° rotations.
+        
+        Args:
+            target_a: Target A position (0.0 to 1.0)
+            
+        Returns:
+            Continuous A position that takes shortest path from current position
+        """
+        # Calculate the difference between target and current
+        diff = target_a - (self.current_a % 1.0)  # Normalize current_a to 0-1 range
+        
+        # If difference is greater than 0.5, it's shorter to go the other way
+        if diff > 0.5:
+            # Go backwards (subtract 1.0)
+            continuous_a = self.current_a + diff - 1.0
+        elif diff < -0.5:
+            # Go forwards (add 1.0)
+            continuous_a = self.current_a + diff + 1.0
+        else:
+            # Direct path is shortest
+            continuous_a = self.current_a + diff
+        
+        # Update current position
+        self.current_a = continuous_a
+        
+        return round(continuous_a, 4)
 
 
 def main():
