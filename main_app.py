@@ -13,7 +13,6 @@ import time
 import math
 import tkinter.filedialog as filedialog
 import re
-from typing import List, Dict
 
 # Try to import ezdxf for DXF parsing
 try:
@@ -118,7 +117,7 @@ def flatten_spline_with_angle_limit(spline, max_angle_deg=2.0):
 
 # --- Motor simulation logic ---
 class SimulatedMotorController:
-    def __init__(self, debug_mode=False):
+    def __init__(self):
         self.position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0}
         self.lock = threading.Lock()
         self.is_homing = False
@@ -191,8 +190,8 @@ class SimulatedMotorController:
 
 # --- Real Motor Controller Wrapper ---
 class RealMotorController:
-    def __init__(self, debug_mode=False):
-        self.motor_controller = GrblMotorController(debug_mode=debug_mode)
+    def __init__(self):
+        self.motor_controller = GrblMotorController()
         self.lock = threading.Lock()
         self.is_homing = False
         # No internal position tracking - GRBL is single source of truth
@@ -231,9 +230,6 @@ class RealMotorController:
             clamped_val = self._clamp(axis, target_val)
             actual_delta = clamped_val - current_val
             
-            # Debug the delta calculations for A-axis
-            if axis == 'A':
-                print(f"[REAL MOTOR DEBUG] A: current={current_val:.6f}, delta={delta:.6f}, target={target_val:.6f}, clamped={clamped_val:.6f}, actual_delta={actual_delta:.6f}")
             
             if abs(actual_delta) > 1e-6:
                 # Use specified jog feedrates for each axis
@@ -297,7 +293,7 @@ class RealMotorController:
         """Position syncing now handled by get_position() from GRBL"""
     
     def get_sensor_states(self):
-        """Get current sensor states for debugging (not applicable for GRBL)."""
+        """Get current sensor states (not applicable for GRBL)."""
         return {}
 
     def estop(self):
@@ -439,9 +435,7 @@ class FabricCNCApp:
         self._current_toolpath_pos = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0}
         self.toolpaths = []
         
-        # Check for debug mode from environment variable or config
-        debug_mode = os.environ.get('FABRIC_CNC_DEBUG', '').lower() in ('1', 'true', 'yes')
-        self.motor_ctrl = SimulatedMotorController(debug_mode) if SIMULATION_MODE else RealMotorController(debug_mode)
+        self.motor_ctrl = SimulatedMotorController() if SIMULATION_MODE else RealMotorController()
         self._jog_in_progress = {'X': False, 'Y': False, 'Z': False, 'A': False}
         self._arrow_key_repeat_delay = config.APP_CONFIG['ARROW_KEY_REPEAT_DELAY']
         
@@ -989,7 +983,6 @@ class FabricCNCApp:
         # Draw coordinates
         self.canvas.create_text(x_c, y_c - r - 15, text=f"(X={x_in:.2f}, Y={y_in:.2f})", fill=UI_COLORS['PRIMARY_VARIANT'], font=("Arial", 10, "bold"))
         
-        # Debug: log position for troubleshooting
         # Tool head position updated
 
     def _draw_dxf_entities_inches(self):
@@ -1839,14 +1832,7 @@ class FabricCNCApp:
         # No axis mapping needed - GUI and GRBL both use 'A'
         grbl_axis = axis
             
-        # Add debug logging for all axes
-        if axis == 'A':
-            logger.info(f"[MAIN APP] A-axis jog: current={current_pos[pos_axis]:.3f}, delta={delta:.3f}, new={new_pos:.3f}")
-            logger.info(f"[MAIN APP] Will send GRBL axis='{grbl_axis}', delta={delta:.3f}")
-        elif axis == 'X':
-            logger.info(f"[MAIN APP] X-axis jog: current={current_pos[pos_axis]:.3f}, delta={delta:.3f}, new={new_pos:.3f}")
-            logger.info(f"[MAIN APP] Will send GRBL axis='{grbl_axis}', delta={delta:.3f}")
-            
+        
         # Perform the jog if within bounds
         self.motor_ctrl.jog(grbl_axis, delta)
         # Position update loop will handle canvas redraw automatically
@@ -1862,21 +1848,6 @@ class FabricCNCApp:
         # Clear status after 2 seconds
         self.root.after(2000, lambda: self.status_label.configure(text="Ready", text_color=UI_COLORS['ON_SURFACE']))
     
-    def _debug_homing(self):
-        """Debug homing issues - call this method to run diagnostics."""
-        logger.info("🔧 Running homing diagnostics...")
-        if hasattr(self.motor_ctrl, 'motor_controller') and hasattr(self.motor_ctrl.motor_controller, 'diagnose_homing_issue'):
-            self.motor_ctrl.motor_controller.diagnose_homing_issue()
-        else:
-            logger.info("Diagnostics not available in simulation mode")
-    
-    def _test_individual_homing(self, axis):
-        """Test homing for a specific axis."""
-        # Testing axis homing individually
-        if hasattr(self.motor_ctrl, 'motor_controller') and hasattr(self.motor_ctrl.motor_controller, 'test_axis_homing_individually'):
-            self.motor_ctrl.motor_controller.test_axis_homing_individually(axis)
-        else:
-            logger.info("Individual homing test not available in simulation mode")
     
 
     def _stop_movement(self):
@@ -1990,7 +1961,6 @@ def main():
     app = FabricCNCApp(root)
     root.mainloop()
 
-    # Print debug info for simulation mode
     if SIMULATION_MODE:
         print("Running in simulation mode")
 

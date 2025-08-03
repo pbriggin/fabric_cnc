@@ -12,7 +12,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 class GrblMotorController:
-    def __init__(self, port='/dev/ttyACM0', baudrate=115200, debug_mode=False):
+    def __init__(self, port='/dev/ttyACM1', baudrate=115200, debug_mode=False):
         self.port = port
         self.baudrate = baudrate
         self.serial = None
