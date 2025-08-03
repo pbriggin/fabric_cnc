@@ -140,10 +140,7 @@ class ToolpathGenerator:
             current_point = points[i]
             next_point = points[i + 1]
             
-            # Calculate angle between current segment and next segment
-            angle_change = self._calculate_angle_change(points, i)
-            
-            # Determine if we need to raise Z at this corner using simple angle detection
+            # Determine if we need to raise Z at this corner
             should_raise_z = self._is_genuine_corner(points, i)
             
             # Calculate A rotation for the next segment
@@ -171,51 +168,6 @@ class ToolpathGenerator:
         
         return gcode_lines
     
-    def _calculate_angle_change(self, points: List[Tuple[float, float]], point_index: int) -> float:
-        """
-        Calculate the angle change at a specific point.
-        
-        Args:
-            points: List of points
-            point_index: Index of the point to calculate angle change at
-            
-        Returns:
-            Angle change in radians
-        """
-        if point_index == 0 or point_index >= len(points) - 1:
-            return 0.0
-        
-        # Get three consecutive points
-        prev_point = points[point_index - 1]
-        current_point = points[point_index]
-        next_point = points[point_index + 1]
-        
-        # Calculate vectors
-        v1 = (current_point[0] - prev_point[0], current_point[1] - prev_point[1])
-        v2 = (next_point[0] - current_point[0], next_point[1] - current_point[1])
-        
-        # Calculate magnitudes
-        mag1 = math.sqrt(v1[0]**2 + v1[1]**2)
-        mag2 = math.sqrt(v2[0]**2 + v2[1]**2)
-        
-        if mag1 == 0 or mag2 == 0:
-            return 0.0
-        
-        # Calculate dot product
-        dot_product = v1[0] * v2[0] + v1[1] * v2[1]
-        
-        # Calculate angle
-        cos_angle = dot_product / (mag1 * mag2)
-        cos_angle = max(-1, min(1, cos_angle))  # Clamp to [-1, 1]
-        
-        angle = math.acos(cos_angle)
-        
-        # Determine sign using cross product
-        cross_product = v1[0] * v2[1] - v1[1] * v2[0]
-        if cross_product < 0:
-            angle = -angle
-        
-        return angle
     
     def _is_genuine_corner(self, points: List[Tuple[float, float]], point_index: int) -> bool:
         """
@@ -226,7 +178,7 @@ class ToolpathGenerator:
             point_index: Index of the point to check
             
         Returns:
-            True if this is a corner (angle > 5 degrees), False otherwise
+            True if this is a corner (angle > threshold), False otherwise
         """
         if point_index == 0 or point_index >= len(points) - 1:
             return False
@@ -244,7 +196,8 @@ class ToolpathGenerator:
         mag1 = math.sqrt(v1[0]**2 + v1[1]**2)
         mag2 = math.sqrt(v2[0]**2 + v2[1]**2)
         
-        if mag1 == 0 or mag2 == 0:
+        # Check for zero or very small magnitudes (numerical stability)
+        if mag1 < 1e-10 or mag2 < 1e-10:
             return False
         
         # Calculate dot product
@@ -257,16 +210,10 @@ class ToolpathGenerator:
         angle_radians = math.acos(cos_angle)
         angle_degrees = math.degrees(angle_radians)
         
-        # Debug output
-        if angle_degrees > 5.0:
-            # Corner detected
-            pass
-        else:
-            # Not a corner
-            pass
         
-        # Use the configured corner angle threshold
-        return angle_degrees > math.degrees(self.corner_angle_threshold_radians)
+        # Use the configured corner angle threshold (convert radians to degrees for comparison)
+        threshold_degrees = math.degrees(self.corner_angle_threshold_radians)
+        return angle_degrees > threshold_degrees
     
     def _calculate_z_rotation(self, point1: Tuple[float, float], point2: Tuple[float, float]) -> float:
         """
