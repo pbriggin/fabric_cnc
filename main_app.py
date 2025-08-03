@@ -1835,6 +1835,7 @@ class FabricCNCApp:
         # Add debug logging for A-axis
         if axis == 'ROT':
             logger.info(f"A-axis jog: current={current_pos[pos_axis]:.3f}, delta={delta:.3f}, new={new_pos:.3f}")
+            logger.info(f"Sending GRBL command: $J=G91 {grbl_axis}{delta:.3f} F100")
             
         # Perform the jog if within bounds
         self.motor_ctrl.jog(grbl_axis, delta)
