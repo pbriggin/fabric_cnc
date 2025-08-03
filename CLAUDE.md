@@ -39,7 +39,7 @@ pip install -e .[dev]
 **main_app.py** - Main GUI application using CustomTkinter. Handles DXF import, toolpath visualization, motor control interface, and real-time position display. Automatically runs in simulation mode on non-Raspberry Pi systems.
 
 **config.py** - Centralized configuration management containing:
-- GPIO pin assignments for 5 stepper motors (X, Y1, Y2, Z_LIFT, Z_ROTATE)
+- GPIO pin assignments for 5 stepper motors (X, Y1, Y2, Z_LIFT, A)
 - Motor steps per inch and direction settings
 - Work area dimensions (68" x 45")
 - Motion parameters (speed, acceleration)
@@ -63,7 +63,7 @@ The system controls a 5-axis fabric cutting CNC machine:
 - **X/Y axes**: Fabric positioning (68" x 45" work area)
 - **Y1/Y2**: Dual Y-axis motors for gantry stability
 - **Z_LIFT**: Cutting head vertical movement
-- **Z_ROTATE**: Cutting blade rotation for angle cuts
+- **A**: Cutting blade rotation for angle cuts
 
 Each axis has hall effect sensors (NJK-5002C) for homing with EMI-resistant debouncing.
 

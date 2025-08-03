@@ -38,7 +38,7 @@ class Config:
             'Y1': {'DIR': 27, 'STEP': 22, 'EN': 17, 'HALL': 1},  # Left Y motor hall sensor on pin 1
             'Y2': {'DIR': 5, 'STEP': 6, 'EN': 10, 'HALL': 20},  # Right Y motor hall sensor on pin 20
             'Z_LIFT': {'DIR': 7, 'STEP': 18, 'EN': 8, 'HALL': 25},  # Z hall sensor on pin 25
-            'Z_ROTATE': {'DIR': 19, 'STEP': 26, 'EN': 13, 'HALL': 12},  # ROT hall sensor on pin 12
+            'A': {'DIR': 19, 'STEP': 26, 'EN': 13, 'HALL': 12},  # A hall sensor on pin 12
         }
         
         # Motor Steps Configuration (steps per inch)
@@ -47,7 +47,7 @@ class Config:
             'Y1': 2032,  # 80 steps/mm * 25.4 mm/inch
             'Y2': 2032,  # 80 steps/mm * 25.4 mm/inch
             'Z_LIFT': 10160,  # 400 steps/mm * 25.4 mm/inch
-            'Z_ROTATE': 254,  # 10 steps/mm * 25.4 mm/inch
+            'A': 254,  # 10 steps/mm * 25.4 mm/inch
         }
         
         # Motor Direction Configuration
@@ -56,7 +56,7 @@ class Config:
             'Y1': True,  # Invert Y1 to fix Y direction
             'Y2': False,  # Keep Y2 normal (opposite of Y1 for sync)
             'Z_LIFT': False,
-            'Z_ROTATE': True,  # Invert direction to fix one-way rotation issue
+            'A': True,  # Invert direction to fix one-way rotation issue
         }
         
         # Work Area Configuration
@@ -81,7 +81,7 @@ class Config:
             'Y1': 10,     # 10ms for Y1 sensor
             'Y2': 10,     # 10ms for Y2 sensor
             'Z_LIFT': 40, # 40ms for Z sensor
-            'Z_ROTATE': 25 # 25ms for ROT sensor
+            'A': 25 # 25ms for A sensor
         }
         
         # Sensor reading count for multi-reading debounce
@@ -205,7 +205,7 @@ MOTOR_CONFIG = {
         'HOME_SPEED': 0.001,  # Original homing speed
         'VERIFY_SPEED': 0.004  # Original verification speed
     },
-    'Z_ROTATE': {
+    'A': {
         'PULSES_PER_REV': 3200,  # TB6600 driver setting (3200 pulses/rev)
         'INCH_PER_REV': 360,  # 360 degrees per revolution
         'STEP_DELAY': 0.00025,  # 0.25ms between pulses = 2000 steps/sec

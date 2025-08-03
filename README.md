@@ -15,7 +15,7 @@ A complete CNC fabric cutting machine control system designed specifically for R
 ## Hardware Requirements
 
 - **Raspberry Pi 4** (recommended) or Raspberry Pi 3B+
-- **Stepper Motors**: 5 stepper motors (X, Y1, Y2, Z_LIFT, Z_ROTATE)
+- **Stepper Motors**: 5 stepper motors (X, Y1, Y2, Z_LIFT, A)
 - **Motor Drivers**: TB6600 or similar stepper motor drivers
 - **Hall Effect Sensors**: NJK-5002C for homing (5 sensors)
 - **Power Supply**: 5V for logic, 12-24V for motors
@@ -41,10 +41,10 @@ A complete CNC fabric cutting machine control system designed specifically for R
 | Z_LIFT | GPIO 11 | DIR |
 | Z_LIFT | GPIO 13 | ENABLE |
 | Z_LIFT | GPIO 22 | HALL Sensor |
-| Z_ROTATE | GPIO 15 | STEP |
-| Z_ROTATE | GPIO 14 | DIR |
-| Z_ROTATE | GPIO 16 | ENABLE |
-| Z_ROTATE | GPIO 23 | HALL Sensor |
+| A | GPIO 15 | STEP |
+| A | GPIO 14 | DIR |
+| A | GPIO 16 | ENABLE |
+| A | GPIO 23 | HALL Sensor |
 
 ## Quick Installation
 
