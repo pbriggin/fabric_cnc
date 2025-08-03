@@ -626,12 +626,12 @@ class FabricCNCApp:
         
         # Z lower limit slider
         ctk.CTkLabel(motor_section, text="Z Lower Limit:", font=("Arial", 12, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).grid(row=9, column=0, columnspan=2, pady=(UI_PADDING['SMALL'], 0))
-        z_limit_slider = ctk.CTkSlider(motor_section, from_=0.5, to=3.0, number_of_steps=25, command=self._on_z_limit_slider)
+        z_limit_slider = ctk.CTkSlider(motor_section, from_=1.0, to=1.5, number_of_steps=10, command=self._on_z_limit_slider)
         z_limit_slider.grid(row=10, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="ew")
         z_limit_slider.set(1.0)  # Set to -1.0 inch (1.0 on slider)
         
         # Z lower limit value display
-        self.z_limit_label = ctk.CTkLabel(motor_section, text="-1.0 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
+        self.z_limit_label = ctk.CTkLabel(motor_section, text="-1.00 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
         self.z_limit_label.grid(row=11, column=0, columnspan=2, pady=(0, UI_PADDING['SMALL']))
         
         # Home controls section
@@ -1951,11 +1951,11 @@ class FabricCNCApp:
         self.jog_size = size_inches  # Already in inches
         
     def _on_z_limit_slider(self, value):
-        # Convert slider value to negative Z limit (0.5 to 3.0 -> -0.5 to -3.0)
+        # Convert slider value to negative Z limit (1.0 to 1.5 -> -1.0 to -1.5)
         limit_depth = -float(value)
         self.z_lower_limit_var.set(limit_depth)
-        # Update the display label
-        self.z_limit_label.configure(text=f"{limit_depth:.1f} in")
+        # Update the display label with 0.05" precision
+        self.z_limit_label.configure(text=f"{limit_depth:.2f} in")
         # Update the actual Z lower limit
         self.z_lower_limit = limit_depth
         
