@@ -469,16 +469,7 @@ class GrblMotorController:
         command = f"$J=G91 {axis}{delta:.3f} F{feedrate}"
         if self.debug_mode:
             print(f"[GRBL DEBUG] Sending jog command: {command}")
-        # Always log A-axis commands for debugging
-        if axis == 'A':
-            print(f"[A-AXIS DEBUG] Sending: {command}")
-            print(f"[A-AXIS DEBUG] Current position before jog: {self.position}")
         self.send(command)
-        
-        # For A-axis, wait a moment and check if position changed
-        if axis == 'A':
-            time.sleep(0.5)  # Give time for command to execute
-            print(f"[A-AXIS DEBUG] Position after jog: {self.position}")
 
     def home_all(self):
         """Home all axes using $H command."""
