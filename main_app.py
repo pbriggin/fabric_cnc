@@ -137,7 +137,7 @@ class SimulatedMotorController:
         elif axis == 'Y':
             return max(-45.0, min(value, 45.0))  # 45 inches max Y travel
         elif axis == 'Z':
-            return max(-0.5, min(value, 0.0))  # Z: -0.5 to 0.0 inches
+            return max(-1.0, min(value, 0.0))  # Z: -1.0 to 0.0 inches
         else:
             return value
 
@@ -220,7 +220,7 @@ class RealMotorController:
         elif axis == 'Y':
             return max(-45.0, min(value, 45.0))  # 45 inches max Y travel
         elif axis == 'Z':
-            return max(-0.5, min(value, 0.0))  # Z: -0.5 to 0.0 inches
+            return max(-1.0, min(value, 0.0))  # Z: -1.0 to 0.0 inches
         else:
             return value
 
@@ -456,7 +456,7 @@ class FabricCNCApp:
         if DXF_TOOLPATH_IMPORTS_AVAILABLE:
             self.dxf_processor = DXFProcessor()
             self.toolpath_generator = ToolpathGenerator(
-                cutting_height=-0.5,  # Plunge depth below work surface
+                cutting_height=-1.0,  # Plunge depth below work surface
                 safe_height=0.0,  # Safe height at work surface level
                 corner_angle_threshold=10.0,  # 10-degree threshold
                 feed_rate=1000.0,
@@ -1660,12 +1660,12 @@ class FabricCNCApp:
         """Travel from home to the start position of the toolpath."""
         # Move to start position with Z up
         if MOTOR_IMPORTS_AVAILABLE:
-            self.motor_ctrl.move_to(x=x_in, y=y_in, z=-0.5, rot=0.0)  # Move to safe height (-0.5 inches)
+            self.motor_ctrl.move_to(x=x_in, y=y_in, z=0.0, rot=0.0)  # Move to safe height (0.0 inches)
         
         # Update position and display
         self._current_toolpath_pos['X'] = x_in
         self._current_toolpath_pos['Y'] = y_in
-        self._current_toolpath_pos['Z'] = -0.5  # Safe height in inches
+        self._current_toolpath_pos['Z'] = 0.0  # Safe height in inches
         self._current_toolpath_pos['ROT'] = 0.0
         
         # Position update loop and canvas redraw will be handled automatically
@@ -1695,7 +1695,7 @@ class FabricCNCApp:
         y_in = y
         self._current_toolpath_pos['X'] = x_in
         self._current_toolpath_pos['Y'] = y_in
-        self._current_toolpath_pos['Z'] = -1.0 if z == 0 else -0.5  # Cutting (-1.0in) or safe (-0.5in) height
+        self._current_toolpath_pos['Z'] = -1.0 if z < 0 else 0.0  # Cutting (-1.0in) or safe (0.0in) height
         # Use rotation angle directly - motor controller handles direction inversion
         self._current_toolpath_pos['ROT'] = math.degrees(angle)
         
