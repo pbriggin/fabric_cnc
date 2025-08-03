@@ -97,7 +97,7 @@ class ToolpathGenerator:
         return [
             "",
             f"G0 Z{self.safe_height} ; Return to safe height",
-            "G0 X0 Y0 ; Return to work coordinate origin",
+            "G0 X0 Y0 A0 ; Return to work coordinate origin",
             "M5 ; Spindle off (if applicable)",
             "M2 ; End program"
         ]

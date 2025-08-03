@@ -918,7 +918,11 @@ class GrblMotorController:
             
             logger.info(f"Streaming {len(gcode_lines)} G-code lines")
             
-            # Simple line-by-line streaming with acknowledgment
+            # Use robust flow control streaming
+            self._stream_with_flow_control(gcode_lines)
+            return  # Skip the old streaming code below
+            
+            # OLD: Simple line-by-line streaming with acknowledgment
             for line_num, gcode_line in enumerate(gcode_lines, 1):
                 success = False
                 max_attempts = 3
@@ -975,6 +979,92 @@ class GrblMotorController:
         except Exception as e:
             logger.error(f"G-code streaming failed: {e}")
             raise
+    
+    def _stream_with_flow_control(self, gcode_lines):
+        """Robust streaming with software flow control using GRBL buffer status."""
+        sent_lines = 0
+        ack_count = 0
+        pending_lines = []
+        max_pending = 5  # Conservative buffer limit
+        
+        # Track which lines are pending acknowledgment
+        for line_num, gcode_line in enumerate(gcode_lines, 1):
+            
+            # Wait if too many lines are pending
+            while len(pending_lines) >= max_pending:
+                self._wait_for_acknowledgments(pending_lines)
+                
+            # Send the line with retry logic
+            retry_count = 0
+            max_retries = 5
+            
+            while retry_count <= max_retries:
+                try:
+                    if self.serial and self.serial.is_open:
+                        self.serial.write((gcode_line + '\n').encode('utf-8'))
+                        self.serial.flush()
+                        pending_lines.append((line_num, gcode_line))
+                        sent_lines += 1
+                        break
+                        
+                except (serial.SerialException, OSError) as e:
+                    retry_count += 1
+                    logger.warning(f"Serial error sending line {line_num}, attempt {retry_count}: {e}")
+                    
+                    if retry_count > max_retries:
+                        raise Exception(f"Failed to send line {line_num} after {max_retries} retries: {e}")
+                    
+                    # Wait and try to recover
+                    time.sleep(0.1 * retry_count)  # Progressive backoff
+                    
+                    # Try to reconnect if needed
+                    if not self.serial or not self.serial.is_open:
+                        logger.info("Attempting to reconnect serial...")
+                        self._open_serial_with_cleanup()
+            
+            # Progress reporting
+            if line_num % 25 == 0:
+                progress = (line_num / len(gcode_lines)) * 100
+                logger.info(f"Progress: {line_num}/{len(gcode_lines)} ({progress:.1f}%)")
+        
+        # Wait for all remaining acknowledgments
+        while pending_lines:
+            self._wait_for_acknowledgments(pending_lines)
+    
+    def _wait_for_acknowledgments(self, pending_lines):
+        """Wait for and process acknowledgments from GRBL."""
+        timeout_start = time.time()
+        timeout_duration = 30.0  # 30 second timeout
+        
+        while pending_lines and (time.time() - timeout_start) < timeout_duration:
+            try:
+                if self.serial and self.serial.in_waiting > 0:
+                    response = self.serial.readline().decode('utf-8').strip()
+                    
+                    if response == 'ok':
+                        if pending_lines:
+                            line_num, gcode_line = pending_lines.pop(0)
+                        continue
+                    elif response.startswith('error:'):
+                        if pending_lines:
+                            line_num, gcode_line = pending_lines.pop(0)
+                            logger.error(f"GRBL error on line {line_num}: {response}")
+                        continue
+                    elif response.startswith('ALARM:'):
+                        logger.error(f"GRBL alarm: {response}")
+                        raise Exception(f"GRBL alarm: {response}")
+                    # Ignore status and other responses
+                    
+                time.sleep(0.001)  # 1ms polling for acknowledgments
+                
+            except (serial.SerialException, OSError) as e:
+                logger.warning(f"Serial error waiting for acknowledgments: {e}")
+                time.sleep(0.1)
+                continue
+        
+        if pending_lines and (time.time() - timeout_start) >= timeout_duration:
+            logger.error(f"Timeout waiting for acknowledgments. {len(pending_lines)} lines pending.")
+            # Continue anyway - don't fail the entire job
     
 
     def get_position(self):
