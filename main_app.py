@@ -137,7 +137,7 @@ class SimulatedMotorController:
         elif axis == 'Y':
             return max(-45.0, min(value, 45.0))  # 45 inches max Y travel
         elif axis == 'Z':
-            return max(-1.0, min(value, 0.0))  # Z: -1.0 to 0.0 inches
+            return max(self.z_lower_limit, min(value, 0.0))  # Z: runtime limit to 0.0 inches
         else:
             return value
 
@@ -220,7 +220,7 @@ class RealMotorController:
         elif axis == 'Y':
             return max(-45.0, min(value, 45.0))  # 45 inches max Y travel
         elif axis == 'Z':
-            return max(-1.0, min(value, 0.0))  # Z: -1.0 to 0.0 inches
+            return max(self.z_lower_limit, min(value, 0.0))  # Z: runtime limit to 0.0 inches
         else:
             return value
 
@@ -433,6 +433,10 @@ class FabricCNCApp:
         self.jog_size = 1.0  # Default to 1 inch
         self.jog_size_var = ctk.DoubleVar(value=1.0)  # Default to 1 inch
         self._jog_slider_scale = 0.1  # Scale factor for slider (0.1 inch increments)
+        
+        # Z lower limit control
+        self.z_lower_limit = -1.0  # Runtime adjustable Z lower limit
+        self.z_lower_limit_var = ctk.DoubleVar(value=-1.0)
         self._arrow_key_state = {}
         self._arrow_key_after_ids = {}
         self._current_toolpath_idx = [0, 0]
@@ -456,7 +460,7 @@ class FabricCNCApp:
         if DXF_TOOLPATH_IMPORTS_AVAILABLE:
             self.dxf_processor = DXFProcessor()
             self.toolpath_generator = ToolpathGenerator(
-                cutting_height=-1.0,  # Plunge depth below work surface
+                cutting_height=self.z_lower_limit,  # Use runtime adjustable depth
                 safe_height=0.0,  # Safe height at work surface level
                 corner_angle_threshold=10.0,  # 10-degree threshold
                 feed_rate=1000.0,
@@ -594,6 +598,9 @@ class FabricCNCApp:
         motor_section.grid_rowconfigure(6, weight=1)  # Jog size label row
         motor_section.grid_rowconfigure(7, weight=1)  # Jog size slider row
         motor_section.grid_rowconfigure(8, weight=1)  # Jog size value display row
+        motor_section.grid_rowconfigure(9, weight=1)  # Z limit label row
+        motor_section.grid_rowconfigure(10, weight=1)  # Z limit slider row
+        motor_section.grid_rowconfigure(11, weight=1)  # Z limit value display row
         
         # Arrow buttons - stacked layout with equal widths
         self._add_compact_jog_button(motor_section, "↑", lambda: self._jog('Y', +self.jog_size)).grid(row=1, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
@@ -616,6 +623,16 @@ class FabricCNCApp:
         # Jog size value display
         self.jog_size_label = ctk.CTkLabel(motor_section, text="1.0 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
         self.jog_size_label.grid(row=8, column=0, columnspan=2, pady=(0, UI_PADDING['SMALL']))
+        
+        # Z lower limit slider
+        ctk.CTkLabel(motor_section, text="Z Lower Limit:", font=("Arial", 12, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).grid(row=9, column=0, columnspan=2, pady=(UI_PADDING['SMALL'], 0))
+        z_limit_slider = ctk.CTkSlider(motor_section, from_=0.5, to=3.0, number_of_steps=25, command=self._on_z_limit_slider)
+        z_limit_slider.grid(row=10, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="ew")
+        z_limit_slider.set(1.0)  # Set to -1.0 inch (1.0 on slider)
+        
+        # Z lower limit value display
+        self.z_limit_label = ctk.CTkLabel(motor_section, text="-1.0 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
+        self.z_limit_label.grid(row=11, column=0, columnspan=2, pady=(0, UI_PADDING['SMALL']))
         
         # Home controls section
         home_section = ctk.CTkFrame(self.right_column, fg_color="#d0d0d0", corner_radius=8)
@@ -1695,7 +1712,7 @@ class FabricCNCApp:
         y_in = y
         self._current_toolpath_pos['X'] = x_in
         self._current_toolpath_pos['Y'] = y_in
-        self._current_toolpath_pos['Z'] = -1.0 if z < 0 else 0.0  # Cutting (-1.0in) or safe (0.0in) height
+        self._current_toolpath_pos['Z'] = self.z_lower_limit if z < 0 else 0.0  # Cutting (runtime limit) or safe (0.0in) height
         # Use rotation angle directly - motor controller handles direction inversion
         self._current_toolpath_pos['ROT'] = math.degrees(angle)
         
@@ -1820,8 +1837,8 @@ class FabricCNCApp:
             if new_pos > 0:
                 logger.warning(f"Z jog blocked: would move to {new_pos:.3f} (max: 0)")
                 return
-            elif new_pos < -1.0:
-                logger.warning(f"Z jog blocked: would move to {new_pos:.3f} (min: -1.0)")
+            elif new_pos < self.z_lower_limit:
+                logger.warning(f"Z jog blocked: would move to {new_pos:.3f} (min: {self.z_lower_limit})")
                 return
         elif axis == 'ROT':
             # Allow continuous rotation - remove bounds checking for A-axis
@@ -1932,6 +1949,19 @@ class FabricCNCApp:
         self.jog_size_label.configure(text=f"{size_inches:.1f} in")
         # Update the actual jog size
         self.jog_size = size_inches  # Already in inches
+        
+    def _on_z_limit_slider(self, value):
+        # Convert slider value to negative Z limit (0.5 to 3.0 -> -0.5 to -3.0)
+        limit_depth = -float(value)
+        self.z_lower_limit_var.set(limit_depth)
+        # Update the display label
+        self.z_limit_label.configure(text=f"{limit_depth:.1f} in")
+        # Update the actual Z lower limit
+        self.z_lower_limit = limit_depth
+        
+        # Update toolpath generator if available
+        if hasattr(self, 'toolpath_generator') and self.toolpath_generator is not None:
+            self.toolpath_generator.cutting_height = limit_depth
 
     def _toggle_fullscreen(self):
         """Toggle full screen mode."""
