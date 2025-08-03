@@ -39,8 +39,6 @@ try:
 except ImportError:
     DXF_TOOLPATH_IMPORTS_AVAILABLE = False
 
-# Legacy toolpath imports no longer needed with GRBL
-TOOLPATH_IMPORTS_AVAILABLE = False
 
 # Import configuration
 import config
@@ -49,8 +47,6 @@ from config import (
     ON_RPI, SIMULATION_MODE
 )
 
-# GPIO not needed with GRBL controller
-GPIO_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fabric_cnc.main_app")
@@ -119,9 +115,6 @@ def flatten_spline_with_angle_limit(spline, max_angle_deg=2.0):
         logger.error(f"Error flattening spline: {e}")
         return []
 
-# Toolpath generation functions moved to toolpath_planning package
-
-# Toolpath generation functions moved to toolpath_planning package
 
 # --- Motor simulation logic ---
 class SimulatedMotorController:
@@ -129,7 +122,6 @@ class SimulatedMotorController:
         self.position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0}
         self.lock = threading.Lock()
         self.is_homing = False
-        self._debug_prints_enabled = debug_mode  # Debug printing control
 
     def _clamp(self, axis, value):
         if axis == 'X':
@@ -203,7 +195,6 @@ class RealMotorController:
         self.motor_controller = GrblMotorController(debug_mode=debug_mode)
         self.lock = threading.Lock()
         self.is_homing = False
-        self._debug_prints_enabled = debug_mode  # Debug printing control
         # No internal position tracking - GRBL is single source of truth
         
         # Reset work coordinates (alarm handling now done in GrblMotorController)
@@ -458,7 +449,6 @@ class FabricCNCApp:
         self._canvas_redraw_pending = False
         self._last_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0}
         self._position_update_threshold = 0.01  # Only update if position changes by > 0.01 inches
-        self._debug_prints_enabled = debug_mode  # Toggle for debug output
         
         # Initialize new DXF processing and toolpath generation
         if DXF_TOOLPATH_IMPORTS_AVAILABLE:
@@ -1846,10 +1836,8 @@ class FabricCNCApp:
             # Allow continuous rotation - remove bounds checking for A-axis
             pass
         
-        # Map GUI axis names to GRBL axis names
+        # No axis mapping needed - GUI and GRBL both use 'A'
         grbl_axis = axis
-        if axis == 'A':
-            grbl_axis = 'A'
             
         # Add debug logging for all axes
         if axis == 'A':
@@ -2002,237 +1990,11 @@ def main():
     app = FabricCNCApp(root)
     root.mainloop()
 
-    # In main(), print debug info for simulation mode
+    # Print debug info for simulation mode
     if SIMULATION_MODE:
         print("Running in simulation mode")
 
-# G-code generation functions moved to toolpath_planning package
 
-# G-code generation functions moved to toolpath_planning package
-
-# G-code file operations moved to toolpath_planning package
-
-class GCodeExecutor:
-    """Executes G-code commands for smooth motor control."""
-    
-    def __init__(self, motor_controller):
-        """Initialize G-code executor.
-        
-        Args:
-            motor_controller: Motor controller instance
-        """
-        self.motor_ctrl = motor_controller
-        self.current_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0}
-        self.feed_rate = 1000.0  # mm/min
-        self.is_executing = False
-        self.stop_requested = False
-        
-        # G-code state
-        self.absolute_positioning = True
-        self.units_mm = True
-        
-        # G-code executor initialized
-    
-    def execute_gcode_file(self, gcode_file_path: str, progress_callback=None):
-        """Execute G-code from file.
-        
-        Args:
-            gcode_file_path: Path to G-code file
-            progress_callback: Optional callback for progress updates
-        """
-        try:
-            with open(gcode_file_path, 'r') as f:
-                gcode_lines = f.readlines()
-            
-            self.execute_gcode_lines(gcode_lines, progress_callback)
-        except Exception as e:
-            logger.error(f"Error executing G-code file: {e}")
-            raise
-    
-    def execute_gcode_lines(self, gcode_lines: List[str], progress_callback=None):
-        """Execute G-code from list of lines.
-        
-        Args:
-            gcode_lines: List of G-code lines
-            progress_callback: Optional callback for progress updates
-        """
-        self.is_executing = True
-        self.stop_requested = False
-        
-        total_lines = len(gcode_lines)
-        executed_lines = 0
-        
-        try:
-            for line_num, line in enumerate(gcode_lines, 1):
-                if self.stop_requested:
-                    # G-code execution stopped by user
-                    break
-                
-                line = line.strip()
-                if not line or line.startswith(';'):
-                    continue
-                
-                # Parse and execute the line
-                self._execute_gcode_line(line)
-                executed_lines += 1
-                
-                # Update progress
-                if progress_callback and total_lines > 0:
-                    progress = (executed_lines / total_lines) * 100
-                    progress_callback(progress, f"Line {line_num}/{total_lines}")
-                
-                # Small delay for smooth execution
-                time.sleep(0.001)
-        
-        except Exception as e:
-            logger.error(f"Error executing G-code at line {line_num}: {e}")
-            raise
-        finally:
-            self.is_executing = False
-    
-    def _execute_gcode_line(self, line: str):
-        """Execute a single G-code line.
-        
-        Args:
-            line: G-code line to execute
-        """
-        # Remove comments
-        line = line.split(';')[0].strip()
-        if not line:
-            return
-        
-        # Parse command
-        cmd_match = re.match(r'^([GM]\d+)(.*)$', line.upper())
-        if not cmd_match:
-            logger.warning(f"Invalid G-code line: {line}")
-            return
-        
-        command = cmd_match.group(1)
-        params = cmd_match.group(2)
-        
-        # Parse parameters
-        params_dict = {}
-        for param_match in re.finditer(r'([XYZAF])([+-]?\d*\.?\d*)', params):
-            axis = param_match.group(1)
-            value = float(param_match.group(2)) if param_match.group(2) else 0.0
-            params_dict[axis] = value
-        
-        # Execute command
-        if command.startswith('G'):
-            self._execute_g_command(command, params_dict)
-        elif command.startswith('M'):
-            self._execute_m_command(command, params_dict)
-    
-    def _execute_g_command(self, command: str, params: Dict[str, float]):
-        """Execute G command.
-        
-        Args:
-            command: G command (e.g., G0, G1, G21, G90)
-            params: Command parameters
-        """
-        if command == 'G0':  # Rapid positioning
-            self._move_to_position(params, rapid=True)
-        elif command == 'G1':  # Linear interpolation
-            self._move_to_position(params, rapid=False)
-        elif command == 'G21':  # Set units to millimeters
-            self.units_mm = True
-        elif command == 'G90':  # Absolute positioning
-            self.absolute_positioning = True
-        elif command == 'G91':  # Relative positioning
-            self.absolute_positioning = False
-        elif command == 'G28':  # Home all axes
-            self._home_all_axes()
-        elif command == 'G54':  # Select work coordinate system 1
-            # Send G54 to GRBL to ensure we're using work coordinates
-            if MOTOR_IMPORTS_AVAILABLE:
-                self.motor_ctrl.motor_controller.send("G54")
-            # Selected work coordinate system (G54)
-        else:
-            logger.warning(f"Unsupported G command: {command}")
-    
-    def _execute_m_command(self, command: str, params: Dict[str, float]):
-        """Execute M command.
-        
-        Args:
-            command: M command
-            params: Command parameters
-        """
-        if command == 'M3':  # Spindle on
-            # Spindle on
-            pass
-        elif command == 'M5':  # Spindle off
-            # Spindle off
-            pass
-        else:
-            logger.warning(f"Unsupported M command: {command}")
-    
-    def _move_to_position(self, params: Dict[str, float], rapid: bool = False):
-        """Move to specified position.
-        
-        Args:
-            params: Position parameters (X, Y, Z, A, F)
-            rapid: Whether this is a rapid move
-        """
-        # Calculate target position
-        target_pos = self.current_position.copy()
-        
-        for axis, value in params.items():
-            if axis == 'F':  # Feed rate
-                self.feed_rate = value
-                continue
-            
-            if self.absolute_positioning:
-                target_pos[axis] = value
-            else:
-                target_pos[axis] += value
-        
-        # Convert to motor controller format
-        x_mm = target_pos.get('X', self.current_position['X'])
-        y_mm = target_pos.get('Y', self.current_position['Y'])
-        z_mm = target_pos.get('Z', self.current_position['Z'])
-        a_deg = target_pos.get('A', self.current_position['A'])  # GCODE uses 'A'
-        
-        # Check if this is a Z-only movement (no X, Y, or A changes)
-        is_z_only = (
-            abs(x_mm - self.current_position['X']) < 1e-6 and
-            abs(y_mm - self.current_position['Y']) < 1e-6 and
-            abs(a_deg - self.current_position['A']) < 1e-6 and
-            abs(z_mm - self.current_position['Z']) > 1e-6
-        )
-        
-        # Execute movement
-        if MOTOR_IMPORTS_AVAILABLE:
-            if is_z_only:
-                # For Z-only movements, use individual Z movement to ensure completion
-                z_distance_mm = z_mm - self.current_position['Z']
-                logger.debug(f"Z-only movement: Z={z_mm:.2f} (distance={z_distance_mm:.2f}mm)")
-                self.motor_ctrl.move_distance(z_distance_mm, 'Z')
-            else:
-                # For other movements, use coordinated movement
-                self.motor_ctrl.move_to(x=x_mm, y=y_mm, z=z_mm, rot=a_deg)
-        
-        # Update current position
-        self.current_position = target_pos.copy()
-        if 'A' in target_pos:
-            self.current_position['A'] = target_pos['A']
-            del self.current_position['A']
-        
-    
-    def _home_all_axes(self):
-        """Home all axes."""
-        if MOTOR_IMPORTS_AVAILABLE:
-            self.motor_ctrl.home_all_synchronous()
-        
-        # Reset position to home
-        self.current_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0}
-        logger.info("Homed all axes")
-    
-    def stop_execution(self):
-        """Stop G-code execution."""
-        self.stop_requested = True
-        if MOTOR_IMPORTS_AVAILABLE:
-            self.motor_ctrl.stop_movement()
-        # G-code execution stopped
 
 if __name__ == "__main__":
     main() 
