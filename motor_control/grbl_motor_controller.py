@@ -29,7 +29,6 @@ class GrblMotorController:
         self.response_callback = None  # Callback for manual command responses
         self.is_homed = False  # Track if machine is homed
         self.machine_state = "Unknown"  # Track GRBL state (Idle, Run, Hold, Alarm, etc.)
-        self._last_a_command_sent = False  # Debug flag for A-axis command tracking
 
         self.reader_thread = threading.Thread(target=self._read_loop, daemon=True)
         self.writer_thread = threading.Thread(target=self._write_loop, daemon=True)
@@ -335,16 +334,6 @@ class GrblMotorController:
                             self._last_status_line = decoded  # Store for direct parsing during homing
                             self._parse_status(decoded)
                         else:
-                            # Debug A-axis responses
-                            if hasattr(self, '_last_a_command_sent') and self._last_a_command_sent:
-                                print(f"[A-AXIS RESP] {decoded}")
-                                if decoded == "ok":
-                                    print(f"[A-AXIS RESP] A-axis command acknowledged!")
-                                    self._last_a_command_sent = False
-                                elif decoded.startswith("error:"):
-                                    print(f"[A-AXIS RESP] A-axis command rejected: {decoded}")
-                                    self._last_a_command_sent = False
-                                    
                             if self.debug_mode:
                                 print(f"[GRBL RESP] {decoded}")
                             elif not decoded.strip() == "ok":  # Only log non-"ok" responses in non-debug mode
@@ -391,9 +380,6 @@ class GrblMotorController:
             try:
                 cmd = self.command_queue.get(timeout=0.1)
                 if self.serial and self.serial.is_open:
-                    if 'A' in cmd:
-                        print(f"[SERIAL DEBUG] Sending A-axis command to GRBL: {cmd}")
-                        self._last_a_command_sent = True
                     self.serial.write((cmd + "\n").encode('utf-8'))
                 self.command_queue.task_done()
             except queue.Empty:
@@ -463,8 +449,6 @@ class GrblMotorController:
                     print(f"[GRBL DEBUG] Using converted WPos coordinates for position display")
 
     def send(self, gcode_line):
-        if 'A' in gcode_line:
-            print(f"[QUEUE DEBUG] A-axis command queued: {gcode_line}")
         self.command_queue.put(gcode_line)
     
     def set_response_callback(self, callback):
@@ -484,7 +468,6 @@ class GrblMotorController:
         
         # Use G91 for relative movement, let GRBL use current unit mode
         command = f"$J=G91 {axis}{delta:.3f} F{feedrate}"
-        print(f"[JOG DEBUG] Axis={axis}, Delta={delta:.3f}, Command={command}")
         if self.debug_mode:
             print(f"[GRBL DEBUG] Sending jog command: {command}")
         self.send(command)
