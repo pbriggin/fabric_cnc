@@ -137,7 +137,7 @@ class SimulatedMotorController:
         elif axis == 'Y':
             return max(-45.0, min(value, 45.0))  # 45 inches max Y travel
         elif axis == 'Z':
-            return max(self.z_lower_limit, min(value, 0.0))  # Z: runtime limit to 0.0 inches
+            return max(-3.0, min(value, 0.0))  # Z: -3.0 to 0.0 inches (main app handles runtime limit)
         else:
             return value
 
@@ -220,7 +220,7 @@ class RealMotorController:
         elif axis == 'Y':
             return max(-45.0, min(value, 45.0))  # 45 inches max Y travel
         elif axis == 'Z':
-            return max(self.z_lower_limit, min(value, 0.0))  # Z: runtime limit to 0.0 inches
+            return max(-3.0, min(value, 0.0))  # Z: -3.0 to 0.0 inches (main app handles runtime limit)
         else:
             return value
 
