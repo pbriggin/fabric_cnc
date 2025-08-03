@@ -1815,8 +1815,8 @@ class FabricCNCApp:
             if new_pos > 0:
                 logger.warning(f"Z jog blocked: would move to {new_pos:.3f} (max: 0)")
                 return
-            elif new_pos < -0.5:
-                logger.warning(f"Z jog blocked: would move to {new_pos:.3f} (min: -0.5)")
+            elif new_pos < -1.0:
+                logger.warning(f"Z jog blocked: would move to {new_pos:.3f} (min: -1.0)")
                 return
         elif axis == 'ROT':
             if new_pos < 0:
@@ -1826,8 +1826,13 @@ class FabricCNCApp:
                 logger.warning(f"A jog blocked: would move to {new_pos:.3f} (max: 1)")
                 return
         
+        # Map GUI axis names to GRBL axis names
+        grbl_axis = axis
+        if axis == 'ROT':
+            grbl_axis = 'A'
+            
         # Perform the jog if within bounds
-        self.motor_ctrl.jog(axis, delta)
+        self.motor_ctrl.jog(grbl_axis, delta)
         # Position update loop will handle canvas redraw automatically
 
 
