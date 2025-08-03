@@ -253,7 +253,7 @@ class RealMotorController:
                     delta_grbl = actual_delta
                 
                 self.motor_controller.jog(axis, delta_grbl, feedrate)
-                    time.sleep(0.2)  # Wait for GRBL to process
+                time.sleep(0.2)  # Wait for GRBL to process
                     
             
         except Exception as e:
