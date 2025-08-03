@@ -1792,20 +1792,12 @@ class FabricCNCApp:
         # Debug: Check position data structure
         logger.info(f"Current position data: {current_pos} (type: {type(current_pos)}, length: {len(current_pos)})")
         
-        # Calculate new position
-        axis_index = {'X': 0, 'Y': 1, 'Z': 2, 'ROT': 3}
-        if axis not in axis_index:
-            logger.error(f"Unknown axis: {axis}")
-            return
-        
-        idx = axis_index[axis]
-        
-        # Safety check: ensure position data has enough elements
-        if idx >= len(current_pos):
-            logger.error(f"Position data incomplete: axis {axis} (index {idx}) not available in {current_pos}")
+        # Check if position data has the requested axis
+        if axis not in current_pos:
+            logger.error(f"Axis {axis} not available in position data: {current_pos}")
             return
             
-        new_pos = current_pos[idx] + delta
+        new_pos = current_pos[axis] + delta
         
         # Bounds checking
         if axis == 'X':
