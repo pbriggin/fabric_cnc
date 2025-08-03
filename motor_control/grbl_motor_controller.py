@@ -947,7 +947,7 @@ class GrblMotorController:
                                     raise Exception(f"GRBL alarm: {response}")
                                 # Ignore status responses and other messages
                             
-                            time.sleep(0.01)  # 10ms polling to reduce USB traffic
+                            time.sleep(0.0001)  # 0.1ms polling for faster response handling
                         
                         if success:
                             break
