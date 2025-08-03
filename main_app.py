@@ -611,8 +611,8 @@ class FabricCNCApp:
         # Z and ROT controls - now using jog_size
         self._add_compact_jog_button(motor_section, "Z+", lambda: self._jog('Z', +self.jog_size)).grid(row=4, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
         self._add_compact_jog_button(motor_section, "Z-", lambda: self._jog('Z', -self.jog_size)).grid(row=4, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
-        self._add_compact_jog_button(motor_section, "A+", lambda: self._jog('ROT', +self.jog_size)).grid(row=5, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
-        self._add_compact_jog_button(motor_section, "A-", lambda: self._jog('ROT', -self.jog_size)).grid(row=5, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "A+", lambda: self._jog('ROT', +5.0)).grid(row=5, column=0, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
+        self._add_compact_jog_button(motor_section, "A-", lambda: self._jog('ROT', -5.0)).grid(row=5, column=1, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="nsew")
         
         # Jog size slider
         ctk.CTkLabel(motor_section, text="Jog Size:", font=("Arial", 12, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).grid(row=6, column=0, columnspan=2, pady=(UI_PADDING['SMALL'], 0))
@@ -711,10 +711,10 @@ class FabricCNCApp:
             delta = -self.jog_size
         elif key == 'Home':
             axis = 'ROT'
-            delta = self.jog_size
+            delta = 5.0  # 5 degrees clockwise
         elif key == 'End':
             axis = 'ROT'
-            delta = -self.jog_size
+            delta = -5.0  # 5 degrees counter-clockwise
         if axis:
             if not self._jog_in_progress.get(axis, False):
                 self._jog_in_progress[axis] = True
