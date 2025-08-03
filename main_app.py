@@ -1789,9 +1789,6 @@ class FabricCNCApp:
             logger.warning("Cannot jog - position unknown")
             return
         
-        # Debug: Check position data structure
-        logger.info(f"Current position data: {current_pos} (type: {type(current_pos)}, length: {len(current_pos)})")
-        
         # Check if position data has the requested axis
         if axis not in current_pos:
             logger.error(f"Axis {axis} not available in position data: {current_pos}")
@@ -1804,15 +1801,15 @@ class FabricCNCApp:
             if new_pos < 0:
                 logger.warning(f"X jog blocked: would move to {new_pos:.3f} (min: 0)")
                 return
-            elif new_pos > self.config.work_area.x:
-                logger.warning(f"X jog blocked: would move to {new_pos:.3f} (max: {self.config.work_area.x})")
+            elif new_pos > config.APP_CONFIG['X_MAX_INCH']:
+                logger.warning(f"X jog blocked: would move to {new_pos:.3f} (max: {config.APP_CONFIG['X_MAX_INCH']})")
                 return
         elif axis == 'Y':
             if new_pos < 0:
                 logger.warning(f"Y jog blocked: would move to {new_pos:.3f} (min: 0)")
                 return
-            elif new_pos > self.config.work_area.y:
-                logger.warning(f"Y jog blocked: would move to {new_pos:.3f} (max: {self.config.work_area.y})")
+            elif new_pos > config.APP_CONFIG['Y_MAX_INCH']:
+                logger.warning(f"Y jog blocked: would move to {new_pos:.3f} (max: {config.APP_CONFIG['Y_MAX_INCH']})")
                 return
         elif axis == 'Z':
             if new_pos > 0:
