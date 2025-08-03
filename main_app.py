@@ -1789,6 +1789,9 @@ class FabricCNCApp:
             logger.warning("Cannot jog - position unknown")
             return
         
+        # Debug: Check position data structure
+        logger.info(f"Current position data: {current_pos} (type: {type(current_pos)}, length: {len(current_pos)})")
+        
         # Calculate new position
         axis_index = {'X': 0, 'Y': 1, 'Z': 2, 'ROT': 3}
         if axis not in axis_index:
@@ -1796,6 +1799,12 @@ class FabricCNCApp:
             return
         
         idx = axis_index[axis]
+        
+        # Safety check: ensure position data has enough elements
+        if idx >= len(current_pos):
+            logger.error(f"Position data incomplete: axis {axis} (index {idx}) not available in {current_pos}")
+            return
+            
         new_pos = current_pos[idx] + delta
         
         # Bounds checking
