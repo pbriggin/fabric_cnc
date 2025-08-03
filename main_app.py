@@ -1789,12 +1789,17 @@ class FabricCNCApp:
             logger.warning("Cannot jog - position unknown")
             return
         
+        # Map GUI axis names to position data keys
+        pos_axis = axis
+        if axis == 'ROT':
+            pos_axis = 'ROT'  # Position data uses 'ROT' key
+            
         # Check if position data has the requested axis
-        if axis not in current_pos:
-            logger.error(f"Axis {axis} not available in position data: {current_pos}")
+        if pos_axis not in current_pos:
+            logger.error(f"Axis {pos_axis} not available in position data: {current_pos}")
             return
             
-        new_pos = current_pos[axis] + delta
+        new_pos = current_pos[pos_axis] + delta
         
         # Bounds checking
         if axis == 'X':
@@ -1819,17 +1824,17 @@ class FabricCNCApp:
                 logger.warning(f"Z jog blocked: would move to {new_pos:.3f} (min: -1.0)")
                 return
         elif axis == 'ROT':
-            if new_pos < 0:
-                logger.warning(f"A jog blocked: would move to {new_pos:.3f} (min: 0)")
-                return
-            elif new_pos > 1:
-                logger.warning(f"A jog blocked: would move to {new_pos:.3f} (max: 1)")
-                return
+            # Allow continuous rotation - remove bounds checking for A-axis
+            pass
         
         # Map GUI axis names to GRBL axis names
         grbl_axis = axis
         if axis == 'ROT':
             grbl_axis = 'A'
+            
+        # Add debug logging for A-axis
+        if axis == 'ROT':
+            logger.info(f"A-axis jog: current={current_pos[pos_axis]:.3f}, delta={delta:.3f}, new={new_pos:.3f}")
             
         # Perform the jog if within bounds
         self.motor_ctrl.jog(grbl_axis, delta)
