@@ -229,11 +229,11 @@ class GrblMotorController:
                 "$112": "3000.000",   # Z max rate (realistic high performance)
                 "$113": "3000.000",   # A max rate (realistic high performance)
                 
-                # Acceleration (inches/sec²) - grblHAL high performance
-                "$120": "500.000",    # X acceleration (5x increase for rapid moves)
-                "$121": "500.000",    # Y acceleration (5x increase for rapid moves)
-                "$122": "200.000",    # Z acceleration (4x increase for faster Z moves)
-                "$123": "200.000",    # A acceleration (4x increase for faster rotation)
+                # Acceleration (inches/sec²) - Reduced for smoother motion
+                "$120": "300.000",    # X acceleration (reduced for smoother moves)
+                "$121": "300.000",    # Y acceleration (reduced for smoother moves)
+                "$122": "150.000",    # Z acceleration (reduced for smoother Z moves)
+                "$123": "150.000",    # A acceleration (reduced for smoother rotation)
                 
                 # Maximum travel (mm for GRBL)
                 "$130": "1727.000",   # X max travel
