@@ -122,6 +122,9 @@ class ToolpathGenerator:
         # Add shape comment
         gcode_lines.append(f"; Shape: {shape_name}")
         
+        # Reduce adjacent corners to single corners
+        reduced_corner_indices = self._reduce_adjacent_corners(points)
+        
         # Start at first point
         first_point = points[0]
         gcode_lines.append(f"G0 X{first_point[0]:.3f} Y{first_point[1]:.3f} ; Move to start")
@@ -136,26 +139,80 @@ class ToolpathGenerator:
         gcode_lines.append(f"G0 Z{self.cutting_height} ; Plunge to cutting height")
         
         # Process each segment
-        for i in range(len(points) - 1):
+        i = 0
+        while i < len(points) - 1:
             current_point = points[i]
             next_point = points[i + 1]
             
-            # Determine if we need to raise Z at this corner
-            should_raise_z = self._is_genuine_corner(points, i)
+            # Check if the destination point (next_point) is a corner
+            should_raise_z_at_destination = (i + 1) in reduced_corner_indices
             
-            # Calculate A rotation for the next segment
-            a_raw = self._calculate_z_rotation(current_point, next_point)
-            a_position = self._calculate_continuous_a(a_raw)
-            
-            if should_raise_z:
-                # For corners: raise Z, rotate A, lower Z, move to next point
+            if should_raise_z_at_destination:
+                # Calculate A rotation for this segment (to get to the corner)
+                a_raw = self._calculate_z_rotation(current_point, next_point)
+                a_position = self._calculate_continuous_a(a_raw)
+                
+                # Cut to the corner point
+                gcode_lines.append(f"G1 X{next_point[0]:.3f} Y{next_point[1]:.3f} A{a_position:.4f} F{self.feed_rate} ; Cut to corner point")
+                
+                # Raise Z for the corner
                 gcode_lines.append(f"G0 Z{self.safe_height} ; Raise Z for corner")
-                gcode_lines.append(f"G0 A{a_position:.4f} ; Rotate A for corner")
+                
+                # Find the A position that works best for upcoming segments after this corner
+                # Look ahead to find which A position will minimize future Z operations
+                best_a_position = self.current_a
+                if i + 2 < len(points):
+                    # Look ahead to find the A position needed for the longest stretch
+                    # Find the next corner or end of path
+                    next_corner_index = len(points)
+                    for j in range(i + 2, len(points)):
+                        if j in reduced_corner_indices:
+                            next_corner_index = j
+                            break
+                    
+                    # Calculate A position for the midpoint of the next segment stretch
+                    # This should minimize A changes until the next corner
+                    mid_index = min(i + 3, next_corner_index)
+                    if mid_index < len(points):
+                        mid_segment_start = points[mid_index - 1] if mid_index > 0 else next_point
+                        mid_segment_end = points[mid_index]
+                        next_a_raw = self._calculate_z_rotation(mid_segment_start, mid_segment_end)
+                        best_a_position = self._calculate_continuous_a(next_a_raw)
+                    
+                gcode_lines.append(f"G0 A{best_a_position:.4f} ; Rotate A for segments after corner")
+                
+                # Lower Z to continue cutting
                 gcode_lines.append(f"G0 Z{self.cutting_height} ; Lower Z to cutting height")
-                gcode_lines.append(f"G0 X{next_point[0]:.3f} Y{next_point[1]:.3f} ; Move to next point")
+                
             else:
-                # For curves: combine A rotation with cutting move
-                gcode_lines.append(f"G1 X{next_point[0]:.3f} Y{next_point[1]:.3f} A{a_position:.4f} F{self.feed_rate} ; Cut to next point")
+                # Calculate A rotation for this segment
+                a_raw = self._calculate_z_rotation(current_point, next_point)
+                
+                # Check if this would cause too large an A change while cutting
+                temp_current_a = self.current_a
+                # Calculate what the continuous A would be without updating current_a yet
+                normalized_current = temp_current_a % 1.0
+                target_normalized = a_raw % 1.0
+                diff = target_normalized - normalized_current
+                
+                # Find shortest path (accounting for wraparound)
+                if diff > 0.5:
+                    diff -= 1.0
+                elif diff < -0.5:
+                    diff += 1.0
+                
+                test_a_position = temp_current_a + diff
+                a_change = abs(test_a_position - temp_current_a)
+                
+                if a_change <= 0.025:
+                    # Small change - update A while cutting
+                    self.current_a = test_a_position
+                    gcode_lines.append(f"G1 X{next_point[0]:.3f} Y{next_point[1]:.3f} A{self.current_a:.4f} F{self.feed_rate} ; Cut to next point")
+                else:
+                    # Large change - keep current A (don't change it while cutting)
+                    gcode_lines.append(f"G1 X{next_point[0]:.3f} Y{next_point[1]:.3f} A{self.current_a:.4f} F{self.feed_rate} ; Cut to next point (A unchanged)")
+            
+            i += 1
         
         # For closed shapes, the main loop already handles all segments correctly
         # No additional handling needed
@@ -214,6 +271,116 @@ class ToolpathGenerator:
         # Use the configured corner angle threshold (convert radians to degrees for comparison)
         threshold_degrees = math.degrees(self.corner_angle_threshold_radians)
         return angle_degrees > threshold_degrees
+    
+    def _reduce_adjacent_corners(self, points: List[Tuple[float, float]]) -> set:
+        """
+        Reduce multiple adjacent corners to single corners by identifying the most significant
+        angle change in each sequence of adjacent corners.
+        
+        Args:
+            points: List of points
+            
+        Returns:
+            Set of point indices that should be treated as corners after reduction
+        """
+        if len(points) < 3:
+            return set()
+        
+        # First, identify all potential corners
+        all_corners = []
+        for i in range(1, len(points) - 1):
+            if self._is_genuine_corner(points, i):
+                angle = self._calculate_angle_at_point(points, i)
+                all_corners.append((i, angle))
+        
+        if not all_corners:
+            return set()
+        
+        # Group adjacent corners
+        corner_groups = []
+        current_group = [all_corners[0]]
+        
+        for i in range(1, len(all_corners)):
+            current_idx, current_angle = all_corners[i]
+            prev_idx, prev_angle = all_corners[i-1]
+            
+            # Check if corners should be merged based on geometric proximity
+            # Only merge if they're physically close (within 0.1 inches)
+            if current_idx - prev_idx <= 5:  # Only check if reasonably close in index
+                # Calculate distance between corner points
+                current_point = points[current_idx]
+                prev_point = points[prev_idx]
+                distance = math.sqrt((current_point[0] - prev_point[0])**2 + 
+                                   (current_point[1] - prev_point[1])**2)
+                
+                if distance <= 0.1:
+                    # Close together - merge corners
+                    current_group.append(all_corners[i])
+                else:
+                    # Far apart - separate corners
+                    corner_groups.append(current_group)
+                    current_group = [all_corners[i]]
+            else:
+                corner_groups.append(current_group)
+                current_group = [all_corners[i]]
+        
+        if current_group:
+            corner_groups.append(current_group)
+        
+        # For each group, keep only the corner with the largest angle change
+        reduced_corners = set()
+        for group in corner_groups:
+            if len(group) == 1:
+                # Single corner, keep it
+                reduced_corners.add(group[0][0])
+            else:
+                # Multiple adjacent corners, keep the one with largest angle
+                max_corner = max(group, key=lambda x: x[1])
+                reduced_corners.add(max_corner[0])
+                logger.info(f"Reduced {len(group)} adjacent corners to single corner at index {max_corner[0]}")
+        
+        return reduced_corners
+    
+    def _calculate_angle_at_point(self, points: List[Tuple[float, float]], point_index: int) -> float:
+        """
+        Calculate the angle change at a specific point.
+        
+        Args:
+            points: List of points
+            point_index: Index of the point to check
+            
+        Returns:
+            Angle in degrees (0-180)
+        """
+        if point_index == 0 or point_index >= len(points) - 1:
+            return 0.0
+        
+        # Get three consecutive points
+        prev_point = points[point_index - 1]
+        current_point = points[point_index]
+        next_point = points[point_index + 1]
+        
+        # Calculate vectors
+        v1 = (current_point[0] - prev_point[0], current_point[1] - prev_point[1])
+        v2 = (next_point[0] - current_point[0], next_point[1] - current_point[1])
+        
+        # Calculate magnitudes
+        mag1 = math.sqrt(v1[0]**2 + v1[1]**2)
+        mag2 = math.sqrt(v2[0]**2 + v2[1]**2)
+        
+        # Check for zero or very small magnitudes
+        if mag1 < 1e-10 or mag2 < 1e-10:
+            return 0.0
+        
+        # Calculate dot product and angle
+        dot_product = v1[0] * v2[0] + v1[1] * v2[1]
+        cos_angle = dot_product / (mag1 * mag2)
+        cos_angle = max(-1, min(1, cos_angle))  # Clamp to [-1, 1]
+        
+        angle_radians = math.acos(cos_angle)
+        angle_degrees = math.degrees(angle_radians)
+        
+        return angle_degrees
     
     def _calculate_z_rotation(self, point1: Tuple[float, float], point2: Tuple[float, float]) -> float:
         """
@@ -294,7 +461,7 @@ def main():
     )
     
     # Process DXF file
-    dxf_path = "test_2.dxf"
+    dxf_path = "corner2.dxf"
     
     try:
         # Get shapes from DXF processor
