@@ -1,4 +1,7 @@
 import ezdxf
+from ezdxf.addons import drawing
+from ezdxf.path import make_path, Path
+from ezdxf import path
 import math
 import numpy as np
 from typing import Dict, List, Tuple, Optional
@@ -23,9 +26,117 @@ class DXFProcessor:
         """
         self.max_angle_change_radians = math.radians(max_angle_change_degrees)
         
+    def process_dxf_basic(self, dxf_path: str, min_distance: float = 0.1) -> Dict[str, List[Tuple[float, float]]]:
+        """
+        Process DXF file using basic approach with point reduction, centering, and positioning.
+        Uses simple spline approximation, reduces points to specified spacing, then applies
+        the same positioning and grouping logic as the full processor.
+        
+        Args:
+            dxf_path: Path to the DXF file
+            min_distance: Minimum distance between points in inches
+            
+        Returns:
+            Dictionary mapping shape names to lists of (x, y) coordinate tuples
+        """
+        try:
+            doc = ezdxf.readfile(dxf_path)
+            msp = doc.modelspace()
+            
+            shapes = {}
+            shape_counter = 0
+            
+            logger.info("Processing entities with basic approach:")
+            for entity in msp:
+                logger.info(f"  - {entity.dxftype()}")
+                
+                if entity.dxftype() == "SPLINE":
+                    try:
+                        # Get spline construction tool
+                        tool = entity.construction_tool()
+                        
+                        logger.info(f"    Spline degree: {entity.dxf.degree}")
+                        logger.info(f"    Control points: {len(entity.control_points)}")
+                        
+                        # Basic approximation
+                        spline_points = tool.approximate(segments=50)
+                        points = []
+                        for point in spline_points:
+                            points.append((point.x, point.y))
+                        
+                        # Reduce points to specified spacing
+                        reduced_points = self._reduce_points_by_distance(points, min_distance)
+                        
+                        if reduced_points and len(reduced_points) >= 2:
+                            shape_name = f"shape_{shape_counter}"
+                            shapes[shape_name] = reduced_points
+                            shape_counter += 1
+                            
+                    except Exception as e:
+                        logger.warning(f"    Error processing spline: {e}")
+                
+                # Handle other entity types with basic processing
+                elif entity.dxftype() == 'LINE':
+                    points = self._process_line(entity)
+                    if points:
+                        shapes[f"shape_{shape_counter}"] = points
+                        shape_counter += 1
+                        
+                elif entity.dxftype() == 'CIRCLE':
+                    points = self._process_circle(entity)
+                    if points:
+                        # Reduce points for circles too
+                        reduced_points = self._reduce_points_by_distance(points, min_distance)
+                        shapes[f"shape_{shape_counter}"] = reduced_points
+                        shape_counter += 1
+                        
+                elif entity.dxftype() == 'ARC':
+                    points = self._process_arc(entity)
+                    if points:
+                        # Reduce points for arcs too
+                        reduced_points = self._reduce_points_by_distance(points, min_distance)
+                        shapes[f"shape_{shape_counter}"] = reduced_points
+                        shape_counter += 1
+                        
+                elif entity.dxftype() == 'LWPOLYLINE':
+                    points = self._process_lwpolyline(entity)
+                    if points:
+                        # Reduce points for polylines too
+                        reduced_points = self._reduce_points_by_distance(points, min_distance)
+                        shapes[f"shape_{shape_counter}"] = reduced_points
+                        shape_counter += 1
+                        
+                elif entity.dxftype() == 'POLYLINE':
+                    points = self._process_polyline(entity)
+                    if points:
+                        # Reduce points for polylines too
+                        reduced_points = self._reduce_points_by_distance(points, min_distance)
+                        shapes[f"shape_{shape_counter}"] = reduced_points
+                        shape_counter += 1
+                        
+                else:
+                    logger.info(f"Unsupported entity type: {entity.dxftype()}")
+            
+            if not shapes:
+                return {}
+            
+            # Apply the same post-processing as the full processor
+            # 1. Merge shapes that share points
+            merged_shapes = self._merge_connected_shapes(shapes)
+            
+            # 2. Position shapes with bottom-left justification and 1" buffer
+            positioned_shapes = self._position_shapes_bottom_left(merged_shapes, buffer_inches=1.0)
+            
+            logger.info(f"Processed {len(shapes)} entities with basic approach, merged into {len(merged_shapes)} shapes")
+            return positioned_shapes
+                
+        except Exception as e:
+            logger.error(f"Error processing DXF file with basic approach: {e}")
+            return {}
+
     def process_dxf(self, dxf_path: str) -> Dict[str, List[Tuple[float, float]]]:
         """
-        Process a DXF file and extract all shapes as point lists.
+        Process a DXF file using the basic approach with 0.1" point spacing.
         
         Args:
             dxf_path: Path to the DXF file
@@ -33,80 +144,7 @@ class DXFProcessor:
         Returns:
             Dictionary mapping shape names to lists of (x, y) coordinate tuples
         """
-        try:
-            # Load the DXF file
-            doc = ezdxf.readfile(dxf_path)
-            msp = doc.modelspace()
-            
-            shapes = {}
-            shape_counter = 0
-            
-            # Process each entity in the modelspace
-            logger.info("Entities found in DXF file:")
-            for entity in msp:
-                logger.info(f"  - {entity.dxftype()}")
-            
-            # Reset and process each entity
-            for entity in msp:
-                shape_name = f"shape_{shape_counter}"
-                
-                if entity.dxftype() == 'LINE':
-                    points = self._process_line(entity)
-                    if points:
-                        shapes[shape_name] = points
-                        shape_counter += 1
-                        
-                elif entity.dxftype() == 'CIRCLE':
-                    points = self._process_circle(entity)
-                    if points:
-                        shapes[shape_name] = points
-                        shape_counter += 1
-                        
-                elif entity.dxftype() == 'ARC':
-                    points = self._process_arc(entity)
-                    if points:
-                        shapes[shape_name] = points
-                        shape_counter += 1
-                        
-                elif entity.dxftype() == 'LWPOLYLINE':
-                    points = self._process_lwpolyline(entity)
-                    if points:
-                        shapes[shape_name] = points
-                        shape_counter += 1
-                        
-                elif entity.dxftype() == 'POLYLINE':
-                    points = self._process_polyline(entity)
-                    if points:
-                        shapes[shape_name] = points
-                        shape_counter += 1
-                        
-                elif entity.dxftype() == 'SPLINE':
-                    points = self._process_spline(entity)
-                    if points:
-                        shapes[shape_name] = points
-                        shape_counter += 1
-                        
-                elif entity.dxftype() == 'HATCH':
-                    points = self._process_hatch(entity)
-                    if points:
-                        shapes[shape_name] = points
-                        shape_counter += 1
-                        
-                else:
-                    logger.info(f"Unsupported entity type: {entity.dxftype()}")
-            
-            # Merge shapes that share points
-            merged_shapes = self._merge_connected_shapes(shapes)
-            
-            # Position shapes with bottom-left justification and 1" buffer
-            positioned_shapes = self._position_shapes_bottom_left(merged_shapes, buffer_inches=1.0)
-            
-            logger.info(f"Processed {len(shapes)} entities, merged into {len(merged_shapes)} shapes")
-            return positioned_shapes
-            
-        except Exception as e:
-            logger.error(f"Error processing DXF file: {e}")
-            return {}
+        return self.process_dxf_basic(dxf_path, min_distance=0.1)
     
     def _process_line(self, entity) -> List[Tuple[float, float]]:
         """Process a LINE entity."""
@@ -237,8 +275,19 @@ class DXFProcessor:
         return points
     
     def _process_spline(self, entity) -> List[Tuple[float, float]]:
-        """Process a SPLINE entity by sampling points along the curve."""
+        """Process a SPLINE entity by sampling points along the curve, preserving sharp corners."""
         try:
+            # First try to get control points to detect sharp corners
+            control_points = []
+            try:
+                for point in entity.control_points:
+                    if hasattr(point, 'x') and hasattr(point, 'y'):
+                        control_points.append((point.x, point.y))
+                    elif hasattr(point, '__len__') and len(point) >= 2:
+                        control_points.append((float(point[0]), float(point[1])))
+            except:
+                control_points = []
+            
             # Get the spline curve
             spline = entity.construction_tool()
             
@@ -255,6 +304,10 @@ class DXFProcessor:
                 t = i / num_segments
                 point = spline.point(t)
                 points.append((point.x, point.y))
+            
+            # If we have control points, ensure sharp corners are preserved
+            if len(control_points) >= 3:
+                points = self._preserve_sharp_corners_in_spline(points, control_points)
             
             # Validate the spline points for extreme coordinates
             if points:
@@ -515,6 +568,110 @@ class DXFProcessor:
         
         return filtered_points
     
+    def _preserve_sharp_corners_in_spline(self, spline_points: List[Tuple[float, float]], 
+                                         control_points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+        """
+        Preserve sharp corners from control points in spline tessellation.
+        
+        Args:
+            spline_points: Tessellated spline points
+            control_points: Original control points
+            
+        Returns:
+            Modified point list with sharp corners preserved
+        """
+        if len(control_points) < 3:
+            return spline_points
+        
+        # Find sharp corners in control points (angle changes > 45 degrees)
+        corner_threshold = math.radians(45.0)
+        sharp_corners = []
+        
+        for i in range(1, len(control_points) - 1):
+            angle_change = self._calculate_angle_change(control_points[i-1], control_points[i], control_points[i+1])
+            if angle_change > corner_threshold:
+                sharp_corners.append(control_points[i])
+        
+        if not sharp_corners:
+            return spline_points
+        
+        # For each sharp corner, find the closest point in the spline and replace it
+        result_points = spline_points.copy()
+        
+        for corner in sharp_corners:
+            # Find closest point in tessellated spline
+            min_distance = float('inf')
+            closest_index = 0
+            
+            for i, point in enumerate(result_points):
+                distance = math.sqrt((point[0] - corner[0])**2 + (point[1] - corner[1])**2)
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_index = i
+            
+            # Replace the closest point with the exact corner point
+            if min_distance < 0.5:  # Only if reasonably close
+                result_points[closest_index] = corner
+                logger.info(f"Preserved sharp corner at ({corner[0]:.3f}, {corner[1]:.3f})")
+        
+        return result_points
+    
+    def _force_rectangle_corners(self, shapes: Dict[str, List[Tuple[float, float]]]) -> Dict[str, List[Tuple[float, float]]]:
+        """
+        Force sharp corners at rectangle vertices by finding and replacing rounded corner points.
+        
+        Args:
+            shapes: Dictionary of shape names to point lists
+            
+        Returns:
+            Dictionary with sharp rectangle corners forced
+        """
+        corrected_shapes = {}
+        
+        for shape_name, points in shapes.items():
+            if len(points) < 4:
+                corrected_shapes[shape_name] = points
+                continue
+            
+            # Find bounding box
+            x_coords = [p[0] for p in points]
+            y_coords = [p[1] for p in points]
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+            
+            # Define the 4 exact corner points
+            corners = [
+                (x_min, y_min),  # bottom-left
+                (x_max, y_min),  # bottom-right  
+                (x_max, y_max),  # top-right
+                (x_min, y_max)   # top-left
+            ]
+            
+            # For each corner, find the closest point and replace it
+            result_points = points.copy()
+            corners_replaced = 0
+            
+            for corner in corners:
+                min_distance = float('inf')
+                closest_index = 0
+                
+                for i, point in enumerate(result_points):
+                    distance = math.sqrt((point[0] - corner[0])**2 + (point[1] - corner[1])**2)
+                    if distance < min_distance:
+                        min_distance = distance
+                        closest_index = i
+                
+                # Replace if reasonably close (within 0.5 units)
+                if min_distance < 0.5:
+                    result_points[closest_index] = corner
+                    corners_replaced += 1
+            
+            corrected_shapes[shape_name] = result_points
+            if corners_replaced > 0:
+                logger.info(f"Forced {corners_replaced} sharp rectangle corners in {shape_name}")
+        
+        return corrected_shapes
+    
     def _position_shapes_bottom_left(self, shapes: Dict[str, List[Tuple[float, float]]], 
                                     buffer_inches: float = 1.0) -> Dict[str, List[Tuple[float, float]]]:
         """
@@ -603,6 +760,79 @@ class DXFProcessor:
         cos_angle = max(-1, min(1, cos_angle))  # Clamp to [-1, 1]
         
         return math.acos(cos_angle)
+
+    def _process_path(self, entity_path: Path) -> List[Tuple[float, float]]:
+        """
+        Process an ezdxf Path object to extract points with better corner preservation.
+        
+        Args:
+            entity_path: ezdxf Path object
+            
+        Returns:
+            List of (x, y) coordinate tuples
+        """
+        points = []
+        
+        try:
+            # Use path flattening for better control over tessellation
+            # This approach respects the geometric intent better than direct spline sampling
+            flattened = entity_path.flattening(distance=0.05, segments=4)
+            
+            for vertex in flattened:
+                if hasattr(vertex, 'x') and hasattr(vertex, 'y'):
+                    points.append((vertex.x, vertex.y))
+                elif len(vertex) >= 2:
+                    points.append((float(vertex[0]), float(vertex[1])))
+            
+            # Remove duplicates
+            points = self._remove_duplicate_points(points, min_distance=0.05)
+            
+            return points
+            
+        except Exception as e:
+            logger.warning(f"Error processing path: {e}")
+            # Fallback to approximation
+            try:
+                approximate_points = []
+                for vertex in entity_path.approximate(segments=50):
+                    if hasattr(vertex, 'x') and hasattr(vertex, 'y'):
+                        approximate_points.append((vertex.x, vertex.y))
+                    elif len(vertex) >= 2:
+                        approximate_points.append((float(vertex[0]), float(vertex[1])))
+                
+                return self._remove_duplicate_points(approximate_points, min_distance=0.05)
+                
+            except Exception as e2:
+                logger.warning(f"Error with path approximation: {e2}")
+                return []
+
+    def _reduce_points_by_distance(self, points: List[Tuple[float, float]], min_distance: float = 0.1) -> List[Tuple[float, float]]:
+        """
+        Reduce points to only include points that are at least min_distance apart.
+        
+        Args:
+            points: Original list of points
+            min_distance: Minimum distance between points in inches
+            
+        Returns:
+            Filtered list of points
+        """
+        if len(points) <= 1:
+            return points
+        
+        reduced_points = [points[0]]  # Always keep first point
+        
+        for point in points[1:]:
+            last_point = reduced_points[-1]
+            # Calculate distance to last kept point
+            distance = ((point[0] - last_point[0])**2 + (point[1] - last_point[1])**2)**0.5
+            
+            # Only add point if it's far enough from the last kept point
+            if distance >= min_distance:
+                reduced_points.append(point)
+        
+        logger.info(f"Reduced from {len(points)} to {len(reduced_points)} points ({min_distance}\" spacing)")
+        return reduced_points
 
 
 def main():

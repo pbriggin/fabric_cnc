@@ -450,7 +450,7 @@ class FabricCNCApp:
             self.toolpath_generator = ToolpathGenerator(
                 cutting_height=self.z_lower_limit,  # Use runtime adjustable depth
                 safe_height=0.0,  # Safe height at work surface level
-                corner_angle_threshold=10.0,  # 10-degree threshold
+                corner_angle_threshold=15.0,  # 15-degree threshold for basic approach
                 feed_rate=1000.0,
                 plunge_rate=200.0
             )
@@ -1202,13 +1202,18 @@ class FabricCNCApp:
             return
         
         try:
-            # Process DXF using the new processor (now works entirely in inches)
+            # Process DXF using basic approach (now integrated into DXFProcessor)
             self.processed_shapes = self.dxf_processor.process_dxf(file_path)
             
             if not self.processed_shapes:
                 logger.error("No shapes found in DXF file.")
                 self.status_label.configure(text=self._truncate_status("No shapes found"), text_color="red")
                 return
+            
+            # Get point count from the basic_shape
+            points = self.processed_shapes.get("basic_shape", [])
+            logger.info(f"DXF processed successfully. Found {len(points)} points.")
+            self.status_label.configure(text=self._truncate_status(f"DXF loaded: {len(points)} points"), text_color="green")
             
             # Store the file path for later use
             self.dxf_file_path = file_path
