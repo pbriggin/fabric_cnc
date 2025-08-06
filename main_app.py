@@ -451,8 +451,8 @@ class FabricCNCApp:
                 cutting_height=self.z_lower_limit,  # Use runtime adjustable depth
                 safe_height=0.0,  # Safe height at work surface level
                 corner_angle_threshold=15.0,  # 15-degree threshold for basic approach
-                feed_rate=2500.0,
-                plunge_rate=500.0
+                feed_rate=3000.0,
+                plunge_rate=3000.0
             )
             # Smooth motion executor not needed with GRBL - GRBL handles smooth motion internally
             self.smooth_motion_executor = None

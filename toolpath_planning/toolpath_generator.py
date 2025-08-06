@@ -27,8 +27,8 @@ class ToolpathGenerator:
                  cutting_height: float = -0.5,  # Plunge depth below work surface
                  safe_height: float = 0.0,  # Safe height at work surface level
                  corner_angle_threshold: float = 15.0,  # Increased from 5.0 to be less sensitive to curves
-                 feed_rate: float = 2500.0,
-                 plunge_rate: float = 500.0):
+                 feed_rate: float = 3000.0,
+                 plunge_rate: float = 3000.0):
         """
         Initialize the toolpath generator.
         
@@ -431,8 +431,8 @@ def main():
         cutting_height=-0.5,
         safe_height=0.0,
         corner_angle_threshold=15.0,  # Match main_app setting
-        feed_rate=2500.0,
-        plunge_rate=500.0
+        feed_rate=3000.0,
+        plunge_rate=3000.0
     )
     
     # Process DXF file

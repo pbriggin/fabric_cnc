@@ -180,8 +180,8 @@ class GrblMotorController:
                 "$6": "0",        # Probe pin invert
                 "$9": "1",        # PWM spindle mode
                 "$10": "2",       # Status report options: WPos only (1=MPos, 2=WPos, 3=both)
-                "$11": "0.010",   # Junction deviation
-                "$12": "0.002",   # Arc tolerance
+                "$11": "0.020",   # Junction deviation (increased for smoother high-speed moves)
+                "$12": "0.005",   # Arc tolerance (relaxed for faster arc processing)
                 "$13": "0",       # Report inches
                 "$15": "0",       # Work area alarm
                 "$16": "0",       # Work area alarm
@@ -223,17 +223,17 @@ class GrblMotorController:
                 "$102": "200.00000",  # Z steps/inch
                 "$103": "254.00000",  # A steps/inch
                 
-                # Maximum rates (inches/min)
-                "$110": "3000.000",   # X max rate
-                "$111": "3000.000",   # Y max rate
-                "$112": "1500.000",   # Z max rate (increased to allow full homing seek speed)
-                "$113": "1500.000",   # A max rate (increased to allow full homing seek speed)
+                # Maximum rates (inches/min) - Realistic grblHAL limits
+                "$110": "3000.000",   # X max rate (realistic high performance)
+                "$111": "3000.000",   # Y max rate (realistic high performance)
+                "$112": "3000.000",   # Z max rate (realistic high performance)
+                "$113": "3000.000",   # A max rate (realistic high performance)
                 
-                # Acceleration (inches/sec²)
-                "$120": "100.000",    # X acceleration
-                "$121": "100.000",    # Y acceleration
-                "$122": "50.000",     # Z acceleration (increased for better homing performance)
-                "$123": "50.000",     # A acceleration (increased for better homing performance)
+                # Acceleration (inches/sec²) - grblHAL high performance
+                "$120": "500.000",    # X acceleration (5x increase for rapid moves)
+                "$121": "500.000",    # Y acceleration (5x increase for rapid moves)
+                "$122": "200.000",    # Z acceleration (4x increase for faster Z moves)
+                "$123": "200.000",    # A acceleration (4x increase for faster rotation)
                 
                 # Maximum travel (mm for GRBL)
                 "$130": "1727.000",   # X max travel
