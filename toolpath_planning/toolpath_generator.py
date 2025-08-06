@@ -435,26 +435,15 @@ def main():
         plunge_rate=500.0
     )
     
-    # Process DXF file (create a simple test shape since corner.dxf is not available)
-    # dxf_path = "/Users/peterbriggs/Code/fabric_cnc/corner.dxf"
-    
-    # Create a simple test rectangle shape manually
-    shapes = {
-        "test_rectangle": [
-            (1.0, 1.0),    # bottom-left
-            (12.0, 1.0),   # bottom-right
-            (12.0, 10.0),  # top-right
-            (1.0, 10.0),   # top-left
-            (1.0, 1.0)     # back to start
-        ]
-    }
+    # Process DXF file
+    dxf_path = "/Users/peterbriggs/Code/fabric_cnc/corner.dxf"
     
     try:
-        # Use the manually created test shapes instead of DXF processing
-        # shapes = dxf_processor.process_dxf(dxf_path)
+        # Get shapes from DXF processor (now includes positioning and merging)
+        shapes = dxf_processor.process_dxf(dxf_path)
         
         if not shapes:
-            print("No shapes found")
+            print("No shapes found in DXF file")
             return
         
         print(f"Processing {len(shapes)} shapes for toolpath generation...")
@@ -467,7 +456,7 @@ def main():
         gcode = toolpath_generator.generate_toolpath(shapes)
         
         # Save GCODE to file
-        output_filename = "toolpath_test_fast.gcode"
+        output_filename = f"toolpath_{dxf_path.split('/')[-1].replace('.dxf', '.gcode')}"
         with open(output_filename, 'w') as f:
             f.write(gcode)
         
