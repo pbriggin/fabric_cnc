@@ -27,8 +27,8 @@ class ToolpathGenerator:
                  cutting_height: float = -0.5,  # Plunge depth below work surface
                  safe_height: float = 0.0,  # Safe height at work surface level
                  corner_angle_threshold: float = 15.0,  # Increased from 5.0 to be less sensitive to curves
-                 feed_rate: float = 1000.0,
-                 plunge_rate: float = 200.0):
+                 feed_rate: float = 2500.0,
+                 plunge_rate: float = 500.0):
         """
         Initialize the toolpath generator.
         
@@ -104,7 +104,8 @@ class ToolpathGenerator:
     
     def _generate_shape_toolpath(self, shape_name: str, points: List[Tuple[float, float]]) -> List[str]:
         """
-        Generate GCODE for a single shape.
+        Generate GCODE for a single shape with simple corner detection.
+        Z lifts only when angle change between adjacent line segments > 15 degrees.
         
         Args:
             shape_name: Name of the shape
@@ -118,113 +119,87 @@ class ToolpathGenerator:
             return []
         
         gcode_lines = []
-        
-        # Add shape comment
         gcode_lines.append(f"; Shape: {shape_name}")
         
-        # Reduce adjacent corners to single corners
-        reduced_corner_indices = self._reduce_adjacent_corners(points)
-        
-        # Start at first point
+        # Move to start point
         first_point = points[0]
         gcode_lines.append(f"G0 X{first_point[0]:.3f} Y{first_point[1]:.3f} ; Move to start")
         
-        # Set initial A rotation for first segment
+        # Set initial A rotation and plunge
         if len(points) > 1:
-            first_a_raw = self._calculate_z_rotation(first_point, points[1])
-            first_a_position = self._calculate_continuous_a(first_a_raw)
-            gcode_lines.append(f"G0 A{first_a_position:.4f} ; Set initial cutting wheel position")
+            first_a = self._calculate_z_rotation(first_point, points[1])
+            self.current_a = first_a
+            gcode_lines.append(f"G0 A{self.current_a:.4f} ; Set initial blade angle")
         
-        # First plunge - use G0 to ensure Z movement completes before XY movement
         gcode_lines.append(f"G0 Z{self.cutting_height} ; Plunge to cutting height")
         
         # Process each segment
-        i = 0
-        while i < len(points) - 1:
+        for i in range(len(points) - 1):
             current_point = points[i]
             next_point = points[i + 1]
             
-            # Check if the destination point (next_point) is a corner
-            should_raise_z_at_destination = (i + 1) in reduced_corner_indices
-            
-            if should_raise_z_at_destination:
-                # Calculate A rotation for this segment (to get to the corner)
-                a_raw = self._calculate_z_rotation(current_point, next_point)
-                a_position = self._calculate_continuous_a(a_raw)
+            # Check for corner at current point (if not first or last point)
+            if i > 0:
+                prev_point = points[i - 1]
+                angle_change = self._calculate_line_angle_change(prev_point, current_point, next_point)
                 
-                # Cut to the corner point
-                gcode_lines.append(f"G1 X{next_point[0]:.3f} Y{next_point[1]:.3f} A{a_position:.4f} F{self.feed_rate} ; Cut to corner point")
-                
-                # Raise Z for the corner
-                gcode_lines.append(f"G0 Z{self.safe_height} ; Raise Z for corner")
-                
-                # Find the A position that works best for upcoming segments after this corner
-                # Look ahead to find which A position will minimize future Z operations
-                best_a_position = self.current_a
-                if i + 2 < len(points):
-                    # Look ahead to find the A position needed for the longest stretch
-                    # Find the next corner or end of path
-                    next_corner_index = len(points)
-                    for j in range(i + 2, len(points)):
-                        if j in reduced_corner_indices:
-                            next_corner_index = j
-                            break
-                    
-                    # Calculate A position for the midpoint of the next segment stretch
-                    # This should minimize A changes until the next corner
-                    mid_index = min(i + 3, next_corner_index)
-                    if mid_index < len(points):
-                        mid_segment_start = points[mid_index - 1] if mid_index > 0 else next_point
-                        mid_segment_end = points[mid_index]
-                        next_a_raw = self._calculate_z_rotation(mid_segment_start, mid_segment_end)
-                        best_a_position = self._calculate_continuous_a(next_a_raw)
-                    
-                gcode_lines.append(f"G0 A{best_a_position:.4f} ; Rotate A for segments after corner")
-                
-                # Lower Z to continue cutting
-                gcode_lines.append(f"G0 Z{self.cutting_height} ; Lower Z to cutting height")
-                
-            else:
-                # Calculate A rotation for this segment
-                a_raw = self._calculate_z_rotation(current_point, next_point)
-                
-                # Check if this would cause too large an A change while cutting
-                temp_current_a = self.current_a
-                # Calculate what the continuous A would be without updating current_a yet
-                normalized_current = temp_current_a % 1.0
-                target_normalized = a_raw % 1.0
-                diff = target_normalized - normalized_current
-                
-                # Find shortest path (accounting for wraparound)
-                if diff > 0.5:
-                    diff -= 1.0
-                elif diff < -0.5:
-                    diff += 1.0
-                
-                test_a_position = temp_current_a + diff
-                a_change = abs(test_a_position - temp_current_a)
-                
-                if a_change <= 0.025:
-                    # Small change - update A while cutting
-                    self.current_a = test_a_position
-                    gcode_lines.append(f"G1 X{next_point[0]:.3f} Y{next_point[1]:.3f} A{self.current_a:.4f} F{self.feed_rate} ; Cut to next point")
+                if angle_change > 15.0:  # Angle change > 15 degrees
+                    # Lift Z, rotate A, lower Z
+                    gcode_lines.append(f"G0 Z{self.safe_height} ; Raise Z for corner")
+                    new_a = self._calculate_z_rotation(current_point, next_point)
+                    self.current_a = new_a
+                    gcode_lines.append(f"G0 A{self.current_a:.4f} ; Rotate blade for new direction")
+                    gcode_lines.append(f"G0 Z{self.cutting_height} ; Lower Z to cutting height")
                 else:
-                    # Large change - keep current A (don't change it while cutting)
-                    gcode_lines.append(f"G1 X{next_point[0]:.3f} Y{next_point[1]:.3f} A{self.current_a:.4f} F{self.feed_rate} ; Cut to next point (A unchanged)")
+                    # No corner, just update A angle
+                    self.current_a = self._calculate_z_rotation(current_point, next_point)
+            else:
+                # First segment, just update A angle
+                self.current_a = self._calculate_z_rotation(current_point, next_point)
             
-            i += 1
+            # Cut to next point
+            gcode_lines.append(f"G1 X{next_point[0]:.3f} Y{next_point[1]:.3f} A{self.current_a:.4f} F{self.feed_rate} ; Cut to next point")
         
-        # For closed shapes, the main loop already handles all segments correctly
-        # No additional handling needed
-        
-        # Raise tool to safe height before homing
+        # Raise tool to safe height
         gcode_lines.append(f"G0 Z{self.safe_height} ; Raise tool to safe height")
-        
-        # Add blank line for spacing
         gcode_lines.append("")
         
         return gcode_lines
     
+    def _calculate_line_angle_change(self, p1: Tuple[float, float], p2: Tuple[float, float], p3: Tuple[float, float]) -> float:
+        """
+        Calculate angle change between two line segments: p1->p2 and p2->p3.
+        
+        Args:
+            p1, p2, p3: Three consecutive points
+            
+        Returns:
+            Angle change in degrees (0-180)
+        """
+        # Vector from p1 to p2
+        v1 = (p2[0] - p1[0], p2[1] - p1[1])
+        # Vector from p2 to p3  
+        v2 = (p3[0] - p2[0], p3[1] - p2[1])
+        
+        # Calculate magnitudes
+        mag1 = math.sqrt(v1[0]**2 + v1[1]**2)
+        mag2 = math.sqrt(v2[0]**2 + v2[1]**2)
+        
+        # Check for zero length vectors
+        if mag1 < 1e-10 or mag2 < 1e-10:
+            return 0.0
+        
+        # Calculate dot product
+        dot_product = v1[0] * v2[0] + v1[1] * v2[1]
+        
+        # Calculate angle using dot product
+        cos_angle = dot_product / (mag1 * mag2)
+        cos_angle = max(-1, min(1, cos_angle))  # Clamp to [-1, 1]
+        
+        angle_radians = math.acos(cos_angle)
+        angle_degrees = math.degrees(angle_radians)
+        
+        return angle_degrees
     
     def _is_genuine_corner(self, points: List[Tuple[float, float]], point_index: int) -> bool:
         """
@@ -449,35 +424,50 @@ class ToolpathGenerator:
 
 
 def main():
-    """Test the toolpath generator with the DXF processor output."""
+    """Test the toolpath generator with the integrated DXF processor."""
     # Initialize processors
     dxf_processor = DXFProcessor()
     toolpath_generator = ToolpathGenerator(
         cutting_height=-0.5,
         safe_height=0.0,
-        corner_angle_threshold=5.0,
-        feed_rate=1000.0,
-        plunge_rate=200.0
+        corner_angle_threshold=15.0,  # Match main_app setting
+        feed_rate=2500.0,
+        plunge_rate=500.0
     )
     
-    # Process DXF file
-    dxf_path = "corner2.dxf"
+    # Process DXF file (create a simple test shape since corner.dxf is not available)
+    # dxf_path = "/Users/peterbriggs/Code/fabric_cnc/corner.dxf"
+    
+    # Create a simple test rectangle shape manually
+    shapes = {
+        "test_rectangle": [
+            (1.0, 1.0),    # bottom-left
+            (12.0, 1.0),   # bottom-right
+            (12.0, 10.0),  # top-right
+            (1.0, 10.0),   # top-left
+            (1.0, 1.0)     # back to start
+        ]
+    }
     
     try:
-        # Get shapes from DXF processor
-        shapes = dxf_processor.process_dxf(dxf_path)
+        # Use the manually created test shapes instead of DXF processing
+        # shapes = dxf_processor.process_dxf(dxf_path)
         
         if not shapes:
-            print("No shapes found in DXF file")
+            print("No shapes found")
             return
         
         print(f"Processing {len(shapes)} shapes for toolpath generation...")
+        
+        # Show shape details
+        for name, points in shapes.items():
+            print(f"  {name}: {len(points)} points")
         
         # Generate toolpath
         gcode = toolpath_generator.generate_toolpath(shapes)
         
         # Save GCODE to file
-        output_filename = f"toolpath_{dxf_path.split('/')[-1].replace('.dxf', '.gcode')}"
+        output_filename = "toolpath_test_fast.gcode"
         with open(output_filename, 'w') as f:
             f.write(gcode)
         
