@@ -191,6 +191,7 @@ class SimulatedMotorController:
 # --- Real Motor Controller Wrapper ---
 class RealMotorController:
     def __init__(self):
+        # Use auto-detection by passing no port parameter
         self.motor_controller = GrblMotorController()
         self.lock = threading.Lock()
         self.is_homing = False

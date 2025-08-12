@@ -8,12 +8,151 @@ import subprocess
 import os
 import psutil
 import logging
+import glob
+import serial.tools.list_ports
 
 logger = logging.getLogger(__name__)
 
+def detect_grbl_controllers():
+    """
+    Auto-detect GRBL controllers on ACM* ports.
+    
+    Returns:
+        List of tuples: [(port, description), ...]
+    """
+    grbl_controllers = []
+    
+    # Method 1: Find ACM devices using glob
+    acm_devices = glob.glob('/dev/ttyACM*')
+    
+    # Method 2: Also check using pyserial's list_ports
+    all_ports = serial.tools.list_ports.comports()
+    for port in all_ports:
+        if 'ACM' in port.device:
+            if port.device not in acm_devices:
+                acm_devices.append(port.device)
+    
+    logger.info(f"Found ACM devices: {acm_devices}")
+    
+    # Test each ACM device for GRBL
+    for device in sorted(acm_devices):
+        try:
+            logger.info(f"Testing {device} for GRBL controller...")
+            
+            # Skip if device doesn't exist or has permission issues
+            if not os.path.exists(device):
+                logger.warning(f"Device {device} does not exist")
+                continue
+                
+            # Quick test for GRBL response
+            with serial.Serial(device, 115200, timeout=2) as test_serial:
+                time.sleep(1)  # Allow device to initialize
+                
+                # Clear any existing data in buffer
+                test_serial.reset_input_buffer()
+                
+                # Try multiple GRBL identification methods
+                test_commands = [
+                    b'$$\n',     # Request GRBL settings  
+                    b'$I\n',     # Request build info
+                    b'?\n'       # Request status
+                ]
+                
+                response = b''
+                for cmd in test_commands:
+                    test_serial.write(cmd)
+                    time.sleep(0.3)
+                    
+                    start_time = time.time()
+                    while time.time() - start_time < 1.5:
+                        if test_serial.in_waiting:
+                            response += test_serial.read(test_serial.in_waiting)
+                        time.sleep(0.1)
+                    
+                    # Stop testing if we already got a good response
+                    response_str = response.decode('utf-8', errors='ignore')
+                    if any(indicator in response_str.upper() for indicator in ['$0=', '$1=', 'GRBL', 'VER']):
+                        break
+                
+                response_str = response.decode('utf-8', errors='ignore')
+                logger.info(f"Response from {device}: {response_str[:100]}...")
+                
+                # Check for GRBL-specific responses (case insensitive)
+                grbl_indicators = ['$0=', '$1=', 'grbl', 'ver', '$$', '<idle', '<run', '<hold']
+                if any(indicator in response_str.lower() for indicator in grbl_indicators):
+                    description = f"GRBL Controller on {device}"
+                    grbl_controllers.append((device, description))
+                    logger.info(f"✓ GRBL controller detected on {device}")
+                else:
+                    logger.info(f"✗ No GRBL response from {device}")
+                    
+        except serial.SerialException as e:
+            logger.warning(f"Serial error testing {device}: {e}")
+        except PermissionError:
+            logger.warning(f"Permission denied accessing {device} - try running as root or adding user to dialout group")
+        except Exception as e:
+            logger.warning(f"Could not test {device}: {e}")
+    
+    return grbl_controllers
+
+def find_best_grbl_port():
+    """
+    Find the best GRBL controller port to use.
+    
+    Returns:
+        str: Best port device path, or None if no GRBL controller found
+    """
+    controllers = detect_grbl_controllers()
+    
+    if not controllers:
+        logger.warning("No GRBL controllers detected on ACM ports")
+        return None
+    
+    if len(controllers) == 1:
+        port, desc = controllers[0]
+        logger.info(f"Using single detected GRBL controller: {desc}")
+        return port
+    
+    # Multiple controllers found - prefer lower numbered ACM ports
+    controllers.sort(key=lambda x: x[0])  # Sort by device path
+    port, desc = controllers[0]
+    logger.info(f"Multiple GRBL controllers found, using first: {desc}")
+    
+    return port
+
+def get_grbl_controller_status():
+    """
+    Get status information about detected GRBL controllers.
+    
+    Returns:
+        dict: Status information including detected controllers and current connection
+    """
+    controllers = detect_grbl_controllers()
+    
+    status = {
+        'detected_controllers': controllers,
+        'count': len(controllers),
+        'recommended_port': find_best_grbl_port() if controllers else None
+    }
+    
+    return status
+
 class GrblMotorController:
-    def __init__(self, port='/dev/ttyACM1', baudrate=115200, debug_mode=False):
-        self.port = port
+    def __init__(self, port=None, baudrate=115200, debug_mode=False):
+        # Auto-detect GRBL controller if no port specified
+        if port is None:
+            logger.info("No port specified, attempting auto-detection of GRBL controller...")
+            auto_port = find_best_grbl_port()
+            if auto_port:
+                self.port = auto_port
+                logger.info(f"Auto-detected GRBL controller on {self.port}")
+            else:
+                # Fallback to default port if auto-detection fails
+                self.port = '/dev/ttyACM1'
+                logger.warning(f"Auto-detection failed, falling back to default port: {self.port}")
+        else:
+            self.port = port
+            
         self.baudrate = baudrate
         self.serial = None
         self.debug_mode = debug_mode
@@ -458,6 +597,22 @@ class GrblMotorController:
     def clear_response_callback(self):
         """Clear the response callback."""
         self.response_callback = None
+    
+    def get_connection_info(self):
+        """
+        Get information about the current GRBL connection.
+        
+        Returns:
+            dict: Connection information including port, status, etc.
+        """
+        return {
+            'port': self.port,
+            'baudrate': self.baudrate,
+            'connected': self.serial is not None and self.serial.is_open,
+            'machine_state': getattr(self, 'machine_state', 'Unknown'),
+            'is_homed': getattr(self, 'is_homed', False),
+            'position': self.position if hasattr(self, 'position') else [0, 0, 0, 0]
+        }
 
     def send_immediate(self, gcode_line):
         self.serial.write((gcode_line + "\n").encode('utf-8'))
