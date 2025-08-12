@@ -497,7 +497,7 @@ class FabricCNCApp:
             self.dxf_processor = DXFProcessor()
             self.toolpath_generator = ToolpathGenerator(
                 cutting_height=self.z_lower_limit,  # Use runtime adjustable depth
-                safe_height=-0.75,  # Safe height during toolpath execution
+                safe_height=0.0,  # Safe height during toolpath execution
                 corner_angle_threshold=15.0,  # 15-degree threshold for basic approach
                 feed_rate=3000.0,
                 plunge_rate=3000.0
