@@ -62,12 +62,19 @@ class ToolpathGenerator:
         # Add header
         gcode_lines.extend(self._generate_header())
         
+        # Sort shapes by position (left to right, top to bottom)
+        sorted_shapes = self._sort_shapes_by_position(shapes)
+        
         # Process each shape
-        for shape_name, points in shapes.items():
+        for shape_name, points in sorted_shapes:
             logger.info(f"Generating toolpath for {shape_name} with {len(points)} points")
             # Reset A position tracking for each new shape
             self.current_a = 0.0
-            shape_gcode = self._generate_shape_toolpath(shape_name, points)
+            
+            # Find best starting point (corner if available)
+            optimized_points = self._optimize_starting_point(points)
+            
+            shape_gcode = self._generate_shape_toolpath(shape_name, optimized_points)
             gcode_lines.extend(shape_gcode)
         
         # Add footer
@@ -423,6 +430,136 @@ class ToolpathGenerator:
         self.current_a = continuous_a
         
         return round(continuous_a, 4)
+    
+    def _sort_shapes_by_position(self, shapes: Dict[str, List[Tuple[float, float]]]) -> List[Tuple[str, List[Tuple[float, float]]]]:
+        """
+        Sort shapes by position: left to right, top to bottom.
+        
+        Args:
+            shapes: Dictionary of shape names to point lists
+            
+        Returns:
+            List of (shape_name, points) tuples sorted by position
+        """
+        def get_shape_position(shape_data):
+            name, points = shape_data
+            if not points:
+                return (0, 0)
+            
+            # Calculate bounding box center
+            min_x = min(p[0] for p in points)
+            max_x = max(p[0] for p in points)
+            min_y = min(p[1] for p in points)
+            max_y = max(p[1] for p in points)
+            
+            center_x = (min_x + max_x) / 2
+            center_y = (min_y + max_y) / 2
+            
+            # Sort by Y first (top to bottom), then X (left to right)
+            # Negate Y to sort top to bottom (higher Y values first)
+            return (-center_y, center_x)
+        
+        shape_list = list(shapes.items())
+        shape_list.sort(key=get_shape_position)
+        
+        logger.info(f"Sorted {len(shape_list)} shapes by position (left to right, top to bottom)")
+        return shape_list
+    
+    def _optimize_starting_point(self, points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+        """
+        Find the best starting point for a shape, preferring corners.
+        
+        Args:
+            points: Original list of points
+            
+        Returns:
+            Reordered list of points starting from the best point
+        """
+        if len(points) < 3:
+            return points
+        
+        # Find all corners in the shape
+        corners = []
+        for i in range(len(points)):
+            if self._is_corner_point(points, i):
+                angle = self._calculate_line_angle_change(
+                    points[(i-1) % len(points)], 
+                    points[i], 
+                    points[(i+1) % len(points)]
+                )
+                corners.append((i, angle, points[i]))
+        
+        if corners:
+            # Sort corners by angle change (largest first) to prefer sharp corners
+            corners.sort(key=lambda x: x[1], reverse=True)
+            best_start_idx = corners[0][0]
+            best_angle = corners[0][1]
+            best_point = corners[0][2]
+            logger.info(f"Starting shape from corner at index {best_start_idx} (angle={best_angle:.1f}°, point={best_point[0]:.3f},{best_point[1]:.3f}, found {len(corners)} corners)")
+            
+            # Log all corners found
+            for i, (idx, angle, pt) in enumerate(corners[:5]):  # Show first 5 corners
+                logger.info(f"  Corner {i+1}: index {idx}, angle {angle:.1f}°, point ({pt[0]:.3f},{pt[1]:.3f})")
+        else:
+            # No corners found, start from the leftmost point
+            best_start_idx = min(range(len(points)), key=lambda i: points[i][0])
+            best_point = points[best_start_idx]
+            logger.info(f"No corners found, starting from leftmost point at index {best_start_idx} ({best_point[0]:.3f},{best_point[1]:.3f})")
+        
+        # Reorder points to start from the best starting point
+        if best_start_idx == 0:
+            return points
+        
+        # Check if this is a closed shape (first and last points are close)
+        first_point = points[0]
+        last_point = points[-1]
+        is_closed = (abs(first_point[0] - last_point[0]) < 1e-6 and 
+                     abs(first_point[1] - last_point[1]) < 1e-6)
+        
+        if is_closed:
+            # For closed shapes, rotate the list and ensure closure
+            reordered = points[best_start_idx:-1] + points[:best_start_idx] + [points[best_start_idx]]
+            logger.info(f"Reordered closed shape: original start ({points[0][0]:.3f},{points[0][1]:.3f}) -> new start ({reordered[0][0]:.3f},{reordered[0][1]:.3f})")
+        else:
+            # For open shapes, just start from the best point
+            reordered = points[best_start_idx:] + points[:best_start_idx]
+            logger.info(f"Reordered open shape: original start ({points[0][0]:.3f},{points[0][1]:.3f}) -> new start ({reordered[0][0]:.3f},{reordered[0][1]:.3f})")
+        
+        return reordered
+    
+    def _is_corner_point(self, points: List[Tuple[float, float]], point_index: int) -> bool:
+        """
+        Check if a point is a corner using angle detection.
+        
+        Args:
+            points: List of points
+            point_index: Index of point to check
+            
+        Returns:
+            True if the point is a corner
+        """
+        num_points = len(points)
+        if num_points < 3:
+            return False
+        
+        # Handle wraparound for closed shapes
+        prev_idx = (point_index - 1) % num_points
+        next_idx = (point_index + 1) % num_points
+        
+        # Skip if we're at the same point due to wraparound
+        if prev_idx == point_index or next_idx == point_index:
+            return False
+        
+        prev_point = points[prev_idx]
+        current_point = points[point_index]
+        next_point = points[next_idx]
+        
+        # Calculate angle change
+        angle_change = self._calculate_line_angle_change(prev_point, current_point, next_point)
+        
+        # Use the configured corner angle threshold
+        threshold_degrees = math.degrees(self.corner_angle_threshold_radians)
+        return angle_change > threshold_degrees
 
 
 def main():
@@ -438,7 +575,7 @@ def main():
     )
     
     # Process DXF file
-    dxf_path = "/Users/peterbriggs/Code/fabric_cnc/corner.dxf"
+    dxf_path = "/Users/peterbriggs/Downloads/big_test.dxf"
     
     try:
         # Get shapes from DXF processor (now includes positioning and merging)
