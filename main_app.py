@@ -1880,13 +1880,9 @@ class FabricCNCApp:
         # Apply the delta to the jogged axis
         target_positions[grbl_axis] = new_pos
         
-        # Move to target positions (all axes commanded simultaneously)
-        self.motor_ctrl.move_to_position(
-            target_positions['X'], 
-            target_positions['Y'], 
-            target_positions['Z'], 
-            target_positions['A']
-        )
+        # Send G90 absolute positioning command to move all axes simultaneously
+        gcode_command = f"G90 G1 X{target_positions['X']:.3f} Y{target_positions['Y']:.3f} Z{target_positions['Z']:.3f} A{target_positions['A']:.3f} F100"
+        self.motor_ctrl.send(gcode_command)
         # Position update loop will handle canvas redraw automatically
 
 
