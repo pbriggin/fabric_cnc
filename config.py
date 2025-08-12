@@ -60,7 +60,7 @@ class Config:
         }
         
         # Work Area Configuration
-        self.work_area = WorkArea(x=68, y=45)  # 68" x 45" work area (matches APP_CONFIG)
+        self.work_area = WorkArea(x=68, y=44)  # 68" x 44" work area (matches APP_CONFIG)
         
         # Motion Configuration
         self.motion = MotionConfig(
@@ -222,7 +222,7 @@ MOTOR_CONFIG = {
 # Machine configuration - All machine limits and parameters
 MACHINE_CONFIG = {
     'MAX_X': 68,  # Maximum X travel in inches (matches work area)
-    'MAX_Y': 45,  # Maximum Y travel in inches (matches work area)
+    'MAX_Y': 44,  # Maximum Y travel in inches (matches work area)
     'HOMING_OFFSET': 0.197,  # Distance to move after hitting home sensor (5mm = 0.197 inches)
     'VERIFICATION_DISTANCE': 0.394  # Distance to move for verification (10mm = 0.394 inches)
 }
@@ -232,7 +232,7 @@ MACHINE_CONFIG = {
 # Application configuration
 APP_CONFIG = {
     'X_MAX_INCH': 68,  # 68 inches
-    'Y_MAX_INCH': 45,  # 45 inches
+    'Y_MAX_INCH': 44,  # 44 inches
     'Z_MAX_INCH': 2.5,  # 2.5 inches
     'Z_UP_INCH': -0.75,  # -0.75 inches
     'Z_DOWN_INCH': -0.75,  # Same as hover height for testing

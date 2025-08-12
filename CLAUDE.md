@@ -41,7 +41,7 @@ pip install -e .[dev]
 **config.py** - Centralized configuration management containing:
 - GPIO pin assignments for 5 stepper motors (X, Y1, Y2, Z_LIFT, A)
 - Motor steps per inch and direction settings
-- Work area dimensions (68" x 45")
+- Work area dimensions (68" x 44")
 - Motion parameters (speed, acceleration)
 - Hall effect sensor configurations with debounce settings
 
@@ -60,7 +60,7 @@ pip install -e .[dev]
 ### Hardware Configuration
 
 The system controls a 5-axis fabric cutting CNC machine:
-- **X/Y axes**: Fabric positioning (68" x 45" work area)
+- **X/Y axes**: Fabric positioning (68" x 44" work area)
 - **Y1/Y2**: Dual Y-axis motors for gantry stability
 - **Z_LIFT**: Cutting head vertical movement
 - **A**: Cutting blade rotation for angle cuts

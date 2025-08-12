@@ -126,7 +126,7 @@ class SimulatedMotorController:
         if axis == 'X':
             return max(-68.0, min(value, 68.0))  # 68 inches max X travel
         elif axis == 'Y':
-            return max(-45.0, min(value, 45.0))  # 45 inches max Y travel
+            return max(-44.0, min(value, 44.0))  # 44 inches max Y travel
         elif axis == 'Z':
             return max(-3.0, min(value, 0.0))  # Z: -3.0 to 0.0 inches (main app handles runtime limit)
         elif axis == 'A':
@@ -211,7 +211,7 @@ class RealMotorController:
         if axis == 'X':
             return max(-68.0, min(value, 68.0))  # 68 inches max X travel
         elif axis == 'Y':
-            return max(-45.0, min(value, 45.0))  # 45 inches max Y travel
+            return max(-44.0, min(value, 44.0))  # 44 inches max Y travel
         elif axis == 'Z':
             return max(-3.0, min(value, 0.0))  # Z: -3.0 to 0.0 inches (main app handles runtime limit)
         elif axis == 'A':
@@ -778,7 +778,7 @@ class FabricCNCApp:
         if pos is None:
             pos = self.motor_ctrl.get_position()
         x_max_inches = 68.0  # 68 inches max X travel
-        y_max_inches = 45.0  # 45 inches max Y travel
+        y_max_inches = 44.0  # 44 inches max Y travel
         x = max(0.0, min(pos['X'], x_max_inches))
         y = max(0.0, min(pos['Y'], y_max_inches))
         clamped_pos = {'X': x, 'Y': y}
@@ -858,7 +858,7 @@ class FabricCNCApp:
         
         # Configure plot dimensions from config file
         plot_width_in = 68.0  # 68 inches work area width
-        plot_height_in = 45.0  # 45 inches work area height
+        plot_height_in = 44.0  # 44 inches work area height
         
         # Get buffer from config file
         buffer_px = config.APP_CONFIG['PLOT_BUFFER_PX']
@@ -941,7 +941,7 @@ class FabricCNCApp:
         # Convert inches to canvas coordinates with home at bottom-left
         # Configure plot dimensions from config file
         plot_width_in = 68.0  # 68 inches work area width
-        plot_height_in = 45.0  # 45 inches work area height
+        plot_height_in = 44.0  # 44 inches work area height
         
         # Get buffer from config file
         buffer_px = config.APP_CONFIG['PLOT_BUFFER_PX']
@@ -1719,8 +1719,8 @@ class FabricCNCApp:
             )
         
         # Check if coordinates are within machine limits
-        if abs(x_in) > 68.0 or abs(y_in) > 45.0:
-            logger.warning(f"Coordinates beyond machine limits! X={x_in:.2f}in (limit: ±68.0in), Y={y_in:.2f}in (limit: ±45.0in)")
+        if abs(x_in) > 68.0 or abs(y_in) > 44.0:
+            logger.warning(f"Coordinates beyond machine limits! X={x_in:.2f}in (limit: ±68.0in), Y={y_in:.2f}in (limit: ±44.0in)")
         
         # Update position tracking and schedule canvas redraw
         self._last_position = self.motor_ctrl.get_position().copy()
