@@ -634,7 +634,7 @@ class FabricCNCApp:
         
         # Jog size slider
         ctk.CTkLabel(motor_section, text="Jog Size:", font=("Arial", 12, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).grid(row=6, column=0, columnspan=2, pady=(UI_PADDING['SMALL'], 0))
-        jog_slider = ctk.CTkSlider(motor_section, from_=1, to=50, number_of_steps=49, command=self._on_jog_slider)
+        jog_slider = ctk.CTkSlider(motor_section, from_=1, to=100, number_of_steps=99, command=self._on_jog_slider)
         jog_slider.grid(row=7, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="ew")
         jog_slider.set(10)  # Set to 1.0 inch (10 * 0.1)
         
