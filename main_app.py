@@ -297,6 +297,13 @@ class RealMotorController:
     def sync_position(self):
         """Position syncing now handled by get_position() from GRBL"""
     
+    def send(self, gcode_command):
+        """Send a G-code command directly to the GRBL controller."""
+        try:
+            self.motor_controller.send(gcode_command)
+        except Exception as e:
+            logger.error(f"Failed to send G-code command '{gcode_command}': {e}")
+    
     def get_sensor_states(self):
         """Get current sensor states (not applicable for GRBL)."""
         return {}
