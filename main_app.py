@@ -428,7 +428,7 @@ class FabricCNCApp:
         self.root.configure(bg=UI_COLORS['BACKGROUND'])
         self.jog_size = 1.0  # Default to 1 inch
         self.jog_size_var = ctk.DoubleVar(value=1.0)  # Default to 1 inch
-        self._jog_slider_scale = 0.1  # Scale factor for slider (0.1 inch increments)
+        self._jog_slider_scale = 0.05  # Scale factor for slider (0.05 inch increments)
         
         # Z lower limit control
         self.z_lower_limit = -0.25  # Runtime adjustable Z lower limit
@@ -1859,9 +1859,6 @@ class FabricCNCApp:
         elif axis == 'Z':
             if new_pos > 0:
                 logger.warning(f"Z jog blocked: would move to {new_pos:.3f} (max: 0)")
-                return
-            elif new_pos < self.z_lower_limit:
-                logger.warning(f"Z jog blocked: would move to {new_pos:.3f} (min: {self.z_lower_limit})")
                 return
         elif axis == 'A':
             # Allow continuous rotation - remove bounds checking for A-axis
