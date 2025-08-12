@@ -11,32 +11,31 @@ import customtkinter as ctk
 import threading
 import time
 import math
-import tkinter.filedialog as filedialog
-import re
 
-# Try to import ezdxf for DXF parsing
-try:
-    import ezdxf
-    EZDXF_AVAILABLE = True
-except ImportError:
-    ezdxf = None
-    EZDXF_AVAILABLE = False
+# Lazy imports - only import when needed
+def lazy_import_filedialog():
+    import tkinter.filedialog as filedialog
+    return filedialog
 
-# Import motor control modules
-try:
-    from motor_control.grbl_motor_controller import GrblMotorController
-    MOTOR_IMPORTS_AVAILABLE = True
-except ImportError:
-    MOTOR_IMPORTS_AVAILABLE = False
+def lazy_import_motor_control():
+    try:
+        from motor_control.grbl_motor_controller import GrblMotorController
+        return GrblMotorController, True
+    except ImportError:
+        return None, False
 
-# Import new DXF processing and toolpath generation modules
-try:
-    from dxf_processing.dxf_processor import DXFProcessor
-    from toolpath_planning.toolpath_generator import ToolpathGenerator
-    from toolpath_planning.gcode_visualizer import GCodeVisualizer
-    DXF_TOOLPATH_IMPORTS_AVAILABLE = True
-except ImportError:
-    DXF_TOOLPATH_IMPORTS_AVAILABLE = False
+def lazy_import_dxf_processing():
+    try:
+        from dxf_processing.dxf_processor import DXFProcessor
+        from toolpath_planning.toolpath_generator import ToolpathGenerator
+        from toolpath_planning.gcode_visualizer import GCodeVisualizer
+        return DXFProcessor, ToolpathGenerator, GCodeVisualizer, True
+    except ImportError:
+        return None, None, None, False
+
+# Quick availability checks without importing
+MOTOR_IMPORTS_AVAILABLE = True  # Assume available, check on use
+DXF_TOOLPATH_IMPORTS_AVAILABLE = True  # Assume available, check on use
 
 
 # Import configuration
@@ -191,6 +190,11 @@ class SimulatedMotorController:
 # --- Real Motor Controller Wrapper ---
 class RealMotorController:
     def __init__(self):
+        # Lazy import and initialize motor controller
+        GrblMotorController, available = lazy_import_motor_control()
+        if not available or GrblMotorController is None:
+            raise ImportError("GRBL motor controller not available")
+        
         # Use auto-detection by passing no port parameter
         self.motor_controller = GrblMotorController()
         self.lock = threading.Lock()
@@ -443,26 +447,14 @@ class FabricCNCApp:
         # Performance optimization: Canvas redraw debouncing
         self._canvas_redraw_pending = False
         self._last_position = {'X': 0.0, 'Y': 0.0, 'Z': 0.0, 'A': 0.0}
-        self._position_update_threshold = 0.01  # Only update if position changes by > 0.01 inches
+        self._position_update_threshold = 0.05  # Only update if position changes by > 0.05 inches (reduced frequency)
         
-        # Initialize new DXF processing and toolpath generation
-        if DXF_TOOLPATH_IMPORTS_AVAILABLE:
-            self.dxf_processor = DXFProcessor()
-            self.toolpath_generator = ToolpathGenerator(
-                cutting_height=self.z_lower_limit,  # Use runtime adjustable depth
-                safe_height=-0.75,  # Safe height during toolpath execution
-                corner_angle_threshold=15.0,  # 15-degree threshold for basic approach
-                feed_rate=3000.0,
-                plunge_rate=3000.0
-            )
-            # Smooth motion executor not needed with GRBL - GRBL handles smooth motion internally
-            self.smooth_motion_executor = None
-            self.gcode_visualizer = GCodeVisualizer()
-        else:
-            self.dxf_processor = None
-            self.toolpath_generator = None
-            self.smooth_motion_executor = None
-            self.gcode_visualizer = None
+        # Defer DXF processing initialization until needed
+        self.dxf_processor = None
+        self.toolpath_generator = None
+        self.smooth_motion_executor = None
+        self.gcode_visualizer = None
+        self._dxf_initialized = False
         
         # Initialize DXF-related attributes (legacy)
         self.dxf_doc = None
@@ -473,12 +465,49 @@ class FabricCNCApp:
         self.processed_shapes = {}
         self.generated_gcode = ""
         self.gcode_file_path = ""
+        # Setup critical UI first
         self._setup_ui()
-        self._bind_arrow_keys()
-        self._update_position_and_canvas()  # Start the synchronized update loop
+        
+        # Defer non-critical initialization
+        self.root.after(10, self._setup_deferred_initialization)
+        
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         # Force fullscreen after UI setup
         self.root.after(100, lambda: self.root.attributes('-fullscreen', True))
+    
+    def _setup_deferred_initialization(self):
+        """Initialize non-critical components after UI is visible."""
+        try:
+            self._bind_arrow_keys()
+            self._update_position_and_canvas()  # Start the synchronized update loop
+        except Exception as e:
+            logger.error(f"Error in deferred initialization: {e}")
+            # Continue anyway, don't block startup
+    
+    def _initialize_dxf_processing(self):
+        """Lazy initialization of DXF processing components."""
+        if self._dxf_initialized:
+            return True
+            
+        try:
+            DXFProcessor, ToolpathGenerator, GCodeVisualizer, available = lazy_import_dxf_processing()
+            if not available:
+                return False
+                
+            self.dxf_processor = DXFProcessor()
+            self.toolpath_generator = ToolpathGenerator(
+                cutting_height=self.z_lower_limit,  # Use runtime adjustable depth
+                safe_height=-0.75,  # Safe height during toolpath execution
+                corner_angle_threshold=15.0,  # 15-degree threshold for basic approach
+                feed_rate=3000.0,
+                plunge_rate=3000.0
+            )
+            self.gcode_visualizer = GCodeVisualizer()
+            self._dxf_initialized = True
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize DXF processing: {e}")
+            return False
 
     def _setup_ui(self):
         # App Bar
@@ -557,8 +586,8 @@ class FabricCNCApp:
         self.canvas_scale = 1.0
         self.canvas_offset = (0, 0)
         
-        # Draw initial canvas
-        self._schedule_canvas_redraw()
+        # Defer initial canvas draw to speed up startup
+        self.root.after(100, self._schedule_canvas_redraw)
 
 
         # === RIGHT COLUMN: Motor Controls ===
@@ -1192,12 +1221,14 @@ class FabricCNCApp:
     # --- DXF Import/Toolpath ---
     def _import_dxf(self):
         """Import DXF file using the new DXF processor."""
-        if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
+        # Initialize DXF processing if needed
+        if not self._initialize_dxf_processing():
             logger.error("DXF processing modules not available. Please install required dependencies.")
             self.status_label.configure(text=self._truncate_status("Missing DXF deps"), text_color="red")
             return
         
         initial_dir = os.path.expanduser("~/Desktop/DXF")
+        filedialog = lazy_import_filedialog()
         file_path = filedialog.askopenfilename(initialdir=initial_dir, filetypes=[("DXF Files", "*.dxf")])
         if not file_path:
             return
@@ -1483,7 +1514,8 @@ class FabricCNCApp:
 
     def _preview_toolpath(self):
         """Preview toolpath with arrows and corner analysis in the main GUI."""
-        if not DXF_TOOLPATH_IMPORTS_AVAILABLE:
+        # Initialize DXF processing if needed
+        if not self._initialize_dxf_processing():
             logger.error("G-code visualization modules not available.")
             self.status_label.configure(text=self._truncate_status("Missing viz deps"), text_color="red")
             return
@@ -1893,7 +1925,7 @@ class FabricCNCApp:
             self._last_position = pos.copy()
             self._schedule_canvas_redraw(pos)
         
-        self.root.after(500, self._update_position_and_canvas)  # Update every 500ms
+        self.root.after(1000, self._update_position_and_canvas)  # Update every 1000ms for better performance
 
     def _update_position_display(self, pos=None):
         if pos is None:
