@@ -639,7 +639,7 @@ class FabricCNCApp:
         jog_slider.set(10)  # Set to 1.0 inch (10 * 0.1)
         
         # Jog size value display
-        self.jog_size_label = ctk.CTkLabel(motor_section, text="1.0 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
+        self.jog_size_label = ctk.CTkLabel(motor_section, text="0.50 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
         self.jog_size_label.grid(row=8, column=0, columnspan=2, pady=(0, UI_PADDING['SMALL']))
         
         # Z lower limit slider
@@ -1869,7 +1869,24 @@ class FabricCNCApp:
             
         
         # Perform the jog if within bounds
-        self.motor_ctrl.jog(grbl_axis, delta)
+        # Command all motors to maintain current position, with only the jogged axis moving
+        target_positions = {
+            'X': current_pos.get('X', 0),
+            'Y': current_pos.get('Y', 0), 
+            'Z': current_pos.get('Z', 0),
+            'A': current_pos.get('A', 0)
+        }
+        
+        # Apply the delta to the jogged axis
+        target_positions[grbl_axis] = new_pos
+        
+        # Move to target positions (all axes commanded simultaneously)
+        self.motor_ctrl.move_to_position(
+            target_positions['X'], 
+            target_positions['Y'], 
+            target_positions['Z'], 
+            target_positions['A']
+        )
         # Position update loop will handle canvas redraw automatically
 
 
@@ -1945,7 +1962,7 @@ class FabricCNCApp:
         size_inches = float(value) * self._jog_slider_scale
         self.jog_size_var.set(size_inches)
         # Update the display label
-        self.jog_size_label.configure(text=f"{size_inches:.1f} in")
+        self.jog_size_label.configure(text=f"{size_inches:.2f} in")
         # Update the actual jog size
         self.jog_size = size_inches  # Already in inches
         
