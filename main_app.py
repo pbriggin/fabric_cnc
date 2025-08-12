@@ -644,7 +644,7 @@ class FabricCNCApp:
         
         # Z lower limit slider
         ctk.CTkLabel(motor_section, text="Z Lower Limit:", font=("Arial", 12, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).grid(row=9, column=0, columnspan=2, pady=(UI_PADDING['SMALL'], 0))
-        z_limit_slider = ctk.CTkSlider(motor_section, from_=0.25, to=1.25, number_of_steps=20, command=self._on_z_limit_slider)
+        z_limit_slider = ctk.CTkSlider(motor_section, from_=0.25, to=1.5, number_of_steps=25, command=self._on_z_limit_slider)
         z_limit_slider.grid(row=10, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="ew")
         z_limit_slider.set(0.25)  # Set to -0.25 inch (0.25 on slider)
         
