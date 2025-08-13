@@ -246,12 +246,8 @@ class RealMotorController:
                 }
                 feedrate = axis_feedrates.get(axis, 100)
                 
-                if axis == 'A':
-                    # Convert rotation from degrees to inches for GRBL (1 inch = 360 degrees)
-                    delta_grbl = actual_delta / 360.0
-                else:
-                    # Linear axes - send inches directly to GRBL
-                    delta_grbl = actual_delta
+                # Send delta directly to GRBL for all axes
+                delta_grbl = actual_delta
                 
                 self.motor_controller.jog(axis, delta_grbl, feedrate)
                 time.sleep(0.2)  # Wait for GRBL to process
@@ -1876,21 +1872,7 @@ class FabricCNCApp:
             
         
         # Perform the jog if within bounds
-        # Command all motors to maintain current position, with only the jogged axis moving
-        target_positions = {
-            'X': current_pos.get('X', 0),
-            'Y': current_pos.get('Y', 0), 
-            'Z': current_pos.get('Z', 0),
-            'A': current_pos.get('A', 0)
-        }
-        
-        # Apply the delta to the jogged axis
-        target_positions[grbl_axis] = new_pos
-        
-        # A-axis is already in degrees from get_position(), so use directly
-        # Send G90 absolute positioning command to move all axes simultaneously
-        gcode_command = f"G90 G1 X{target_positions['X']:.3f} Y{target_positions['Y']:.3f} Z{target_positions['Z']:.3f} A{target_positions['A']:.3f} F100"
-        self.motor_ctrl.send(gcode_command)
+        self.motor_ctrl.jog(grbl_axis, delta)
         # Position update loop will handle canvas redraw automatically
 
 
