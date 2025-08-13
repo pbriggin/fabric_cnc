@@ -502,8 +502,8 @@ class FabricCNCApp:
                 cutting_height=self.z_lower_limit,  # Use runtime adjustable depth
                 safe_height=0.0,  # Safe height during toolpath execution
                 corner_angle_threshold=15.0,  # 15-degree threshold for basic approach
-                feed_rate=3000.0,
-                plunge_rate=3000.0
+                feed_rate=6000.0,  # Increased from 3000 for faster cutting
+                plunge_rate=6000.0  # Increased from 3000 for faster plunges
             )
             self.gcode_visualizer = GCodeVisualizer()
             self._dxf_initialized = True
