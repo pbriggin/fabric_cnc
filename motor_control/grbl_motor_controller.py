@@ -364,10 +364,10 @@ class GrblMotorController:
                 "$103": "254.00000",  # A steps/inch
                 
                 # Maximum rates (inches/min) - Realistic grblHAL limits
-                "$110": "3000.000",   # X max rate (realistic high performance)
-                "$111": "3000.000",   # Y max rate (realistic high performance)
-                "$112": "3000.000",   # Z max rate (realistic high performance)
-                "$113": "3000.000",   # A max rate (realistic high performance)
+                "$110": "6000.000",   # X max rate (increased for faster cutting)
+                "$111": "6000.000",   # Y max rate (increased for faster cutting)
+                "$112": "3000.000",   # Z max rate (keep conservative for safety)
+                "$113": "6000.000",   # A max rate (increased for faster rotation)
                 
                 # Acceleration (inches/sec²) - Reduced for smoother motion
                 "$120": "300.000",    # X acceleration (reduced for smoother moves)
