@@ -1160,64 +1160,34 @@ class FabricCNCApp:
                     fill='red', outline='darkred', tags='toolpath'
                 )
         
-        # Draw tool orientation arrows
-        if self.toolpath_data.get('orientations'):
-            orientations = self.toolpath_data['orientations']
-            positions = self.toolpath_data.get('positions', [])
-            
-            # Draw arrows every 1.0 inches along the path
-            arrow_spacing_inches = 1.0
-            arrow_indices = []
-            
-            if len(positions) > 1:
-                # Calculate cumulative distance along the path
-                cumulative_distance = 0.0
-                last_pos = positions[0]
+        # Draw tool orientation arrows only where A-axis moved and plunged
+        if self.toolpath_data.get('arrow_positions'):
+            # Draw arrows only at positions where A-axis rotated and then plunged
+            for x_in, y_in, a_inches in self.toolpath_data['arrow_positions']:
+                x_canvas, y_canvas = self._inches_to_canvas(x_in, y_in)
                 
-                for i, pos in enumerate(positions):
-                    if i > 0:
-                        # Calculate distance to previous point
-                        dx = pos[0] - last_pos[0]
-                        dy = pos[1] - last_pos[1]
-                        segment_distance = math.sqrt(dx*dx + dy*dy)
-                        cumulative_distance += segment_distance
-                        
-                        # Check if we should place an arrow here
-                        if cumulative_distance >= arrow_spacing_inches:
-                            arrow_indices.append(i)
-                            cumulative_distance = 0.0  # Reset for next 1.0" interval
-                    
-                    last_pos = pos
-            
-            # Drawing toolpath arrows
-            for i in arrow_indices:
-                if i < len(positions):
-                    x_in, y_in = positions[i]
-                    a_inches = orientations[i]  # A-axis value in inches
-                    x_canvas, y_canvas = self._inches_to_canvas(x_in, y_in)
-                    
-                    # Convert A-axis inches to degrees: 1 inch = 360 degrees
-                    a_deg = a_inches * 360.0
-                    
-                    # Calculate arrow direction
-                    arrow_length = 15
-                    # Match toolpath generator: negate angle and add 90 degrees
-                    adjusted_angle_deg = -a_deg + 90.0
-                    angle_rad = math.radians(adjusted_angle_deg)
-                    
-                    # Account for canvas Y-axis inversion (Tkinter Y is top-down)
-                    # In machine coordinates: positive Y is up, positive X is right
-                    # In canvas coordinates: positive Y is down, positive X is right
-                    # So we need to flip the Y component of the arrow
-                    dx = arrow_length * math.cos(angle_rad)
-                    dy = -arrow_length * math.sin(angle_rad)  # Flip Y component
-                    
-                    # Draw arrow
-                    self.canvas.create_line(
-                        x_canvas, y_canvas,
-                        x_canvas + dx, y_canvas + dy,
-                        fill='green', width=3, arrow='last', tags='toolpath'
-                    )
+                # Convert A-axis inches to degrees: 1 inch = 360 degrees
+                a_deg = a_inches * 360.0
+                
+                # Calculate arrow direction
+                arrow_length = 15
+                # Match toolpath generator: negate angle and add 90 degrees
+                adjusted_angle_deg = -a_deg + 90.0
+                angle_rad = math.radians(adjusted_angle_deg)
+                
+                # Account for canvas Y-axis inversion (Tkinter Y is top-down)
+                # In machine coordinates: positive Y is up, positive X is right
+                # In canvas coordinates: positive Y is down, positive X is right
+                # So we need to flip the Y component of the arrow
+                dx = arrow_length * math.cos(angle_rad)
+                dy = -arrow_length * math.sin(angle_rad)  # Flip Y component
+                
+                # Draw arrow with distinctive styling for drag knife orientation
+                self.canvas.create_line(
+                    x_canvas, y_canvas,
+                    x_canvas + dx, y_canvas + dy,
+                    fill='green', width=3, arrow='last', tags='toolpath'
+                )
             
             # Drew toolpath arrows
 
@@ -1557,7 +1527,8 @@ class FabricCNCApp:
             'positions': [],
             'orientations': [],
             'corners': [],
-            'z_changes': []
+            'z_changes': [],
+            'arrow_positions': []  # Only positions where arrows should be shown
         }
         
         # Current position tracking
@@ -1566,6 +1537,11 @@ class FabricCNCApp:
         current_z = 0.0
         current_a = 0.0
         pending_corner = False
+        
+        # Drag knife state tracking
+        previous_a = 0.0
+        a_just_changed = False
+        z_raised_for_rotation = False
         
         with open(gcode_file_path, 'r') as f:
             for line_num, line in enumerate(f, 1):
@@ -1586,9 +1562,25 @@ class FabricCNCApp:
                 if y_match:
                     current_y = float(y_match.group(1))
                 if z_match:
-                    current_z = float(z_match.group(1))
+                    new_z = float(z_match.group(1))
+                    # Check if Z is being raised (likely for rotation)
+                    if new_z > current_z and current_z < 0:  # Rising from cutting height
+                        z_raised_for_rotation = True
+                    # Check if Z is plunging after A-axis change
+                    elif new_z < current_z and a_just_changed and z_raised_for_rotation:
+                        # This is a plunge after A-axis rotation - mark for arrow
+                        self.toolpath_data['arrow_positions'].append((current_x, current_y, current_a))
+                        a_just_changed = False
+                        z_raised_for_rotation = False
+                    current_z = new_z
+                
                 if a_match:
-                    current_a = float(a_match.group(1))
+                    new_a = float(a_match.group(1))
+                    # Check if A-axis actually changed (with small tolerance)
+                    if abs(new_a - previous_a) > 0.01:
+                        a_just_changed = True
+                        previous_a = new_a
+                    current_a = new_a
                 
                 # Check if this is a movement command
                 if line.startswith('G0') or line.startswith('G1'):
