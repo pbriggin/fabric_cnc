@@ -434,8 +434,8 @@ class FabricCNCApp:
         self._jog_slider_scale = 0.05  # Scale factor for slider (0.05 inch increments)
         
         # Z lower limit control
-        self.z_lower_limit = -0.25  # Runtime adjustable Z lower limit
-        self.z_lower_limit_var = ctk.DoubleVar(value=-0.25)
+        self.z_lower_limit = -2.0  # Runtime adjustable Z lower limit
+        self.z_lower_limit_var = ctk.DoubleVar(value=-2.0)
         self._arrow_key_state = {}
         self._arrow_key_after_ids = {}
         self._current_toolpath_idx = [0, 0]
@@ -500,7 +500,7 @@ class FabricCNCApp:
             self.dxf_processor = DXFProcessor()
             self.toolpath_generator = ToolpathGenerator(
                 cutting_height=self.z_lower_limit,  # Use runtime adjustable depth
-                safe_height=0.0,  # Safe height during toolpath execution
+                safe_height=-2.0,  # Safe height during toolpath execution
                 corner_angle_threshold=15.0,  # 15-degree threshold for basic approach
                 feed_rate=6000.0,  # Increased from 3000 for faster cutting
                 plunge_rate=6000.0  # Increased from 3000 for faster plunges
@@ -639,21 +639,27 @@ class FabricCNCApp:
         ctk.CTkLabel(motor_section, text="Jog Size:", font=("Arial", 12, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).grid(row=6, column=0, columnspan=2, pady=(UI_PADDING['SMALL'], 0))
         jog_slider = ctk.CTkSlider(motor_section, from_=1, to=100, number_of_steps=99, command=self._on_jog_slider)
         jog_slider.grid(row=7, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="ew")
-        jog_slider.set(10)  # Set to 1.0 inch (10 * 0.1)
+        jog_slider.set(20)  # Set to 1.0 inch (20 * 0.05)
         
         # Jog size value display
-        self.jog_size_label = ctk.CTkLabel(motor_section, text="0.50 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
+        self.jog_size_label = ctk.CTkLabel(motor_section, text="1.00 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
         self.jog_size_label.grid(row=8, column=0, columnspan=2, pady=(0, UI_PADDING['SMALL']))
+        
+        # Initialize slider to sync all jog size variables
+        self._on_jog_slider(20)
         
         # Z lower limit slider
         ctk.CTkLabel(motor_section, text="Z Lower Limit:", font=("Arial", 12, "bold"), text_color=UI_COLORS['PRIMARY_COLOR']).grid(row=9, column=0, columnspan=2, pady=(UI_PADDING['SMALL'], 0))
-        z_limit_slider = ctk.CTkSlider(motor_section, from_=0.25, to=1.5, number_of_steps=25, command=self._on_z_limit_slider)
+        z_limit_slider = ctk.CTkSlider(motor_section, from_=2.0, to=3.0, number_of_steps=20, command=self._on_z_limit_slider)
         z_limit_slider.grid(row=10, column=0, columnspan=2, padx=UI_PADDING['SMALL'], pady=UI_PADDING['SMALL'], sticky="ew")
-        z_limit_slider.set(0.25)  # Set to -0.25 inch (0.25 on slider)
+        z_limit_slider.set(2.0)  # Set to -2.0 inch (2.0 on slider)
         
         # Z lower limit value display
-        self.z_limit_label = ctk.CTkLabel(motor_section, text="-0.25 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
+        self.z_limit_label = ctk.CTkLabel(motor_section, text="-2.00 in", font=("Arial", 12, "bold"), text_color=UI_COLORS['ON_SURFACE'])
         self.z_limit_label.grid(row=11, column=0, columnspan=2, pady=(0, UI_PADDING['SMALL']))
+        
+        # Initialize Z limit slider to sync all variables
+        self._on_z_limit_slider(2.0)
         
         # Home controls section
         home_section = ctk.CTkFrame(self.right_column, fg_color="#d0d0d0", corner_radius=8)
@@ -1953,7 +1959,7 @@ class FabricCNCApp:
         self.jog_size = size_inches  # Already in inches
         
     def _on_z_limit_slider(self, value):
-        # Convert slider value to negative Z limit (0.25 to 1.25 -> -0.25 to -1.25)
+        # Convert slider value to negative Z limit (2.0 to 3.0 -> -2.0 to -3.0)
         limit_depth = -float(value)
         self.z_lower_limit_var.set(limit_depth)
         # Update the display label with 0.05" precision

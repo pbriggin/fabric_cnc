@@ -25,7 +25,7 @@ class ToolpathGenerator:
     
     def __init__(self, 
                  cutting_height: float = -0.5,  # Plunge depth below work surface
-                 safe_height: float = 0.0,  # Safe height during toolpath execution
+                 safe_height: float = -2.0,  # Safe height during toolpath execution
                  corner_angle_threshold: float = 15.0,  # Increased from 5.0 to be less sensitive to curves
                  feed_rate: float = 3000.0,
                  plunge_rate: float = 3000.0):
@@ -568,7 +568,7 @@ def main():
     dxf_processor = DXFProcessor()
     toolpath_generator = ToolpathGenerator(
         cutting_height=-0.5,
-        safe_height=0.0,
+        safe_height=-2.0,
         corner_angle_threshold=15.0,  # Match main_app setting
         feed_rate=3000.0,
         plunge_rate=3000.0
