@@ -513,8 +513,8 @@ class ToolpathGenerator:
         # Check if this is a closed shape (first and last points are close)
         first_point = points[0]
         last_point = points[-1]
-        is_closed = (abs(first_point[0] - last_point[0]) < 1e-6 and 
-                     abs(first_point[1] - last_point[1]) < 1e-6)
+        distance = math.sqrt((first_point[0] - last_point[0])**2 + (first_point[1] - last_point[1])**2)
+        is_closed = distance < 0.15  # Allow up to 0.15" gap to be considered closed
         
         if is_closed:
             # For closed shapes, rotate the list and ensure closure
