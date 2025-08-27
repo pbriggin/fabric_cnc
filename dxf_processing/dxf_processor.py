@@ -459,52 +459,63 @@ class DXFProcessor:
     def _merge_point_lists(self, points1: List[Tuple[float, float]], 
                           points2: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
         """
-        Merge two point lists, removing duplicates and ensuring continuity.
+        Merge two point lists by connecting them at shared endpoints, avoiding duplicates.
         
         Args:
             points1: First point list
             points2: Second point list
             
         Returns:
-            Merged point list
+            Merged point list or None if no proper connection found
         """
-        # Start with first list
-        merged = points1.copy()
+        tolerance = 0.1
         
-        # Find the best connection point
-        best_connection = None
-        min_distance = float('inf')
+        # Get endpoints of both lists
+        p1_start, p1_end = points1[0], points1[-1]
+        p2_start, p2_end = points2[0], points2[-1]
         
-        # Check all possible connections
-        for i, p1 in enumerate(points1):
-            for j, p2 in enumerate(points2):
-                # Check end of points1 to start of points2
-                if i == len(points1) - 1:
-                    distance = math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
-                    if distance < min_distance:
-                        min_distance = distance
-                        best_connection = ('end_to_start', i, j)
-                
-                # Check end of points2 to start of points1
-                if j == len(points2) - 1:
-                    distance = math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
-                    if distance < min_distance:
-                        min_distance = distance
-                        best_connection = ('start_to_end', i, j)
+        # Check all possible connections and find the best one
+        connections = []
         
-        # Apply the best connection only if it's within reasonable tolerance
-        if best_connection and min_distance < 0.1:  # 0.1 unit tolerance (same as point sharing)
-            connection_type, i, j = best_connection
-            if connection_type == 'end_to_start':
-                # Add points2 after points1
-                merged.extend(points2)
-            else:  # start_to_end
-                # Add points1 after points2
-                merged = points2 + merged
-        else:
-            # No good connection found - don't merge these shapes
-            # Return None to indicate that merging should not occur
+        # End of points1 connects to start of points2
+        dist = math.sqrt((p1_end[0] - p2_start[0])**2 + (p1_end[1] - p2_start[1])**2)
+        if dist < tolerance:
+            connections.append(('end_to_start', dist))
+            
+        # End of points1 connects to end of points2 (reverse points2)
+        dist = math.sqrt((p1_end[0] - p2_end[0])**2 + (p1_end[1] - p2_end[1])**2)
+        if dist < tolerance:
+            connections.append(('end_to_end', dist))
+            
+        # Start of points1 connects to end of points2
+        dist = math.sqrt((p1_start[0] - p2_end[0])**2 + (p1_start[1] - p2_end[1])**2)
+        if dist < tolerance:
+            connections.append(('start_to_end', dist))
+            
+        # Start of points1 connects to start of points2 (reverse points2)
+        dist = math.sqrt((p1_start[0] - p2_start[0])**2 + (p1_start[1] - p2_start[1])**2)
+        if dist < tolerance:
+            connections.append(('start_to_start', dist))
+        
+        if not connections:
             return None
+            
+        # Use the connection with the smallest distance
+        best_connection = min(connections, key=lambda x: x[1])[0]
+        
+        # Merge based on the best connection
+        if best_connection == 'end_to_start':
+            # points1 + points2 (skip duplicate endpoint)
+            merged = points1 + points2[1:]
+        elif best_connection == 'end_to_end':
+            # points1 + reversed points2 (skip duplicate endpoint)
+            merged = points1 + list(reversed(points2))[1:]
+        elif best_connection == 'start_to_end':
+            # points2 + points1 (skip duplicate endpoint)
+            merged = points2 + points1[1:]
+        elif best_connection == 'start_to_start':
+            # reversed points2 + points1 (skip duplicate endpoint)
+            merged = list(reversed(points2)) + points1[1:]
         
         return merged
     
