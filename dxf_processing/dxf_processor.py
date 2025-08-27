@@ -124,8 +124,8 @@ class DXFProcessor:
             # 1. Merge shapes that share points
             merged_shapes = self._merge_connected_shapes(shapes)
             
-            # 2. Position shapes with bottom-left justification and 1" buffer
-            positioned_shapes = self._position_shapes_bottom_left(merged_shapes, buffer_inches=1.0)
+            # 2. Position shapes with bottom-left justification (1" X buffer, 3" Y buffer)
+            positioned_shapes = self._position_shapes_bottom_left(merged_shapes, x_buffer_inches=1.0, y_buffer_inches=3.0)
             
             logger.info(f"Processed {len(shapes)} entities with basic approach, merged into {len(merged_shapes)} shapes")
             return positioned_shapes
@@ -684,13 +684,15 @@ class DXFProcessor:
         return corrected_shapes
     
     def _position_shapes_bottom_left(self, shapes: Dict[str, List[Tuple[float, float]]], 
-                                    buffer_inches: float = 1.0) -> Dict[str, List[Tuple[float, float]]]:
+                                    x_buffer_inches: float = 1.0, 
+                                    y_buffer_inches: float = 1.0) -> Dict[str, List[Tuple[float, float]]]:
         """
-        Position all shapes so they are bottom-left justified with a buffer.
+        Position all shapes so they are bottom-left justified with separate X and Y buffers.
         
         Args:
             shapes: Dictionary mapping shape names to lists of (x, y) coordinate tuples
-            buffer_inches: Buffer distance in inches from the bottom and left edges
+            x_buffer_inches: Buffer distance in inches from the left edge
+            y_buffer_inches: Buffer distance in inches from the bottom edge
             
         Returns:
             Dictionary with the same shape names but translated coordinates
@@ -714,9 +716,9 @@ class DXFProcessor:
         
         logger.info(f"Original bounds: X({min_x:.3f}, {max_x:.3f}), Y({min_y:.3f}, {max_y:.3f})")
         
-        # Calculate translation to move shapes to bottom-left with buffer
-        translate_x = buffer_inches - min_x
-        translate_y = buffer_inches - min_y
+        # Calculate translation to move shapes to bottom-left with separate buffers
+        translate_x = x_buffer_inches - min_x
+        translate_y = y_buffer_inches - min_y
         
         logger.info(f"Translating by: X={translate_x:.3f}, Y={translate_y:.3f}")
         
